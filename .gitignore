@@ -53,3 +53,29 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# CMake build directory and generated in-source files
+build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+_deps/
+
+# CUDA intermediate and device-code artefacts
+*.ptx
+*.cubin
+*.fatbin
+*.nvfatbin
+*.gpu
+*.cudafe1.cpp
+
+# Generated FITS output (stacker results, test artefacts)
+*.fits
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

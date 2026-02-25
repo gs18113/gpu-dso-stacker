@@ -1,0 +1,62 @@
+cmake_minimum_required(VERSION 3.18)
+project(dso_stacker LANGUAGES C CXX CUDA)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 17)
+
+set(CUDAToolkit_ROOT "/usr/local/cuda")
+find_package(CUDAToolkit 12 REQUIRED)
+
+find_package(PkgConfig REQUIRED)
+set(ENV{PKG_CONFIG_PATH} "/home/donut/.local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+pkg_check_modules(CFITSIO REQUIRED cfitsio)
+
+set(LIB_SOURCES
+    src/fits_io.c
+    src/csv_parser.c
+    src/lanczos_cpu.c
+    src/integration.c
+    src/lanczos_gpu.cu
+)
+
+add_library(dso_stacker_lib STATIC ${LIB_SOURCES})
+target_include_directories(dso_stacker_lib PUBLIC
+    include
+    ${CFITSIO_INCLUDE_DIRS}
+    ${CUDAToolkit_INCLUDE_DIRS}
+)
+target_link_directories(dso_stacker_lib PUBLIC ${CFITSIO_LIBRARY_DIRS})
+target_link_libraries(dso_stacker_lib PUBLIC
+    ${CFITSIO_LIBRARIES}
+    CUDA::cudart
+    CUDA::nppc
+    CUDA::nppig
+)
+set_target_properties(dso_stacker_lib PROPERTIES
+    CUDA_ARCHITECTURES "86;89"
+    CUDA_SEPARABLE_COMPILATION ON
+)
+
+add_executable(dso_stacker main.cpp)
+target_link_libraries(dso_stacker PRIVATE dso_stacker_lib)
+
+# ---- Tests ----------------------------------------------------------------
+enable_testing()
+
+# CPU tests (C11): csv_parser, fits_io, integration, lanczos_cpu
+add_executable(test_cpu tests/test_cpu.c)
+target_include_directories(test_cpu PRIVATE tests)
+target_link_libraries(test_cpu PRIVATE dso_stacker_lib m)
+add_test(NAME test_cpu COMMAND test_cpu)
+
+# GPU tests (CUDA): lanczos_gpu init/transform vs CPU baseline
+add_executable(test_gpu tests/test_gpu.cu)
+set_target_properties(test_gpu PROPERTIES
+    CUDA_ARCHITECTURES "86;89"
+    CUDA_SEPARABLE_COMPILATION ON)
+target_include_directories(test_gpu PRIVATE tests)
+target_link_libraries(test_gpu PRIVATE dso_stacker_lib)
+add_test(NAME test_gpu COMMAND test_gpu)
+# Exit code 77 = SKIP (no GPU available)
+set_property(TEST test_gpu PROPERTY SKIP_RETURN_CODE 77)

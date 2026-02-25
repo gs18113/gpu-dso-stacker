@@ -1,0 +1,48 @@
+/*
+ * fits_io.h — FITS image I/O API (backed by CFITSIO)
+ *
+ * Provides three functions for loading and saving float32 astronomical images
+ * in the FITS format, and for freeing the allocated pixel buffer.
+ *
+ * FITS layout: NAXIS1 = width (columns), NAXIS2 = height (rows).
+ * Internal layout: row-major float32, pixel (x, y) at data[y*width + x].
+ */
+
+#pragma once
+
+#include "dso_types.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+ * fits_load — read a FITS image into a host float32 buffer.
+ *
+ * Supports any BITPIX value; CFITSIO converts to float automatically.
+ * On success, out->data is heap-allocated and must be freed with image_free().
+ *
+ * Returns DSO_OK or DSO_ERR_FITS / DSO_ERR_ALLOC / DSO_ERR_INVALID_ARG.
+ */
+DsoError fits_load(const char *filepath, Image *out);
+
+/*
+ * fits_save — write a host float32 image to a FITS file (BITPIX=-32).
+ *
+ * Overwrites any existing file at filepath (CFITSIO '!' prefix).
+ *
+ * Returns DSO_OK or DSO_ERR_FITS / DSO_ERR_INVALID_ARG.
+ */
+DsoError fits_save(const char *filepath, const Image *img);
+
+/*
+ * image_free — release the data buffer inside an Image struct.
+ *
+ * Sets img->data = NULL after freeing.  Safe to call on a zero-initialised
+ * or already-freed Image.
+ */
+void image_free(Image *img);
+
+#ifdef __cplusplus
+}
+#endif
