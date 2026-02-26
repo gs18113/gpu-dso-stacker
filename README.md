@@ -40,3 +40,11 @@
 
 **Seungmin**
 - Lanczos interpolation & integration kernel implementation
+
+### Week 2
+
+**Seungwon**
+- Homography matrix calculation
+
+**Seungmin**
+- Interpolation & integration test
