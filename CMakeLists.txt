@@ -18,6 +18,12 @@ set(LIB_SOURCES
     src/lanczos_cpu.c
     src/integration.c
     src/lanczos_gpu.cu
+    src/debayer_gpu.cu
+    src/star_detect_gpu.cu
+    src/star_detect_cpu.c
+    src/ransac.c
+    src/integration_gpu.cu
+    src/pipeline.cu
 )
 
 add_library(dso_stacker_lib STATIC ${LIB_SOURCES})
@@ -60,3 +66,24 @@ target_link_libraries(test_gpu PRIVATE dso_stacker_lib)
 add_test(NAME test_gpu COMMAND test_gpu)
 # Exit code 77 = SKIP (no GPU available)
 set_property(TEST test_gpu PROPERTY SKIP_RETURN_CODE 77)
+
+# CPU tests for star detection (CCL, CoM) and RANSAC homography
+add_executable(test_star_detect tests/test_star_detect.c)
+target_include_directories(test_star_detect PRIVATE tests)
+target_link_libraries(test_star_detect PRIVATE dso_stacker_lib m)
+add_test(NAME test_star_detect COMMAND test_star_detect)
+
+add_executable(test_ransac tests/test_ransac.c)
+target_include_directories(test_ransac PRIVATE tests)
+target_link_libraries(test_ransac PRIVATE dso_stacker_lib m)
+add_test(NAME test_ransac COMMAND test_ransac)
+
+# GPU tests for mini-batch kappa-sigma integration
+add_executable(test_integration_gpu tests/test_integration_gpu.cu)
+set_target_properties(test_integration_gpu PROPERTIES
+    CUDA_ARCHITECTURES "86;89"
+    CUDA_SEPARABLE_COMPILATION ON)
+target_include_directories(test_integration_gpu PRIVATE tests)
+target_link_libraries(test_integration_gpu PRIVATE dso_stacker_lib)
+add_test(NAME test_integration_gpu COMMAND test_integration_gpu)
+set_property(TEST test_integration_gpu PROPERTY SKIP_RETURN_CODE 77)

@@ -4,10 +4,10 @@
  * Strategy:
  *   nppiWarpPerspective only supports NN/LINEAR/CUBIC interpolation.
  *   To obtain true Lanczos-3 quality with a homographic warp we:
- *     1. Invert the 3×3 homography on the host.
- *     2. Launch a CUDA kernel (build_coord_maps) that evaluates the
- *        inverse homography per destination pixel and writes two float
- *        device maps: xmap[dy*W+dx] and ymap[dy*W+dx] = source (sx, sy).
+ *     1. H is the backward (ref → src) homography; use it directly.
+ *     2. Launch a CUDA kernel (build_coord_maps) that evaluates H
+ *        per destination pixel and writes two float device maps:
+ *        xmap[dy*W+dx] and ymap[dy*W+dx] = source (sx, sy).
  *     3. Call nppiRemap_32f_C1R_Ctx with NPPI_INTER_LANCZOS, which reads
  *        the precomputed maps and performs the sampling on the GPU.
  *
@@ -32,13 +32,14 @@ static cudaStream_t     g_stream = 0;
 /* -------------------------------------------------------------------------- */
 
 /*
- * build_coord_maps — compute inverse-homography source coordinates per pixel.
+ * build_coord_maps — compute backward-map source coordinates per pixel.
  *
  * For each destination pixel (dx, dy) the kernel computes:
- *   [sx_h, sy_h, sw]^T = H_inv * [dx, dy, 1]^T
+ *   [sx_h, sy_h, sw]^T = H * [dx, dy, 1]^T
  *   xmap[dy*W+dx] = sx_h / sw
  *   ymap[dy*W+dx] = sy_h / sw
  *
+ * H is the backward (ref → src) map and is used directly without inversion.
  * Pixels where sw is near zero are mapped to (−1, −1), which nppiRemap
  * treats as out-of-bounds and leaves as 0 (destination is zero-initialised).
  */
@@ -67,7 +68,7 @@ __global__ static void build_coord_maps(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Host-side 3×3 homography inversion                                         */
+/* Host-side 3×3 homography inversion (unused; kept for reference)            */
 /* -------------------------------------------------------------------------- */
 
 static DsoError invert_homography_h(const double *h, double *hi)
@@ -170,10 +171,8 @@ DsoError lanczos_transform_gpu(const Image *src, Image *dst, const Homography *H
     size_t dst_bytes = (size_t)DW * DH * sizeof(float);
     size_t map_bytes = (size_t)DW * DH * sizeof(float);
 
-    /* Invert forward homography to get backward-mapping coefficients */
-    double hi[9];
-    DsoError derr = invert_homography_h(H->h, hi);
-    if (derr != DSO_OK) return derr;
+    /* H is already the backward map (ref → src); use it directly. */
+    const double *hi = H->h;
 
     float *d_src = NULL, *d_dst = NULL, *d_xmap = NULL, *d_ymap = NULL;
     cudaError_t cerr;
@@ -247,4 +246,86 @@ cuda_err:
     return DSO_ERR_CUDA;
 
 #undef CHECK_CUDA
+}
+
+/*
+ * lanczos_transform_gpu_d2d — device-to-device Lanczos-3 warp.
+ *
+ * All buffers are already on the device; no H2D/D2H transfers are performed.
+ * Executes on `stream` asynchronously — caller must synchronise.
+ *
+ * The NppStreamContext is derived from g_nppCtx (populated once by
+ * lanczos_gpu_init) with only the hStream field overridden.  This avoids a
+ * repeated cudaGetDeviceProperties call while still directing NPP work to the
+ * correct stream for multi-stream pipeline overlap.
+ */
+DsoError lanczos_transform_gpu_d2d(
+    const float       *d_src,
+    float             *d_dst,
+    float             *d_xmap,
+    float             *d_ymap,
+    int                SW, int SH,
+    int                DW, int DH,
+    const Homography  *H,
+    cudaStream_t       stream)
+{
+    if (!d_src || !d_dst || !d_xmap || !d_ymap || !H) return DSO_ERR_INVALID_ARG;
+    if (SW <= 0 || SH <= 0 || DW <= 0 || DH <= 0)     return DSO_ERR_INVALID_ARG;
+
+    /* Build a per-call NppStreamContext that routes NPP work to `stream`. */
+    NppStreamContext ctx = g_nppCtx;
+    ctx.hStream = stream;
+    /* Update stream flags in case this stream has non-default flags */
+    if (stream != 0) cudaStreamGetFlags(stream, &ctx.nStreamFlags);
+
+    /* H is already the backward map (ref → src); used directly. */
+    const double *hi = H->h;
+
+    cudaError_t cerr;
+
+    /* dim3 declarations before any CHECK_CUDA to avoid jump-over-init */
+    dim3 block(16, 16);
+    dim3 grid((DW + 15) / 16, (DH + 15) / 16);
+
+#define CHECK_CUDA_D2D(call) \
+    do { cerr = (call); if (cerr != cudaSuccess) { \
+        fprintf(stderr, "CUDA error (d2d) %s:%d: %s\n", __FILE__, __LINE__, \
+                cudaGetErrorString(cerr)); \
+        return DSO_ERR_CUDA; } } while(0)
+
+    /* Build coordinate maps from the backward homography */
+    build_coord_maps<<<grid, block, 0, stream>>>(
+        d_xmap, d_ymap, DW, DH,
+        hi[0], hi[1], hi[2],
+        hi[3], hi[4], hi[5],
+        hi[6], hi[7], hi[8]);
+    CHECK_CUDA_D2D(cudaGetLastError());
+
+    /* Remap with Lanczos-3 interpolation.
+     * Row step = width × sizeof(float) for all row-major float32 buffers. */
+    {
+        NppiSize oSrcSize = { SW, SH };
+        NppiRect oSrcROI  = { 0, 0, SW, SH };
+        NppiSize oDstSize = { DW, DH };
+        int src_step = SW * (int)sizeof(float);
+        int map_step = DW * (int)sizeof(float);
+        int dst_step = DW * (int)sizeof(float);
+
+        NppStatus npp_err = nppiRemap_32f_C1R_Ctx(
+            d_src,  oSrcSize, src_step, oSrcROI,
+            d_xmap, map_step,
+            d_ymap, map_step,
+            d_dst,  dst_step, oDstSize,
+            NPPI_INTER_LANCZOS,
+            ctx);
+
+        if (npp_err != NPP_SUCCESS) {
+            fprintf(stderr, "nppiRemap_32f_C1R_Ctx (d2d) failed: %d\n", (int)npp_err);
+            return DSO_ERR_NPP;
+        }
+    }
+
+    return DSO_OK;
+
+#undef CHECK_CUDA_D2D
 }

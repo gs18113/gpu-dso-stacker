@@ -5,9 +5,9 @@
  * backward mapping with a Lanczos-3 interpolation kernel.
  *
  * Algorithm:
- *   1. Analytically invert the 3×3 forward homography H.
+ *   1. H is the backward homography (ref → src); use it directly.
  *   2. For each destination pixel (dx, dy):
- *        [sx_h, sy_h, sw]^T = H_inv * [dx, dy, 1]^T
+ *        [sx_h, sy_h, sw]^T = H * [dx, dy, 1]^T
  *        sx = sx_h / sw,  sy = sy_h / sw
  *   3. Sample the source at (sx, sy) with a 6×6 Lanczos-3 tap window.
  *      Boundary taps outside [0, W) × [0, H) are skipped; weights are
@@ -82,11 +82,8 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
 {
     if (!src || !dst || !H || !src->data || !dst->data) return DSO_ERR_INVALID_ARG;
 
-    Homography H_inv;
-    DsoError err = invert_homography(H, &H_inv);
-    if (err != DSO_OK) return err;
-
-    const double *hi = H_inv.h;
+    /* H is already the backward map (ref → src); use it directly. */
+    const double *hi = H->h;
     int SW = src->width,  SH = src->height;
     int DW = dst->width,  DH = dst->height;
 
@@ -94,7 +91,7 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
         for (int dx = 0; dx < DW; dx++) {
 
             /* Map destination pixel (dx, dy) to source coordinates (sx, sy)
-             * using the inverse homography in homogeneous coordinates. */
+             * using H (the backward map) directly in homogeneous coordinates. */
             double sx_h = hi[0]*dx + hi[1]*dy + hi[2];
             double sy_h = hi[3]*dx + hi[4]*dy + hi[5];
             double sw   = hi[6]*dx + hi[7]*dy + hi[8];

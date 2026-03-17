@@ -107,9 +107,10 @@ int main(int argc, char **argv)
     }
 
     /* ---- Parse CSV ---- */
-    FrameInfo *frames   = nullptr;
-    int        n_frames = 0;
-    check(csv_parse(csv_file, &frames, &n_frames), "csv_parse");
+    FrameInfo *frames        = nullptr;
+    int        n_frames      = 0;
+    int        has_transforms = 0;
+    check(csv_parse(csv_file, &frames, &n_frames, &has_transforms), "csv_parse");
 
     if (n_frames == 0) {
         fprintf(stderr, "Error: CSV contains no frames\n");

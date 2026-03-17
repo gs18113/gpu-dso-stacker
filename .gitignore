@@ -79,3 +79,5 @@ _deps/
 *.swp
 *.swo
 *~
+
+data/*

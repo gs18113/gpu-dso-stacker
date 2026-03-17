@@ -43,6 +43,17 @@ DsoError fits_save(const char *filepath, const Image *img);
  */
 void image_free(Image *img);
 
+/*
+ * fits_get_bayer_pattern — read the BAYERPAT keyword from a FITS header.
+ *
+ * Recognised values (case-insensitive): "RGGB", "BGGR", "GRBG", "GBRG".
+ * If the keyword is absent or the file cannot be opened, *pattern_out is set
+ * to BAYER_NONE and DSO_OK is returned — a missing keyword is not an error.
+ *
+ * Returns DSO_OK or DSO_ERR_FITS / DSO_ERR_INVALID_ARG.
+ */
+DsoError fits_get_bayer_pattern(const char *filepath, BayerPattern *pattern_out);
+
 #ifdef __cplusplus
 }
 #endif

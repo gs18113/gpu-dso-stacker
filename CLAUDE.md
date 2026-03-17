@@ -2,9 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Maintenance rule**: Whenever an important discovery, convention clarification, or "aha moment" arises during a session, update this file immediately so future sessions start with the full picture.
+
 ## Project Overview
 
-A high-performance Deep Sky Object (DSO) image stacker using C/CUDA for GPU-accelerated processing with a Python high-level interface (planned).
+A high-performance Deep Sky Object (DSO) image stacker using C/CUDA for GPU-accelerated processing. Python reference stacker and transform-verification tools live in `python/`.
 
 ## Processing Pipeline
 
@@ -36,12 +38,19 @@ gpu-dso-stacker/
 │   ├── lanczos_cpu.h       ← CPU Lanczos-3 transform API
 │   ├── lanczos_gpu.h       ← GPU Lanczos-3 transform API
 │   └── integration.h       ← Mean / kappa-sigma integration API
-└── src/
-    ├── fits_io.c           ← CFITSIO-based I/O implementation
-    ├── csv_parser.c        ← CSV parser implementation
-    ├── lanczos_cpu.c       ← CPU backward-mapping Lanczos-3
-    ├── lanczos_gpu.cu      ← CUDA coord-map kernel + nppiRemap
-    └── integration.c       ← Mean and kappa-sigma clipping
+├── src/
+│   ├── fits_io.c           ← CFITSIO-based I/O implementation
+│   ├── csv_parser.c        ← CSV parser implementation
+│   ├── lanczos_cpu.c       ← CPU backward-mapping Lanczos-3
+│   ├── lanczos_gpu.cu      ← CUDA coord-map kernel + nppiRemap
+│   └── integration.c       ← Mean and kappa-sigma clipping
+├── tests/
+│   ├── test_framework.h    ← Minimal test harness (ASSERT_*, RUN, SUITE)
+│   ├── test_cpu.c          ← Unit tests for CPU-side library
+│   └── test_gpu.cu         ← Unit tests for GPU transform
+└── python/
+    ├── stacker.py          ← Reference stacker: OpenCV Lanczos4 + kappa-sigma
+    └── compute_transforms.py ← Independent transform computation via astroalign
 ```
 
 ---
@@ -105,7 +114,7 @@ filepath, is_reference, h00, h01, h02, h10, h11, h12, h20, h21, h22
 
 - First row is a header and is always skipped.
 - Exactly **one** row must have `is_reference = 1`.
-- The nine `h` values form a **row-major 3x3 forward homography** mapping source pixel coordinates to reference pixel coordinates.
+- The nine `h` values form a **row-major 3x3 backward homography** mapping reference pixel coordinates to source pixel coordinates (ref → src). Despite being labelled "forward" in some upstream docs, empirical testing confirms this is the backward/inverse map — use it directly for pixel sampling without inverting.
 
 ---
 
@@ -114,7 +123,7 @@ filepath, is_reference, h00, h01, h02, h10, h11, h12, h20, h21, h22
 ### `dso_types.h` — Shared Types
 
 ```c
-typedef struct { double h[9]; }  Homography;   // row-major 3x3, forward direction
+typedef struct { double h[9]; }  Homography;   // row-major 3x3, backward map (ref → src)
 typedef struct { float *data; int width; int height; } Image;  // row-major float32
 typedef struct { char filepath[4096]; int is_reference; Homography H; } FrameInfo;
 typedef enum { DSO_OK=0, DSO_ERR_IO=-1, DSO_ERR_ALLOC=-2, DSO_ERR_FITS=-3,
@@ -149,7 +158,7 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
 ```
 
 CPU Lanczos-3 warp. `dst->data`, `dst->width`, `dst->height` must be pre-set by the caller.
-H is the forward homography (internally inverted). Boundary taps are skipped and weights renormalised.
+H is the **backward homography (ref → src)**, used directly for pixel sampling — not inverted. Boundary taps are skipped and weights renormalised.
 
 ### `lanczos_gpu.h`
 
@@ -178,8 +187,8 @@ Kappa-sigma uses two-pass Bessel-corrected stddev per iteration; degenerate pixe
 
 ## Key Implementation Notes
 
-- **Homography convention**: H is always *forward* (src -> ref). All transform functions invert it internally using cofactor/adjugate method; singular H (|det| < 1e-12) returns `DSO_ERR_INVALID_ARG`.
-- **GPU Lanczos strategy**: `nppiWarpPerspective` only supports NN/LINEAR/CUBIC. We instead pre-compute inverse-homography coordinate maps in a CUDA kernel, then feed them to `nppiRemap_32f_C1R_Ctx` with `NPPI_INTER_LANCZOS` (= 16).
+- **Homography convention**: H is the *backward* map (ref → src). Transform functions use it directly for pixel sampling — **do not invert**. The `invert_homography` helpers remain in the source but are dead code.
+- **GPU Lanczos strategy**: `nppiWarpPerspective` only supports NN/LINEAR/CUBIC. We instead pre-compute backward-homography coordinate maps (H used directly, no inversion) in a CUDA kernel, then feed them to `nppiRemap_32f_C1R_Ctx` with `NPPI_INTER_LANCZOS` (= 16).
 - **Row steps for NPP**: all row steps are `width * sizeof(float)` (row-major float32).
 - **FITS pixel index**: `ffgpxv` / `ffppx` take `long *firstpix` (1-based per axis); pass `{1, 1}`.
 - **Out-of-bounds pixels**: both CPU and GPU paths write 0 for destination pixels that map outside the source bounds.
@@ -196,3 +205,25 @@ Kappa-sigma uses two-pass Bessel-corrected stddev per iteration; degenerate pixe
 | CFITSIO pkg-config | `/home/donut/.local/lib/pkgconfig/cfitsio.pc` |
 | CUDA Toolkit | `/usr/local/cuda` |
 | NPP geometry lib | `/usr/local/cuda/lib64/libnppig.so` |
+
+---
+
+## Python Tools (`python/`)
+
+| Script | Purpose |
+|---|---|
+| `python/stacker.py` | Reference stacker: OpenCV Lanczos4 warp + kappa-sigma integration |
+| `python/compute_transforms.py` | Independently compute homographies via astroalign and compare to CSV |
+
+### astroalign convention note
+`astroalign.find_transform(source, target)` returns an `AffineTransform` whose `.params` maps **source → target** (the forward direction: frame → ref). Since the CSV stores the **backward** map (ref → src), always call `np.linalg.inv(transform.params)` before comparing to CSV homographies.
+
+### Verified findings (2026-03-17)
+- **`data/transform_mat.csv` transforms are correct** — verified against independently computed astroalign transforms; max element diff < 0.04 px across all 9 non-reference frames.
+- **Root cause of misalignment identified**: all three implementations (stacker.py, lanczos_cpu.c, lanczos_gpu.cu) were incorrectly inverting H before use. H is already the backward map — inverting it produced the forward map, which then misaligned every non-reference frame.
+- **Fix**: use H directly without inversion in all transform paths. In OpenCV, pass `cv2.WARP_INVERSE_MAP` so H is used as-is.
+
+### Python dependencies
+```
+astropy, numpy, opencv-python (cv2), astroalign
+```

@@ -47,7 +47,7 @@ static Image make_image_gradient(int w, int h)
     return img;
 }
 
-/* Write a minimal frame-list CSV to `path`. */
+/* Write a minimal 11-column frame-list CSV (pre-computed homographies) to `path`. */
 static void write_test_csv(const char *path)
 {
     FILE *fp = fopen(path, "w");
@@ -58,16 +58,27 @@ static void write_test_csv(const char *path)
     fclose(fp);
 }
 
+/* Write a minimal 2-column frame-list CSV (no pre-computed homographies) to `path`. */
+static void write_test_csv_2col(const char *path)
+{
+    FILE *fp = fopen(path, "w");
+    if (!fp) { perror("write_test_csv_2col"); exit(1); }
+    fprintf(fp, "filepath, is_reference\n");
+    fprintf(fp, "/tmp/dso_frame1.fits, 1\n");
+    fprintf(fp, "/tmp/dso_frame2.fits, 0\n");
+    fclose(fp);
+}
+
 /* =========================================================================
  * CSV PARSER TESTS
  * ====================================================================== */
 
-/* Parsing a valid 2-row CSV must return exactly 2 frames. */
+/* Parsing a valid 2-row 11-col CSV must return exactly 2 frames. */
 static int test_csv_count(void)
 {
     write_test_csv("/tmp/dso_test.csv");
-    FrameInfo *f = NULL; int n = 0;
-    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n));
+    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
     ASSERT_EQ(n, 2);
     ASSERT_NOT_NULL(f);
     free(f);
@@ -78,8 +89,8 @@ static int test_csv_count(void)
 static int test_csv_filepath(void)
 {
     write_test_csv("/tmp/dso_test.csv");
-    FrameInfo *f = NULL; int n = 0;
-    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n));
+    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
     ASSERT_EQ(strcmp(f[0].filepath, "/tmp/dso_frame1.fits"), 0);
     ASSERT_EQ(strcmp(f[1].filepath, "/tmp/dso_frame2.fits"), 0);
     free(f);
@@ -90,8 +101,8 @@ static int test_csv_filepath(void)
 static int test_csv_reference_flag(void)
 {
     write_test_csv("/tmp/dso_test.csv");
-    FrameInfo *f = NULL; int n = 0;
-    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n));
+    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
     ASSERT_EQ(f[0].is_reference, 1);
     ASSERT_EQ(f[1].is_reference, 0);
     free(f);
@@ -102,8 +113,8 @@ static int test_csv_reference_flag(void)
 static int test_csv_homography_values(void)
 {
     write_test_csv("/tmp/dso_test.csv");
-    FrameInfo *f = NULL; int n = 0;
-    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n));
+    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
 
     /* Frame 0: identity */
     ASSERT_NEAR(f[0].H.h[0], 1.0, 1e-9);  /* h00 */
@@ -131,8 +142,8 @@ static int test_csv_blank_lines_skipped(void)
     fprintf(fp, "\n");
     fclose(fp);
 
-    FrameInfo *f = NULL; int n = 0;
-    ASSERT_OK(csv_parse(path, &f, &n));
+    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    ASSERT_OK(csv_parse(path, &f, &n, &ht));
     ASSERT_EQ(n, 1);   /* only the data row, not the blank lines */
     free(f);
     return 0;
@@ -141,9 +152,74 @@ static int test_csv_blank_lines_skipped(void)
 /* Opening a nonexistent file must return an I/O error. */
 static int test_csv_nonexistent_file(void)
 {
-    FrameInfo *f = NULL; int n = 0;
-    DsoError err = csv_parse("/tmp/does_not_exist_xyz.csv", &f, &n);
+    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    DsoError err = csv_parse("/tmp/does_not_exist_xyz.csv", &f, &n, &ht);
     ASSERT_EQ(err, DSO_ERR_IO);
+    return 0;
+}
+
+/*
+ * 11-column CSV must set has_transforms=1.
+ * Verifies the flag accurately reflects that homography values were parsed.
+ */
+static int test_csv_has_transforms_11col(void)
+{
+    write_test_csv("/tmp/dso_test.csv");
+    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
+    ASSERT_EQ(ht, 1);
+    free(f);
+    return 0;
+}
+
+/*
+ * 2-column CSV must set has_transforms=0 and zero-init all homographies.
+ * Verifies that filepaths and is_reference are still correctly parsed.
+ */
+static int test_csv_2col_no_transforms(void)
+{
+    write_test_csv_2col("/tmp/dso_test_2col.csv");
+    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    ASSERT_OK(csv_parse("/tmp/dso_test_2col.csv", &f, &n, &ht));
+    ASSERT_EQ(n, 2);
+    ASSERT_EQ(ht, 0);
+    /* Filepaths must be correct */
+    ASSERT_EQ(strcmp(f[0].filepath, "/tmp/dso_frame1.fits"), 0);
+    ASSERT_EQ(f[0].is_reference, 1);
+    ASSERT_EQ(f[1].is_reference, 0);
+    /* Homography must be zero-initialised when not provided */
+    for (int i = 0; i < 9; i++) ASSERT_NEAR(f[0].H.h[i], 0.0, 1e-12);
+    for (int i = 0; i < 9; i++) ASSERT_NEAR(f[1].H.h[i], 0.0, 1e-12);
+    free(f);
+    return 0;
+}
+
+/*
+ * A CSV with an unexpected column count (e.g. 5) must return DSO_ERR_CSV.
+ * Prevents silent misparse of files in wrong format.
+ */
+static int test_csv_bad_col_count(void)
+{
+    const char *path = "/tmp/dso_test_badcols.csv";
+    FILE *fp = fopen(path, "w");
+    ASSERT_NOT_NULL(fp);
+    fprintf(fp, "filepath, is_reference, foo, bar, baz\n");
+    fprintf(fp, "/tmp/f.fits, 1, 1.0, 2.0, 3.0\n");
+    fclose(fp);
+
+    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    ASSERT_ERR(csv_parse(path, &f, &n, &ht), DSO_ERR_CSV);
+    return 0;
+}
+
+/*
+ * NULL has_transforms_out pointer must return DSO_ERR_INVALID_ARG.
+ */
+static int test_csv_null_has_transforms_out(void)
+{
+    write_test_csv("/tmp/dso_test.csv");
+    FrameInfo *f = NULL; int n = 0;
+    ASSERT_ERR(csv_parse("/tmp/dso_test.csv", &f, &n, NULL), DSO_ERR_INVALID_ARG);
     return 0;
 }
 
@@ -449,10 +525,9 @@ static int test_lanczos_cpu_identity(void)
 }
 
 /*
- * Integer-pixel translation: H maps src(x,y) → ref(x+4, y+3).
+ * Integer-pixel translation: backward map shifts dst lookup by (−4, −3).
  *
- * H = [[1,0,4],[0,1,3],[0,0,1]]
- * H_inv = [[1,0,-4],[0,1,-3],[0,0,1]]
+ * H = [[1,0,-4],[0,1,-3],[0,0,1]]  (backward map: ref → src)
  *
  * For dst pixel (dx,dy): sx = dx-4, sy = dy-3
  * Interior check range: dx in [7..19], dy in [6..19]
@@ -466,8 +541,8 @@ static int test_lanczos_cpu_integer_shift(void)
     Image src = make_image_gradient(W, H);
     Image dst = make_image_const(W, H, 0.f);
 
-    /* Forward hom: src_point → ref_point by (+4, +3) */
-    Homography hom = {{ 1,0,4, 0,1,3, 0,0,1 }};
+    /* Backward map: dst(dx,dy) samples src at (dx-4, dy-3) */
+    Homography hom = {{ 1,0,-4, 0,1,-3, 0,0,1 }};
     ASSERT_OK(lanczos_transform_cpu(&src, &dst, &hom));
 
     for (int dy = 6; dy <= 19; dy++) {
@@ -498,7 +573,7 @@ static int test_lanczos_cpu_oob_pixels_zero(void)
     Image src = make_image_const(W, H, 99.f);
     Image dst = make_image_const(W, H, -1.f);  /* sentinel: non-zero */
 
-    /* Shift source by +1000 pixels — no src pixel lands in dst */
+    /* Backward map with +1000 offset: src lookup at (dx+1000, dy+1000) — always OOB */
     Homography hom = {{ 1,0,1000, 0,1,1000, 0,0,1 }};
     ASSERT_OK(lanczos_transform_cpu(&src, &dst, &hom));
 
@@ -516,15 +591,22 @@ static int test_lanczos_cpu_oob_pixels_zero(void)
     return 0;
 }
 
-/* A singular homography (det = 0) must return DSO_ERR_INVALID_ARG. */
+/*
+ * Degenerate H (sw = 0 everywhere): all destination pixels map to OOB
+ * and must be written as 0. No error is returned — degenerate pixels are
+ * silently zeroed, not rejected. (H is the backward map used directly;
+ * there is no inversion step that would detect a singular matrix.)
+ */
 static int test_lanczos_cpu_singular_h(void)
 {
     Image src = make_image_const(8, 8, 1.f);
-    Image dst = make_image_const(8, 8, 0.f);
+    Image dst = make_image_const(8, 8, -1.f);  /* sentinel */
 
-    /* All-zero matrix has det = 0 */
+    /* All-zero matrix: sw = 0 for every pixel → OOB → written as 0 */
     Homography H = {{ 0,0,0, 0,0,0, 0,0,0 }};
-    ASSERT_ERR(lanczos_transform_cpu(&src, &dst, &H), DSO_ERR_INVALID_ARG);
+    ASSERT_OK(lanczos_transform_cpu(&src, &dst, &H));
+    for (int i = 0; i < 8 * 8; i++)
+        ASSERT_NEAR(dst.data[i], 0.f, 1e-5f);
 
     image_free(&src);
     image_free(&dst);
@@ -550,7 +632,7 @@ static int test_lanczos_cpu_null_args(void)
  * shift (0.5 pixels in x). The interpolated value must lie between the two
  * neighbouring source pixels, not equal to either.
  *
- * H = [[1,0,0.5],[0,1,0],[0,0,1]] → dst(x,y) samples src at (x-0.5, y).
+ * H = [[1,0,-0.5],[0,1,0],[0,0,1]]  (backward map: dst(x,y) samples src at (x-0.5, y))
  * For dst pixel (10, 10): sx=9.5 — interpolated between src[10*W+9] and [10*W+10].
  */
 static int test_lanczos_cpu_subpixel_range(void)
@@ -559,7 +641,7 @@ static int test_lanczos_cpu_subpixel_range(void)
     Image src = make_image_gradient(W, H);  /* pixel value = index */
     Image dst = make_image_const(W, H, 0.f);
 
-    Homography hom = {{ 1,0,0.5, 0,1,0, 0,0,1 }};
+    Homography hom = {{ 1,0,-0.5, 0,1,0, 0,0,1 }};
     ASSERT_OK(lanczos_transform_cpu(&src, &dst, &hom));
 
     /* dst(10,10) samples src at sx=9.5, sy=10 (interior pixel) */
@@ -590,6 +672,10 @@ int main(void)
     RUN(test_csv_homography_values);
     RUN(test_csv_blank_lines_skipped);
     RUN(test_csv_nonexistent_file);
+    RUN(test_csv_has_transforms_11col);
+    RUN(test_csv_2col_no_transforms);
+    RUN(test_csv_bad_col_count);
+    RUN(test_csv_null_has_transforms_out);
 
     SUITE("FITS I/O");
     RUN(test_fits_roundtrip);

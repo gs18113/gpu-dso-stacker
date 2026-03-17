@@ -115,3 +115,57 @@ void image_free(Image *img)
         img->data = NULL;
     }
 }
+
+DsoError fits_get_bayer_pattern(const char *filepath, BayerPattern *pattern_out)
+{
+    if (!filepath || !pattern_out) return DSO_ERR_INVALID_ARG;
+
+    /* Default: assume monochrome (no Bayer pattern) */
+    *pattern_out = BAYER_NONE;
+
+    fitsfile *fptr = NULL;
+    int status = 0;
+
+    if (ffopen(&fptr, filepath, READONLY, &status)) {
+        /* Cannot open file — treat as no pattern rather than hard error,
+         * since this function is often called speculatively. */
+        fprintf(stderr, "fits_get_bayer_pattern: cannot open '%s' (status=%d)\n",
+                filepath, status);
+        return DSO_ERR_FITS;
+    }
+
+    /* Read the BAYERPAT keyword as a string value.
+     * ffgkys returns a non-zero status if the keyword is absent — that is
+     * normal for monochrome images and should not propagate as an error. */
+    char bayerpat[FLEN_VALUE] = {0};
+    char comment[FLEN_COMMENT] = {0};
+    int ks = 0;
+    ffgkys(fptr, "BAYERPAT", bayerpat, comment, &ks);
+
+    ffclos(fptr, &status);
+
+    if (ks != 0) {
+        /* Keyword absent — monochrome sensor, BAYER_NONE already set */
+        return DSO_OK;
+    }
+
+    /* Strip leading/trailing whitespace and single-quotes that CFITSIO may add */
+    char *p = bayerpat;
+    while (*p == ' ' || *p == '\'' || *p == '"') p++;
+    char *end = p + strlen(p);
+    while (end > p && (*(end-1) == ' ' || *(end-1) == '\'' || *(end-1) == '"'))
+        end--;
+    *end = '\0';
+
+    /* Case-insensitive comparison against known Bayer patterns */
+    if      (strcasecmp(p, "RGGB") == 0) *pattern_out = BAYER_RGGB;
+    else if (strcasecmp(p, "BGGR") == 0) *pattern_out = BAYER_BGGR;
+    else if (strcasecmp(p, "GRBG") == 0) *pattern_out = BAYER_GRBG;
+    else if (strcasecmp(p, "GBRG") == 0) *pattern_out = BAYER_GBRG;
+    else {
+        fprintf(stderr,
+                "fits_get_bayer_pattern: unrecognised BAYERPAT='%s', assuming NONE\n", p);
+    }
+
+    return DSO_OK;
+}
