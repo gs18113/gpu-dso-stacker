@@ -1,63 +1,194 @@
 # gpu-dso-stacker
 
-> A high-performance DSO (Deep Sky Object) stacker with hardware acceleration
+> A high-performance DSO (Deep Sky Object) stacker using CUDA for GPU-accelerated processing
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 
-- **C** - Core implementation
-- **CUDA** - GPU acceleration
-- **Python** - High-level interface
-
----
-
-## 🔄 Pipeline
-
-0. **Input**
-   - A csv file is going to be provided as program argument.
-   - First column is going to be file_path. The file paths of input fits files are going to be there.
-   - Second column is goingto be is_reference. Only one row should contain 1 for this column, and all others are going to be 0
-
-1. **Preprocessing(GPU)**  
-   Initial image preparation and calibration
-   - Debayering(in case of color images) - VNG debayering
-
-2. **Star Detection & Center-of-Mass Calculation**  
-   Identify stars and fit point spread functions
-   1. Convolution with the moffat kernel to detect star pixels(GPU)
-   2. leave only pixels over threshold(ex. >3*sigma) (GPU)
-   3. Find weighted center of mass (CPU)
-   4. Get list of star center coordinates (CPU)
-
-3. **Transform Computation(CPU)**  
-   Calculate alignment using RANSAC
-   - Calculate the homography matrix
-
-4. **Image Transformation(GPU)**  
-   Apply Lanczos interpolation to align with reference frame
-   - Code already implemented
-
-5. **Integration(GPU)**  
-   Combine images using kappa-sigma clipping
-   - We are going to use kappa-sigma clipping on mini-batches, not the whole dataset. Divide the images into batches of M images, keep M images(after transformation) on GPU, and do kappa-sigma clipping on the M images, and integrate them all into the final image.
+- **C11** — Core library (FITS I/O, CSV parser, Lanczos CPU, integration, debayer CPU, star detection, RANSAC, CPU pipeline)
+- **OpenMP** — CPU parallelism for debayer, Moffat convolution, Lanczos warp, and integration
+- **CUDA 12** — GPU acceleration (VNG debayer, Moffat convolution, Lanczos warp, kappa-sigma integration, GPU pipeline)
+- **CFITSIO 4.6.3** — FITS image I/O
+- **C++17** — CLI entry point
 
 ---
 
-## 📋 Roadmap
+## Pipeline
 
-### Week 1
+| Stage | GPU (default) | CPU (`--cpu`) |
+|---|---|---|
+| 1. Debayering | VNG demosaic → luminance (CUDA kernel) | VNG demosaic → luminance (OpenMP) |
+| 2. Star Detection | Moffat PSF conv + threshold (CUDA) | Moffat PSF conv + threshold (OpenMP) |
+| 3. RANSAC Alignment | DLT homography + RANSAC (CPU always) | DLT homography + RANSAC (CPU always) |
+| 4. Lanczos Warp | nppiRemap + coord-map kernel (CUDA) | 6-tap backward-map warp (OpenMP) |
+| 5. Integration | Mini-batch kappa-sigma (CUDA) | Full kappa-sigma (OpenMP) |
 
-**Seungwon**
-- Create preprocessing, star detection, transform computation skeleton
+When the input CSV already contains pre-computed homographies (11-column format), stages 1–3 are skipped for both paths.
 
-**Seungmin**
-- Lanczos interpolation & integration kernel implementation
+---
 
-### Week 2
+## Build
 
-**Seungwon**
-- Homography matrix calculation
+### Prerequisites
 
-**Seungmin**
-- Interpolation & integration test
+| Dependency | Version |
+|---|---|
+| CUDA Toolkit | 12.x |
+| CFITSIO | 4.6.3 |
+| OpenMP | any (GCC) |
+| CMake | >= 3.18 |
+
+```bash
+# Configure
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+
+# Compile
+cmake --build build --parallel $(nproc)
+```
+
+CUDA architectures are set to `86;89` (RTX 30xx / 40xx). Edit `CUDA_ARCHITECTURES` in `CMakeLists.txt` for other GPU families.
+
+---
+
+## Usage
+
+```
+dso_stacker -f <frames.csv> [options]
+```
+
+### Input CSV Formats
+
+**2-column format** (star detection and RANSAC alignment are run automatically):
+
+```csv
+filepath, is_reference
+/data/frame1.fits, 1
+/data/frame2.fits, 0
+/data/frame3.fits, 0
+```
+
+**11-column format** (pre-computed homographies, stages 1–3 skipped):
+
+```csv
+filepath, is_reference, h00, h01, h02, h10, h11, h12, h20, h21, h22
+/data/frame1.fits, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1
+/data/frame2.fits, 0, 1, 0, 2.5, 0, 1, 1.3, 0, 0, 1
+```
+
+- Exactly **one** row must have `is_reference = 1`.
+- The nine `h` values form a row-major 3×3 **backward homography** (ref → src).
+
+### Options
+
+```
+I/O:
+  -f, --file <path>              Input CSV file (required)
+  -o, --output <path>            Output FITS file (default: output.fits)
+
+Integration:
+      --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)
+      --integration <method>     mean | kappa-sigma (default: kappa-sigma)
+      --kappa <float>            Sigma clipping threshold (default: 3.0)
+      --iterations <int>         Max clipping passes per pixel (default: 3)
+      --batch-size <int>         GPU integration mini-batch size (default: 16)
+
+Star detection (2-column CSV only):
+      --star-sigma <float>       Detection threshold in σ units (default: 3.0)
+      --moffat-alpha <float>     Moffat PSF alpha / FWHM (default: 2.5)
+      --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
+      --top-stars <int>          Top-K stars for matching (default: 50)
+      --min-stars <int>          Minimum stars for RANSAC (default: 6)
+
+RANSAC (2-column CSV only):
+      --ransac-iters <int>       Max RANSAC iterations (default: 1000)
+      --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)
+      --match-radius <float>     Star matching search radius px (default: 30.0)
+
+Sensor:
+      --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg
+                                 (default: auto-detect from FITS BAYERPAT keyword)
+```
+
+### Examples
+
+Stack frames using automatic star detection and alignment (GPU):
+
+```bash
+dso_stacker -f frames.csv -o stacked.fits
+```
+
+Stack entirely on CPU (no GPU required):
+
+```bash
+dso_stacker -f frames.csv -o stacked.fits --cpu
+```
+
+Stack with pre-computed transforms, mean integration, and a larger batch:
+
+```bash
+dso_stacker -f transforms.csv -o stacked.fits --integration mean --batch-size 32
+```
+
+Stack a color camera image (RGGB sensor) with tighter outlier rejection:
+
+```bash
+dso_stacker -f frames.csv -o stacked.fits --bayer rggb --kappa 2.5 --iterations 5
+```
+
+---
+
+## Tests
+
+```bash
+cd build && ctest --output-on-failure -V
+```
+
+| Test suite | Tests | What it covers |
+|---|---|---|
+| `test_cpu` | 29 | CSV parser, FITS I/O, integration, Lanczos CPU |
+| `test_gpu` | 5 | GPU Lanczos (2 known pre-existing failures without GPU) |
+| `test_star_detect` | 21 | CCL + CoM; Moffat convolution + threshold (CPU) |
+| `test_ransac` | 13 | DLT homography + RANSAC |
+| `test_debayer_cpu` | 10 | VNG debayer CPU: all patterns, uniform, non-uniform, edge cases |
+| `test_integration_gpu` | 9 | GPU mini-batch kappa-sigma |
+
+GPU test suites return exit code 77 (CTest SKIP) when no CUDA device is found.
+
+---
+
+## Benchmark
+
+`bench.sh` times both paths and prints a speedup summary:
+
+```bash
+./bench.sh              # 3 runs, default CSV
+./bench.sh -r 5         # 5 runs
+./bench.sh -f other.csv # different input
+```
+
+Measured on 10 × 4656×3520 frames (star detection mode):
+
+| Path | Wall time | Notes |
+|---|---|---|
+| GPU | ~4.1 s | Double-buffered CUDA stream overlap |
+| CPU (OpenMP) | ~16.4 s | All stages parallelized |
+| Speedup | **~4×** | |
+
+Output agreement: PSNR ≈ 44.6 dB, mean relative error ≈ 0.25% in the image interior.
+Differences arise from distinct floating-point paths (GPU nppi Lanczos vs hand-coded CPU,
+GPU mini-batch vs single-pass CPU kappa-sigma, slight homography differences from Moffat conv precision).
+
+---
+
+## Python Tools
+
+| Script | Purpose |
+|---|---|
+| `python/stacker.py` | Reference stacker: OpenCV Lanczos4 warp + kappa-sigma integration |
+| `python/compute_transforms.py` | Compute homographies independently via astroalign and compare to CSV |
+
+```bash
+python3 python/stacker.py -f data/transform_mat.csv -o ref.fits
+```

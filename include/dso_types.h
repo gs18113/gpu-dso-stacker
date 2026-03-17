@@ -114,6 +114,17 @@ typedef enum {
  * DSO_ERR_STAR_DETECT (-8) — insufficient stars found for alignment
  * DSO_ERR_RANSAC      (-9) — RANSAC failed to find a valid homography
  */
+/*
+ * MoffatParams — shape parameters for the Moffat PSF detection kernel.
+ *
+ * alpha: width parameter (FWHM-related); larger values detect broader stars.
+ * beta : power-law exponent for the profile wings; β=2 is the standard choice.
+ */
+typedef struct {
+    float alpha;   /* default: 2.5 pixels */
+    float beta;    /* default: 2.0         */
+} MoffatParams;
+
 typedef enum {
     DSO_OK              =  0,
     DSO_ERR_IO          = -1,

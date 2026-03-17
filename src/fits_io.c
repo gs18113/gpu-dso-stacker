@@ -90,6 +90,7 @@ DsoError fits_save(const char *filepath, const Image *img)
     ffcrim(fptr, FLOAT_IMG, 2, naxes, &status);
     if (status) {
         fits_report_error(stderr, status);
+        if (fptr) { int s2 = 0; ffclos(fptr, &s2); }
         return DSO_ERR_FITS;
     }
 

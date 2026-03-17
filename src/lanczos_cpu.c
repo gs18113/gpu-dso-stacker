@@ -20,6 +20,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <omp.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -87,6 +88,7 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
     int SW = src->width,  SH = src->height;
     int DW = dst->width,  DH = dst->height;
 
+#pragma omp parallel for schedule(static)
     for (int dy = 0; dy < DH; dy++) {
         for (int dx = 0; dx < DW; dx++) {
 

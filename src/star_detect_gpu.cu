@@ -1,0 +1,446 @@
+/*
+ * star_detect_gpu.cu — GPU Moffat convolution and sigma-threshold masking.
+ *
+ * Moffat convolution:
+ *   The kernel K(i,j) = [1 + (i²+j²)/alpha²]^(-beta) is computed on the CPU,
+ *   normalised to sum=1, and stored in GPU constant memory (up to 31×31 = 961
+ *   elements, ≈ 3.8 KB, well within the 64 KB constant cache limit).
+ *
+ *   The convolution kernel uses shared-memory tiling: each 16×16 block loads
+ *   a (16+2R)×(16+2R) apron into shared memory and then each thread multiplies
+ *   the (2R+1)×(2R+1) kernel against shared memory to produce one output pixel.
+ *   Boundary pixels outside the image are zero-padded.
+ *
+ * Threshold masking:
+ *   A two-pass GPU reduction computes the global mean μ and sample standard
+ *   deviation σ of the convolved image; an element-wise kernel then writes
+ *   mask[i] = (conv[i] > μ + sigma_k * σ) ? 1 : 0.
+ *
+ * The d2d variant keeps all data on the device and executes asynchronously
+ * on the caller-supplied CUDA stream.  The h2h wrapper allocates device memory
+ * and synchronises before returning so the result is immediately available
+ * on the host.
+ */
+
+#include "star_detect_gpu.h"
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
+#include <stdlib.h>
+
+/* -------------------------------------------------------------------------
+ * Moffat kernel in constant memory
+ *
+ * Maximum kernel diameter: 31 pixels (alpha ≤ 5, radius = ceil(3*alpha) = 15,
+ * diameter = 31).  The actual used portion is determined at runtime.
+ * ------------------------------------------------------------------------- */
+#define MOFFAT_MAX_RADIUS 15
+#define MOFFAT_MAX_DIAM   (2*MOFFAT_MAX_RADIUS + 1)  /* = 31 */
+#define MOFFAT_MAX_ELEMS  (MOFFAT_MAX_DIAM * MOFFAT_MAX_DIAM)  /* = 961 */
+
+__constant__ float c_kernel[MOFFAT_MAX_ELEMS];
+__constant__ int   c_kradius;   /* kernel radius currently uploaded */
+
+/* -------------------------------------------------------------------------
+ * Convolution kernel (shared memory tiling)
+ * ------------------------------------------------------------------------- */
+#define CONV_TILE_W 16
+#define CONV_TILE_H 16
+
+/*
+ * moffat_conv_kernel — tile-based 2D convolution with kernel in constant mem.
+ *
+ * d_src : input image (W×H float32)
+ * d_dst : output image (W×H float32), written by this kernel
+ * W, H  : image dimensions
+ *
+ * Shared memory size is computed at launch from the kernel radius.
+ * The kernel assumes zero-padding at image boundaries.
+ */
+__global__ static void moffat_conv_kernel(
+    const float *d_src, float *d_dst, int W, int H)
+{
+    extern __shared__ float sm[];  /* (CONV_TILE_W + 2*kradius)^2 floats */
+
+    int kradius = c_kradius;
+    int kw = 2 * kradius + 1;     /* kernel width */
+    int smw = CONV_TILE_W + 2 * kradius;  /* shared memory tile width */
+
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int gx = blockIdx.x * CONV_TILE_W + tx;
+    int gy = blockIdx.y * CONV_TILE_H + ty;
+
+    /* Load shared memory tile with apron.
+     * Threads cooperatively load the (smw × smh) region. */
+    int smh = CONV_TILE_H + 2 * kradius;
+    for (int dy = ty; dy < smh; dy += CONV_TILE_H) {
+        for (int dx = tx; dx < smw; dx += CONV_TILE_W) {
+            int sx = blockIdx.x * CONV_TILE_W + dx - kradius;
+            int sy = blockIdx.y * CONV_TILE_H + dy - kradius;
+            float v = 0.f;
+            if (sx >= 0 && sx < W && sy >= 0 && sy < H)
+                v = d_src[sy * W + sx];
+            sm[dy * smw + dx] = v;
+        }
+    }
+    __syncthreads();
+
+    if (gx >= W || gy >= H) return;
+
+    /* Apply convolution using shared memory */
+    float acc = 0.f;
+    int sy0 = ty;  /* top of kernel in shared memory */
+    int sx0 = tx;
+
+    for (int ky = 0; ky < kw; ky++) {
+        for (int kx = 0; kx < kw; kx++) {
+            float kv = c_kernel[ky * kw + kx];
+            acc += kv * sm[(sy0 + ky) * smw + (sx0 + kx)];
+        }
+    }
+
+    d_dst[gy * W + gx] = acc;
+}
+
+/* -------------------------------------------------------------------------
+ * Reduction kernels for mean + variance
+ * ------------------------------------------------------------------------- */
+
+#define REDUCE_BLOCK 256
+
+/* Pass 1: compute partial sums into d_partials. */
+__global__ static void reduce_sum_kernel(
+    const float *d_in, double *d_partials, int N)
+{
+    __shared__ double sm_sum[REDUCE_BLOCK];
+    int tid = threadIdx.x;
+    int gid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    double val = 0.0;
+    if (gid < N) val = (double)d_in[gid];
+    sm_sum[tid] = val;
+    __syncthreads();
+
+    /* Tree reduction */
+    for (int s = REDUCE_BLOCK / 2; s > 0; s >>= 1) {
+        if (tid < s) sm_sum[tid] += sm_sum[tid + s];
+        __syncthreads();
+    }
+    if (tid == 0) d_partials[blockIdx.x] = sm_sum[0];
+}
+
+/* Pass 2: compute partial sum-of-squares (for variance) given mean. */
+__global__ static void reduce_sumsq_kernel(
+    const float *d_in, double mean, double *d_partials, int N)
+{
+    __shared__ double sm_sq[REDUCE_BLOCK];
+    int tid = threadIdx.x;
+    int gid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    double v = 0.0;
+    if (gid < N) { double d = (double)d_in[gid] - mean; v = d * d; }
+    sm_sq[tid] = v;
+    __syncthreads();
+
+    for (int s = REDUCE_BLOCK / 2; s > 0; s >>= 1) {
+        if (tid < s) sm_sq[tid] += sm_sq[tid + s];
+        __syncthreads();
+    }
+    if (tid == 0) d_partials[blockIdx.x] = sm_sq[0];
+}
+
+/* Threshold application kernel */
+__global__ static void threshold_kernel(
+    const float *d_conv, uint8_t *d_mask, float threshold, int N)
+{
+    int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (gid >= N) return;
+    d_mask[gid] = (d_conv[gid] > threshold) ? 1 : 0;
+}
+
+/* -------------------------------------------------------------------------
+ * Build Moffat kernel on CPU and upload to constant memory
+ * ------------------------------------------------------------------------- */
+
+static DsoError upload_moffat_kernel(const MoffatParams *params,
+                                      int *radius_out)
+{
+    if (!params || params->alpha <= 0.f || params->beta <= 0.f)
+        return DSO_ERR_INVALID_ARG;
+
+    /* Kernel radius = ceil(3 * alpha); clamp to MOFFAT_MAX_RADIUS. */
+    int R = (int)ceilf(3.0f * params->alpha);
+    if (R > MOFFAT_MAX_RADIUS) {
+        fprintf(stderr, "star_detect_gpu: Moffat alpha=%.2f yields radius %d, "
+                "clamping to MOFFAT_MAX_RADIUS=%d (kernel will be under-sized)\n",
+                params->alpha, R, MOFFAT_MAX_RADIUS);
+        R = MOFFAT_MAX_RADIUS;
+    }
+    if (R < 1) R = 1;
+
+    int kw = 2 * R + 1;
+    float kbuf[MOFFAT_MAX_ELEMS];
+    float ksum = 0.f;
+
+    float alpha2 = params->alpha * params->alpha;
+    float neg_beta = -params->beta;
+
+    for (int j = -R; j <= R; j++) {
+        for (int i = -R; i <= R; i++) {
+            float r2 = (float)(i*i + j*j);
+            float v = powf(1.0f + r2 / alpha2, neg_beta);
+            kbuf[(j+R) * kw + (i+R)] = v;
+            ksum += v;
+        }
+    }
+
+    /* Normalise kernel to sum = 1. */
+    for (int k = 0; k < kw * kw; k++) kbuf[k] /= ksum;
+
+    /* Upload to constant memory (d2d API requires sync for kernel visibility). */
+    cudaError_t cerr;
+    cerr = cudaMemcpyToSymbol(c_kernel, kbuf, (size_t)kw*kw * sizeof(float));
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "upload_moffat_kernel: %s\n", cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+    cerr = cudaMemcpyToSymbol(c_kradius, &R, sizeof(int));
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "upload_moffat_kernel (radius): %s\n", cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+
+    *radius_out = R;
+    return DSO_OK;
+}
+
+/* -------------------------------------------------------------------------
+ * Helper: compute mean and sigma of d_conv using reduction kernels
+ * Returns mean and sigma via host pointers.
+ * stream: CUDA stream for all kernel launches.
+ * d_tmp:  pre-allocated device scratch of size n_blocks*sizeof(double).
+ * Note: synchronises internally.
+ * ------------------------------------------------------------------------- */
+static DsoError compute_mean_sigma(const float *d_conv, int N,
+                                    double *mean_out, double *sigma_out,
+                                    float *d_tmp_f, double *d_tmp_d,
+                                    int n_blocks,
+                                    cudaStream_t stream)
+{
+    cudaError_t cerr;
+    (void)d_tmp_f;  /* unused in this helper */
+
+    /* Pass 1: partial sums */
+    reduce_sum_kernel<<<n_blocks, REDUCE_BLOCK, 0, stream>>>(d_conv, d_tmp_d, N);
+    cerr = cudaGetLastError();
+    if (cerr != cudaSuccess) return DSO_ERR_CUDA;
+    cudaStreamSynchronize(stream);
+
+    /* Download partial sums and sum on CPU */
+    double *h_partials = (double *)malloc((size_t)n_blocks * sizeof(double));
+    if (!h_partials) return DSO_ERR_ALLOC;
+    cerr = cudaMemcpy(h_partials, d_tmp_d,
+                      (size_t)n_blocks * sizeof(double),
+                      cudaMemcpyDeviceToHost);
+    if (cerr != cudaSuccess) { free(h_partials); return DSO_ERR_CUDA; }
+    double total = 0.0;
+    for (int i = 0; i < n_blocks; i++) total += h_partials[i];
+    double mean = total / N;
+    *mean_out = mean;
+
+    /* Pass 2: partial sum-of-squares */
+    reduce_sumsq_kernel<<<n_blocks, REDUCE_BLOCK, 0, stream>>>(
+        d_conv, mean, d_tmp_d, N);
+    cerr = cudaGetLastError();
+    if (cerr != cudaSuccess) { free(h_partials); return DSO_ERR_CUDA; }
+    cudaStreamSynchronize(stream);
+
+    cerr = cudaMemcpy(h_partials, d_tmp_d,
+                      (size_t)n_blocks * sizeof(double),
+                      cudaMemcpyDeviceToHost);
+    if (cerr != cudaSuccess) { free(h_partials); return DSO_ERR_CUDA; }
+    double sq_total = 0.0;
+    for (int i = 0; i < n_blocks; i++) sq_total += h_partials[i];
+    free(h_partials);
+
+    /* Bessel-corrected standard deviation */
+    double variance = (N > 1) ? (sq_total / (N - 1)) : 0.0;
+    *sigma_out = sqrt(variance);
+    return DSO_OK;
+}
+
+/* -------------------------------------------------------------------------
+ * Public d2d implementation
+ * ------------------------------------------------------------------------- */
+
+DsoError star_detect_gpu_d2d(const float        *d_src,
+                              float              *d_conv,
+                              uint8_t            *d_mask,
+                              int                 W, int H,
+                              const MoffatParams *params,
+                              float               sigma_k,
+                              cudaStream_t        stream)
+{
+    if (!d_src || !d_conv || !d_mask || W <= 0 || H <= 0 || !params)
+        return DSO_ERR_INVALID_ARG;
+
+    int R;
+    DsoError err = upload_moffat_kernel(params, &R);
+    if (err != DSO_OK) return err;
+
+    /* Launch Moffat convolution kernel */
+    int kw = 2 * R + 1;
+    int smw = CONV_TILE_W + 2 * R;
+    int smh = CONV_TILE_H + 2 * R;
+    size_t smem = (size_t)smw * smh * sizeof(float);
+
+    dim3 block(CONV_TILE_W, CONV_TILE_H);
+    dim3 grid((W + CONV_TILE_W - 1) / CONV_TILE_W,
+              (H + CONV_TILE_H - 1) / CONV_TILE_H);
+
+    moffat_conv_kernel<<<grid, block, smem, stream>>>(d_src, d_conv, W, H);
+    cudaError_t cerr = cudaGetLastError();
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "moffat_conv_kernel: %s\n", cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+    (void)kw;  /* suppress unused-variable warning */
+
+    /* Compute mean and sigma via reductions */
+    int N = W * H;
+    int n_blocks = (N + REDUCE_BLOCK - 1) / REDUCE_BLOCK;
+    double *d_tmp_d = NULL;
+    cerr = cudaMalloc(&d_tmp_d, (size_t)n_blocks * sizeof(double));
+    if (cerr != cudaSuccess) return DSO_ERR_CUDA;
+
+    double mean = 0.0, sigma = 0.0;
+    err = compute_mean_sigma(d_conv, N, &mean, &sigma,
+                              NULL, d_tmp_d, n_blocks, stream);
+    cudaFree(d_tmp_d);
+    if (err != DSO_OK) return err;
+
+    float threshold = (float)(mean + sigma_k * sigma);
+
+    /* Apply threshold */
+    dim3 blk1(REDUCE_BLOCK);
+    dim3 grd1((N + REDUCE_BLOCK - 1) / REDUCE_BLOCK);
+    threshold_kernel<<<grd1, blk1, 0, stream>>>(d_conv, d_mask, threshold, N);
+    cerr = cudaGetLastError();
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "threshold_kernel: %s\n", cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+
+    return DSO_OK;
+}
+
+/* -------------------------------------------------------------------------
+ * h2h wrapper: star_detect_gpu_moffat_convolve
+ * ------------------------------------------------------------------------- */
+
+DsoError star_detect_gpu_moffat_convolve(const Image        *src,
+                                          Image              *dst,
+                                          const MoffatParams *params,
+                                          cudaStream_t        stream)
+{
+    if (!src || !dst || !src->data || !dst->data || !params)
+        return DSO_ERR_INVALID_ARG;
+    if (src->width != dst->width || src->height != dst->height)
+        return DSO_ERR_INVALID_ARG;
+
+    int W = src->width, H = src->height;
+    size_t nbytes = (size_t)W * H * sizeof(float);
+    float *d_src = NULL, *d_dst = NULL;
+    cudaError_t cerr;
+
+    int R;
+    DsoError derr = upload_moffat_kernel(params, &R);
+    if (derr != DSO_OK) return derr;
+
+    cerr = cudaMalloc(&d_src, nbytes); if (cerr) { return DSO_ERR_CUDA; }
+    cerr = cudaMalloc(&d_dst, nbytes); if (cerr) { cudaFree(d_src); return DSO_ERR_CUDA; }
+
+    cerr = cudaMemcpyAsync(d_src, src->data, nbytes, cudaMemcpyHostToDevice, stream);
+    if (cerr) goto cleanup;
+
+    {
+        int smw = CONV_TILE_W + 2 * R, smh = CONV_TILE_H + 2 * R;
+        size_t smem = (size_t)smw * smh * sizeof(float);
+        dim3 block(CONV_TILE_W, CONV_TILE_H);
+        dim3 grid((W + CONV_TILE_W - 1) / CONV_TILE_W,
+                  (H + CONV_TILE_H - 1) / CONV_TILE_H);
+        moffat_conv_kernel<<<grid, block, smem, stream>>>(d_src, d_dst, W, H);
+        cerr = cudaGetLastError(); if (cerr) goto cleanup;
+    }
+
+    cerr = cudaMemcpyAsync(dst->data, d_dst, nbytes, cudaMemcpyDeviceToHost, stream);
+    if (cerr) goto cleanup;
+    cerr = cudaStreamSynchronize(stream); if (cerr) goto cleanup;
+
+    cudaFree(d_src); cudaFree(d_dst);
+    return DSO_OK;
+cleanup:
+    cudaFree(d_src); cudaFree(d_dst);
+    fprintf(stderr, "star_detect_gpu_moffat_convolve: %s\n", cudaGetErrorString(cerr));
+    return DSO_ERR_CUDA;
+}
+
+/* -------------------------------------------------------------------------
+ * h2h wrapper: star_detect_gpu_threshold
+ * ------------------------------------------------------------------------- */
+
+DsoError star_detect_gpu_threshold(const Image  *convolved,
+                                    uint8_t      *mask_out,
+                                    float         sigma_k,
+                                    cudaStream_t  stream)
+{
+    if (!convolved || !convolved->data || !mask_out) return DSO_ERR_INVALID_ARG;
+
+    int W = convolved->width, H = convolved->height;
+    int N = W * H;
+    size_t nbytes = (size_t)N * sizeof(float);
+    size_t mbytes = (size_t)N;
+
+    float   *d_conv = NULL;
+    uint8_t *d_mask = NULL;
+    double  *d_tmp  = NULL;
+    double   mean   = 0.0;
+    double   sigma  = 0.0;
+    cudaError_t cerr;
+
+    int n_blocks = (N + REDUCE_BLOCK - 1) / REDUCE_BLOCK;
+
+    cerr = cudaMalloc(&d_conv, nbytes); if (cerr) goto cleanup;
+    cerr = cudaMalloc(&d_mask, mbytes); if (cerr) goto cleanup;
+    cerr = cudaMalloc(&d_tmp,  (size_t)n_blocks * sizeof(double)); if (cerr) goto cleanup;
+
+    cerr = cudaMemcpyAsync(d_conv, convolved->data, nbytes,
+                           cudaMemcpyHostToDevice, stream);
+    if (cerr) goto cleanup;
+
+    {
+        DsoError derr = compute_mean_sigma(d_conv, N, &mean, &sigma,
+                                            NULL, d_tmp, n_blocks, stream);
+        if (derr != DSO_OK) { cerr = cudaErrorUnknown; goto cleanup; }
+    }
+
+    {
+        float threshold = (float)(mean + sigma_k * sigma);
+        dim3 blk(REDUCE_BLOCK), grd((N + REDUCE_BLOCK - 1) / REDUCE_BLOCK);
+        threshold_kernel<<<grd, blk, 0, stream>>>(d_conv, d_mask, threshold, N);
+        cerr = cudaGetLastError(); if (cerr) goto cleanup;
+    }
+
+    cerr = cudaMemcpyAsync(mask_out, d_mask, mbytes,
+                           cudaMemcpyDeviceToHost, stream);
+    if (cerr) goto cleanup;
+    cerr = cudaStreamSynchronize(stream);
+
+cleanup:
+    cudaFree(d_conv); cudaFree(d_mask); cudaFree(d_tmp);
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "star_detect_gpu_threshold: %s\n", cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+    return DSO_OK;
+}

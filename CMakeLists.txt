@@ -8,6 +8,7 @@ set(CMAKE_CUDA_STANDARD 17)
 set(CUDAToolkit_ROOT "/usr/local/cuda")
 find_package(CUDAToolkit 12 REQUIRED)
 
+find_package(OpenMP REQUIRED)
 find_package(PkgConfig REQUIRED)
 set(ENV{PKG_CONFIG_PATH} "/home/donut/.local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
 pkg_check_modules(CFITSIO REQUIRED cfitsio)
@@ -17,11 +18,13 @@ set(LIB_SOURCES
     src/csv_parser.c
     src/lanczos_cpu.c
     src/integration.c
+    src/debayer_cpu.c
+    src/star_detect_cpu.c
+    src/ransac.c
+    src/pipeline_cpu.c
     src/lanczos_gpu.cu
     src/debayer_gpu.cu
     src/star_detect_gpu.cu
-    src/star_detect_cpu.c
-    src/ransac.c
     src/integration_gpu.cu
     src/pipeline.cu
 )
@@ -38,6 +41,7 @@ target_link_libraries(dso_stacker_lib PUBLIC
     CUDA::cudart
     CUDA::nppc
     CUDA::nppig
+    OpenMP::OpenMP_C
 )
 set_target_properties(dso_stacker_lib PROPERTIES
     CUDA_ARCHITECTURES "86;89"
@@ -77,6 +81,12 @@ add_executable(test_ransac tests/test_ransac.c)
 target_include_directories(test_ransac PRIVATE tests)
 target_link_libraries(test_ransac PRIVATE dso_stacker_lib m)
 add_test(NAME test_ransac COMMAND test_ransac)
+
+# CPU debayer tests
+add_executable(test_debayer_cpu tests/test_debayer_cpu.c)
+target_include_directories(test_debayer_cpu PRIVATE tests)
+target_link_libraries(test_debayer_cpu PRIVATE dso_stacker_lib m)
+add_test(NAME test_debayer_cpu COMMAND test_debayer_cpu)
 
 # GPU tests for mini-batch kappa-sigma integration
 add_executable(test_integration_gpu tests/test_integration_gpu.cu)

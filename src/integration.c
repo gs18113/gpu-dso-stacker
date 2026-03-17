@@ -24,6 +24,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <omp.h>
 
 DsoError integrate_mean(const Image **frames, int n, Image *out)
 {
@@ -49,12 +50,13 @@ DsoError integrate_mean(const Image **frames, int n, Image *out)
     long  npix  = (long)W * H;
     float inv_n = 1.f / (float)n;
 
-    for (int i = 0; i < n; i++) {
-        const float *src = frames[i]->data;
-        float       *dst = out->data;
-        for (long p = 0; p < npix; p++) {
-            dst[p] += src[p] * inv_n;
-        }
+    /* Pixel-outer loop: each pixel is independent → safe to parallelise. */
+#pragma omp parallel for schedule(static)
+    for (long p = 0; p < npix; p++) {
+        float sum = 0.f;
+        for (int i = 0; i < n; i++)
+            sum += frames[i]->data[p];
+        out->data[p] = sum * inv_n;
     }
 
     return DSO_OK;
@@ -83,79 +85,68 @@ DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
     out->width  = W;
     out->height = H;
 
-    /* Allocate per-pixel work buffers once outside the pixel loop.
-     * Using heap (not VLA/stack) to be safe for large frame counts. */
-    float *vals = (float *)malloc((size_t)n * sizeof(float));
-    int   *mask = (int   *)malloc((size_t)n * sizeof(int));
-    if (!vals || !mask) {
-        free(vals);
-        free(mask);
-        image_free(out);
-        return DSO_ERR_ALLOC;
-    }
-
     long npix = (long)W * H;
 
+    /*
+     * Each pixel is fully independent: per-pixel vals[] and mask[] are
+     * declared as VLAs inside the loop body so every OpenMP thread gets
+     * its own stack copy.  schedule(dynamic) handles the variable work
+     * per pixel (different numbers of clipping iterations).
+     */
+#pragma omp parallel for schedule(dynamic, 64)
     for (long p = 0; p < npix; p++) {
-        /* Gather values from all frames for this pixel */
+        /* Per-iteration work buffers (VLA: one per OpenMP thread iteration) */
+        float vals[n];
+        int   actv[n];
+
         for (int i = 0; i < n; i++) {
             vals[i] = frames[i]->data[p];
-            mask[i] = 1;
+            actv[i] = 1;
         }
 
         int n_active = n;
 
         for (int iter = 0; iter < iterations; iter++) {
-            if (n_active < 2) break;   /* can't compute stddev with < 2 samples */
+            if (n_active < 2) break;
 
-            /* Two-pass mean */
             double sum = 0.0;
-            for (int i = 0; i < n; i++) {
-                if (mask[i]) sum += vals[i];
-            }
+            for (int i = 0; i < n; i++)
+                if (actv[i]) sum += vals[i];
             double mean = sum / n_active;
 
-            /* Sample variance with Bessel correction (÷ (n_active − 1)) */
             double sq_sum = 0.0;
             for (int i = 0; i < n; i++) {
-                if (mask[i]) {
+                if (actv[i]) {
                     double d = vals[i] - mean;
                     sq_sum += d * d;
                 }
             }
-            double stddev = sqrt(sq_sum / (n_active - 1));
-
-            /* Reject any value more than kappa·σ from the mean */
-            int n_rejected = 0;
+            double stddev    = sqrt(sq_sum / (n_active - 1));
             double threshold = kappa * stddev;
+
+            int n_rejected = 0;
             for (int i = 0; i < n; i++) {
-                if (mask[i] && fabs(vals[i] - mean) > threshold) {
-                    mask[i] = 0;
+                if (actv[i] && fabs(vals[i] - mean) > threshold) {
+                    actv[i] = 0;
                     n_rejected++;
                 }
             }
             n_active -= n_rejected;
-
-            if (n_rejected == 0) break;   /* converged */
-            if (n_active < 2)    break;   /* too few left for next iteration */
+            if (n_rejected == 0) break;
+            if (n_active < 2)    break;
         }
 
-        /* Output = mean of surviving values */
         if (n_active > 0) {
             double sum = 0.0;
-            for (int i = 0; i < n; i++) {
-                if (mask[i]) sum += vals[i];
-            }
+            for (int i = 0; i < n; i++)
+                if (actv[i]) sum += vals[i];
             out->data[p] = (float)(sum / n_active);
         } else {
-            /* Degenerate: all pixels clipped — fall back to plain mean */
             double sum = 0.0;
             for (int i = 0; i < n; i++) sum += vals[i];
             out->data[p] = (float)(sum / n);
         }
     }
 
-    free(vals);
-    free(mask);
     return DSO_OK;
 }

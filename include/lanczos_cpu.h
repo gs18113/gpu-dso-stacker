@@ -20,8 +20,8 @@ extern "C" {
 /*
  * lanczos_transform_cpu — warp src into dst using Lanczos-3 interpolation.
  *
- * H is the *forward* homography (source pixel coords → reference pixel coords).
- * Internally the function inverts H and uses the inverse for backward mapping.
+ * H is the *backward* homography (reference pixel coords → source pixel coords).
+ * It is used directly for pixel sampling — do not invert before passing.
  *
  * dst->width, dst->height, and dst->data must be set by the caller before
  * the call (typically matching the reference frame dimensions).
