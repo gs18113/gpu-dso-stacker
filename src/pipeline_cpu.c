@@ -28,6 +28,7 @@
  */
 
 #include "pipeline.h"
+#include "calibration.h"
 #include "fits_io.h"
 #include "debayer_cpu.h"
 #include "star_detect_cpu.h"
@@ -87,6 +88,12 @@ static DsoError phase1_cpu(FrameInfo            *frames,
             image_free(&raw);
             err = DSO_ERR_INVALID_ARG;
             goto cleanup;
+        }
+
+        /* Apply calibration (dark subtract + flat divide) before debayering */
+        if (config->calib) {
+            err = calib_apply_cpu(&raw, config->calib);
+            if (err != DSO_OK) { image_free(&raw); goto cleanup; }
         }
 
         /* Determine Bayer pattern */
@@ -186,6 +193,12 @@ static DsoError phase2_cpu(FrameInfo            *frames,
             image_free(&raw);
             err = DSO_ERR_INVALID_ARG;
             goto cleanup;
+        }
+
+        /* Apply calibration (dark subtract + flat divide) before debayering */
+        if (config->calib) {
+            err = calib_apply_cpu(&raw, config->calib);
+            if (err != DSO_OK) { image_free(&raw); goto cleanup; }
         }
 
         /* Bayer pattern */

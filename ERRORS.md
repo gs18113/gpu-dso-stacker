@@ -1,169 +1,100 @@
-# Code Review — Errors and Issues
+# ERRORS.md — Code Review Findings
 
-Identified during full source review on 2026-03-18.
-
----
-
-## 1. `include/lanczos_cpu.h` lines 23–24 — Wrong documentation (H convention)
-
-**Type:** Documentation error
-**Severity:** Medium (misleading API docs)
-
-The doc comment states:
-> "H is the *forward* homography (source pixel coords → reference pixel coords).
-> Internally the function inverts H and uses the inverse for backward mapping."
-
-The actual implementation (`src/lanczos_cpu.c`) uses H **directly** as the backward map
-(ref → src) without inversion. The internal `invert_homography()` function is dead code.
-This contradicts the rest of the project where all transform functions explicitly document
-H as the backward map.
+Reviewed 2026-03-20. Previous entries superseded (those issues were already fixed).
 
 ---
 
-## 2. `src/ransac.c` line 252 — Dead code: redundant `mat33_mul`
+## Bug 1 — `src/lanczos_cpu.c:137` — Float comparison amplifies FP noise at OOB boundary
 
-**Type:** Dead code / wasted computation
-**Severity:** Low (no incorrect output, just wasted work)
+**Severity:** High — causes `test_gpu_integer_shift` to fail
+**Status:** Fixed
+
+`weight_sum == 0.f` exact comparison fails when the Lanczos kernel center tap lands on an
+out-of-bounds integer coordinate. In that case the only tap with weight 1 is OOB and
+skipped; the remaining taps at offsets ±1, ±2, ±3 are mathematically zero (`sin(k·π)=0`)
+but `sinf` returns a tiny non-zero value (≈8.7e-8 for `sinf(π)`). These accumulate into
+`weight_sum ≈ −1e-9`, which is not `== 0.f`, so `accum / weight_sum` amplifies the noise
+to ≈1560 instead of 0.
+
+The GPU (nppiRemap) correctly returns 0 for an OOB source coordinate, so CPU and GPU
+diverge by up to 1560 at boundary pixels.
+
+**Fix:** `(fabsf(weight_sum) < 1e-6f) ? 0.f : accum / weight_sum`
+
+---
+
+## Bug 2 — `src/lanczos_gpu.cu:164` — Missing singular-H check in `lanczos_transform_gpu`
+
+**Severity:** High — causes `test_gpu_singular_h` to fail
+**Status:** Fixed
+
+`lanczos_transform_gpu` never checks the determinant of `H`. For a singular (all-zero)
+homography, `build_coord_maps` writes `(-1, -1)` for every pixel and nppiRemap leaves the
+zeroed `d_dst` unchanged. The function returns `DSO_OK` instead of `DSO_ERR_INVALID_ARG`.
+
+The dead helper `invert_homography_h` (lines 74–97) already contains the required
+determinant check; it just is never called from `lanczos_transform_gpu`.
+
+**Fix:** Determinant check before any CUDA allocation.
+
+---
+
+## Bug 3 — `src/integration_gpu.cu:122` — Float variance accumulation in GPU kappa-sigma
+
+**Severity:** Medium — reduced precision for high-dynamic-range images
+**Status:** Fixed
+
+`float sq = 0.f` accumulates squared deviations in single precision. For pixel values up
+to 65535 and batch size 64, max `sq ≈ 64 × 65535² ≈ 2.75 × 10¹¹`. Float has only ~7
+significant digits; values that large lose several digits of precision, causing incorrect
+sigma estimates and wrong clipping decisions.
+
+The CPU implementation (`integration.c:120`) correctly uses `double sq_sum = 0.0`.
+
+**Fix:** Promote `sq` to `double`.
+
+---
+
+## Issue 4 — `src/debayer_gpu.cu` and `src/debayer_cpu.c` — Symmetric gradients reduce VNG to 4-way direction selection
+
+**Severity:** Low — consistent CPU/GPU quality degradation, tests pass
+**Status:** Fixed
+
+Each "directional" gradient was computed as the sum of absolute differences in **both**
+directions along the axis:
 
 ```c
-mat33_mul(T_src_inv, h_norm, tmp);   /* T_src⁻¹ * H_norm */   // ← dead
-
-/* Reshape h_norm (vector) to 3×3 first */
-double H_norm33[9];
-memcpy(H_norm33, h_norm, 9 * sizeof(double));
-mat33_mul(T_src_inv, H_norm33, tmp);   // ← overwrites tmp from line above
-mat33_mul(tmp, T_ref, H_raw);
+g[0] = |P(0,-2) - P(0,0)| + |P(0,0) - P(0,2)|  // N
+g[4] = |P(0, 2) - P(0,0)| + |P(0,0) - P(0,-2)|  // S  ← always equals g[0]
 ```
 
-Line 252 computes `T_src_inv * h_norm → tmp`. Lines 254–257 then copy `h_norm` to a
-local `H_norm33` and recompute the identical product, overwriting `tmp` before it is
-ever read. The first `mat33_mul` call and the `H_norm33`/`memcpy` scaffolding are
-both dead code.
+Because `|a−b| = |b−a|`, `g[4] ≡ g[0]`, `g[5] ≡ g[1]`, `g[6] ≡ g[2]`, `g[7] ≡ g[3]`.
+The VNG direction-selection threshold was identical for opposite directions, so the
+algorithm could not distinguish "smooth north, steep south" from the reverse.
+
+**Fix:** Replace each two-sided formula with a one-sided formula sampling only the pixel
+in the named direction:
+
+```c
+g[0] = |P( 0,-2) - P(0,0)|  // N
+g[1] = |P( 2,-2) - P(0,0)|  // NE
+g[2] = |P( 2, 0) - P(0,0)|  // E
+g[3] = |P( 2, 2) - P(0,0)|  // SE
+g[4] = |P( 0, 2) - P(0,0)|  // S
+g[5] = |P(-2, 2) - P(0,0)|  // SW
+g[6] = |P(-2, 0) - P(0,0)|  // W
+g[7] = |P(-2,-2) - P(0,0)|  // NW
+```
+
+Applied to both `src/debayer_gpu.cu` and `src/debayer_cpu.c`.
 
 ---
 
-## 3. `src/ransac.c` lines 370–381 — Dead code: abandoned reservoir sampling
+## Issue 5 — Dead code: `invert_homography` / `invert_homography_h` helpers
 
-**Type:** Dead code
-**Severity:** Low (no incorrect output)
+**Severity:** Cosmetic
+**Status:** Documented, not fixed (retained "for reference" per code comment)
 
-```c
-/* Use a small reservoir of 4 indices */
-for (int k = 0; k < 4; k++) {
-    int j = k + rand() % (pool_size - k);
-    if (k == 0) {
-        idx[0] = j % n_matches;
-        idx[1] = (j + 1) % n_matches;
-        idx[2] = (j + 2) % n_matches;
-        idx[3] = (j + 3) % n_matches;
-        break;   // ← exits immediately; k=1,2,3 never execute
-    }
-}
-/* Simpler: just pick 4 random distinct indices */
-int used[4] = {-1,-1,-1,-1};
-for (int k = 0; k < 4; ) {
-    ...   // ← overwrites idx[] entirely
-}
-```
-
-The first loop breaks unconditionally after `k == 0`, making `k=1,2,3` unreachable.
-The "simpler" block that follows immediately overwrites `idx[]`, making the first
-block's output irrelevant. The first block is completely dead.
-
----
-
-## 4. `src/ransac.c` line 424 — Dead guard on adaptive termination
-
-**Type:** Dead code
-**Severity:** Low (no incorrect output)
-
-```c
-double log_arg = 1.0 - p->confidence;
-if (log_arg < -1.0 + 1e-10) log_arg = -1.0 + 1e-10;   // ← never triggers
-double n_needed = log(log_arg) / log(1.0 - p4);
-```
-
-`log_arg = 1.0 - confidence`. For any valid confidence ∈ (0, 1), `log_arg` ∈ (0, 1).
-The guard clamps if `log_arg < −0.9999…`, which requires `confidence > 1.9999` —
-impossible for a valid confidence value. The guard never executes.
-
-The formula itself is correct (`log(1−conf) / log(1−p^4)`); only the guard is dead code.
-
----
-
-## 5. `src/fits_io.c` lines 89–93 — File handle leak on `ffcrim` failure
-
-**Type:** Resource leak
-**Severity:** High (file descriptor leak on error path)
-
-```c
-ffinit(&fptr, overwrite_path, &status);   // opens file, fptr now valid
-ffcrim(fptr, FLOAT_IMG, 2, naxes, &status);
-if (status) {
-    fits_report_error(stderr, status);
-    return DSO_ERR_FITS;   // ← fptr is never closed
-}
-```
-
-If `ffinit` succeeds (fptr is valid) but `ffcrim` fails (status ≠ 0), the function
-returns without calling `ffclos(fptr, &status)`. The FITS file handle leaks.
-Repeated failures accumulate open file descriptors until the process runs out.
-
----
-
-## 6. `src/pipeline_cpu.c` line 251 — Missing `ref_idx` bounds check
-
-**Type:** Safety / potential out-of-bounds array access
-**Severity:** High (undefined behaviour on invalid input)
-
-```c
-DsoError pipeline_run_cpu(..., int ref_idx, ...) {
-    if (!frames || n_frames <= 0 || !config) return DSO_ERR_INVALID_ARG;
-    // ref_idx is never validated here ↑
-    ...
-    DsoError e = fits_load(frames[ref_idx].filepath, &ref_img);  // ← UB if ref_idx < 0 or ≥ n_frames
-```
-
-`pipeline_run()` in `pipeline.cu` correctly validates `ref_idx < 0 || ref_idx >= n_frames`
-before delegating to `pipeline_run_cpu()`. However `pipeline_run_cpu()` is a public
-function and performs no such check itself.
-
----
-
-## 7. `src/debayer_gpu.cu` lines 126, 128 — Wrong diagonal gradient direction labels
-
-**Type:** Documentation error
-**Severity:** Low (comments only; algorithm is correct)
-
-`P(dx, dy) = sm[sy+dy][sx+dx]`, so `P(-2,-2)` is the pixel 2 columns left and 2 rows
-up (upper-left = NW), and `P(2,2)` is lower-right (SE).
-
-```c
-g[1] = fabsf(P(-2,-2) - P( 0, 0)) + fabsf(P( 0, 0) - P( 2, 2)); /* NE→SE diag */  // ← wrong: NW-SE
-g[3] = fabsf(P(-2, 2) - P( 0, 0)) + fabsf(P( 0, 0) - P( 2,-2)); /* NW→SE cross */ // ← wrong: NE-SW
-```
-
-- `g[1]` spans `P(-2,-2)` ↔ `P(2,2)` (upper-left ↔ lower-right) → **NW-SE diagonal**
-- `g[3]` spans `P(-2,2)` ↔ `P(2,-2)` (lower-left ↔ upper-right) → **NE-SW diagonal**
-
-Both labels are transposed.
-
----
-
-## 8. `src/star_detect_cpu.c` line 38 + `src/star_detect_gpu.cu` line 173 — Silent Moffat radius clamp
-
-**Type:** Silent incorrect result / robustness
-**Severity:** Medium (wrong kernel for alpha > 5, no user warning)
-
-```c
-int R = (int)ceilf(3.0f * params->alpha);
-if (R > MOFFAT_MAX_RADIUS) R = MOFFAT_MAX_RADIUS;   // ← silent truncation
-```
-
-When `alpha > 5`, the intended kernel radius (`ceil(3·alpha) > 15`) exceeds
-`MOFFAT_MAX_RADIUS = 15`. The kernel is silently truncated, producing an under-sized
-PSF and incorrect (under-smoothed) convolution output. No warning or error is
-emitted, making the problem invisible to the caller.
-
-The same silent clamp exists in both the CPU (`star_detect_cpu.c`) and GPU
-(`star_detect_gpu.cu`) paths.
+`src/lanczos_cpu.c:50–80` defines `invert_homography()` and
+`src/lanczos_gpu.cu:74–97` defines `invert_homography_h()`. Neither is called anywhere.
+Both files now use `H` directly as the backward map (no inversion needed).

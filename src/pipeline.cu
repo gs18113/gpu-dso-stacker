@@ -36,6 +36,8 @@
  */
 
 #include "pipeline.h"
+#include "calibration.h"
+#include "calibration_gpu.h"
 #include "fits_io.h"
 #include "debayer_gpu.h"
 #include "star_detect_gpu.h"
@@ -85,6 +87,7 @@ static DsoError phase1_detect_stars(
     int                 ref_idx,
     int                 W, int H,
     const PipelineConfig *config,
+    CalibGpuCtx        *calib_ctx,    /* NULL = no calibration */
     StarList           *star_lists)   /* caller-allocated array of n_frames StarList */
 {
     DsoError  err           = DSO_OK;
@@ -131,8 +134,13 @@ static DsoError phase1_detect_stars(
         if (pat == BAYER_NONE)
             fits_get_bayer_pattern(frames[i].filepath, &pat);
 
-        /* H2D raw → device, debayer in-place to luminance */
+        /* H2D raw → device */
         CUDA_CHECK(cudaMemcpy(d_raw, raw.data, npix_f, cudaMemcpyHostToDevice), frame_err);
+
+        /* Apply calibration (dark subtract + flat divide) before debayering */
+        PIPE_CHECK(calib_gpu_apply_d2d(d_raw, W, H, calib_ctx, 0), frame_err);
+
+        /* Debayer → luminance */
         PIPE_CHECK(debayer_gpu_d2d(d_raw, d_debayed, W, H, pat, 0), frame_err);
 
         /* Moffat convolution + sigma threshold → d_conv, d_mask */
@@ -222,6 +230,7 @@ static DsoError phase2_transform_integrate(
     int                   n_frames,
     int                   W, int H,
     const PipelineConfig *config,
+    CalibGpuCtx          *calib_ctx,   /* NULL = no calibration */
     IntegrationGpuCtx    *ctx)
 {
     DsoError     err            = DSO_OK;
@@ -288,6 +297,10 @@ static DsoError phase2_transform_integrate(
 
             /* Wait (GPU-side) for H2D of this slot to complete */
             CUDA_CHECK(cudaStreamWaitEvent(stream_compute, e_h2d[slot], 0), cleanup);
+
+            /* Apply calibration (dark subtract + flat divide) before debayering */
+            PIPE_CHECK(calib_gpu_apply_d2d(d_raw[slot], W, H,
+                                            calib_ctx, stream_compute), cleanup);
 
             /* Debayer raw → luminance (or plain device-to-device for monochrome) */
             if (pat != BAYER_NONE) {
@@ -409,6 +422,7 @@ DsoError pipeline_run(FrameInfo            *frames,
     int                W          = 0;
     int                H          = 0;
     IntegrationGpuCtx *ctx        = NULL;
+    CalibGpuCtx       *calib_ctx  = NULL;
     StarList          *star_lists = NULL;
 
     /* ---- Load reference frame to determine output dimensions ---- */
@@ -425,6 +439,10 @@ DsoError pipeline_run(FrameInfo            *frames,
     PIPE_CHECK(lanczos_gpu_init(0 /* default stream */), done);
     PIPE_CHECK(integration_gpu_init(W, H, config->batch_size, &ctx), done);
 
+    /* Upload calibration master frames to device (if calibration was requested) */
+    if (config->calib)
+        PIPE_CHECK(calib_gpu_init(config->calib, &calib_ctx), done);
+
     if (!has_transforms) {
         printf("pipeline: Phase 1 — star detection (%d frames)\n", n_frames);
 
@@ -432,7 +450,7 @@ DsoError pipeline_run(FrameInfo            *frames,
         if (!star_lists) { err = DSO_ERR_ALLOC; goto done; }
 
         PIPE_CHECK(phase1_detect_stars(frames, n_frames, ref_idx,
-                                        W, H, config, star_lists), done);
+                                        W, H, config, calib_ctx, star_lists), done);
         printf("pipeline: Phase 1 complete\n");
     }
 
@@ -442,7 +460,7 @@ DsoError pipeline_run(FrameInfo            *frames,
            n_frames, config->batch_size);
 
     PIPE_CHECK(phase2_transform_integrate(frames, n_frames, W, H,
-                                           config, ctx), done);
+                                           config, calib_ctx, ctx), done);
     printf("pipeline: Phase 2 complete\n");
 
     /* ---- Finalise: compute output image and save ---- */
@@ -469,6 +487,7 @@ done:
         free(star_lists);
     }
 
+    calib_gpu_cleanup(calib_ctx);
     integration_gpu_cleanup(ctx);
     lanczos_gpu_cleanup();
 

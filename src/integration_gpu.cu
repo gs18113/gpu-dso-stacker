@@ -117,15 +117,16 @@ __global__ static void kappa_sigma_batch_kernel(
         for (int i = 0; i < M; i++) if (active[i]) sum += vals[i];
         float mean = sum / (float)n_active;
 
-        /* Bessel-corrected sample variance */
-        float sq = 0.f;
+        /* Bessel-corrected sample variance (double to avoid FP loss for
+         * high-dynamic-range pixels; matches CPU integrate_kappa_sigma) */
+        double sq = 0.0;
         for (int i = 0; i < M; i++) {
             if (active[i]) {
                 float d = vals[i] - mean;
-                sq += d * d;
+                sq += (double)d * d;
             }
         }
-        float sigma  = sqrtf(sq / (float)(n_active - 1));
+        float sigma  = sqrtf((float)(sq / (double)(n_active - 1)));
         float thresh = kappa * sigma;
 
         /* Reject outliers */

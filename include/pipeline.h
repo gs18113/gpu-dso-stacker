@@ -43,6 +43,9 @@
 #include "dso_types.h"         /* MoffatParams lives here */
 #include "ransac.h"            /* RansacParams */
 
+/* Forward declaration — include calibration.h where the full type is needed */
+typedef struct CalibFrames CalibFrames;
+
 #ifdef __cplusplus
 #include <stdbool.h>
 extern "C" {
@@ -70,9 +73,12 @@ typedef struct {
     int          use_kappa_sigma; /* 1 = kappa-sigma, 0 = plain mean                 */
 
     /* --- I/O --- */
-    const char  *output_file;     /* output FITS path                                */
-    BayerPattern bayer_override;  /* BAYER_NONE = auto-detect per frame header       */
-    int          use_gpu_lanczos; /* 1 = GPU Lanczos (default), 0 = CPU Lanczos      */
+    const char         *output_file;     /* output FITS path                                */
+    BayerPattern        bayer_override;  /* BAYER_NONE = auto-detect per frame header       */
+    int                 use_gpu_lanczos; /* 1 = GPU Lanczos (default), 0 = CPU Lanczos      */
+
+    /* --- Calibration --- */
+    const CalibFrames  *calib;           /* NULL = no calibration; applied before debayer   */
 } PipelineConfig;
 
 /*

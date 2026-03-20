@@ -21,11 +21,13 @@ set(LIB_SOURCES
     src/debayer_cpu.c
     src/star_detect_cpu.c
     src/ransac.c
+    src/calibration.c
     src/pipeline_cpu.c
     src/lanczos_gpu.cu
     src/debayer_gpu.cu
     src/star_detect_gpu.cu
     src/integration_gpu.cu
+    src/calibration_gpu.cu
     src/pipeline.cu
 )
 
@@ -87,6 +89,12 @@ add_executable(test_debayer_cpu tests/test_debayer_cpu.c)
 target_include_directories(test_debayer_cpu PRIVATE tests)
 target_link_libraries(test_debayer_cpu PRIVATE dso_stacker_lib m)
 add_test(NAME test_debayer_cpu COMMAND test_debayer_cpu)
+
+# CPU tests for calibration (dark/flat/bias/darkflat preprocessing)
+add_executable(test_calibration tests/test_calibration.c)
+target_include_directories(test_calibration PRIVATE tests)
+target_link_libraries(test_calibration PRIVATE dso_stacker_lib m)
+add_test(NAME test_calibration COMMAND test_calibration)
 
 # GPU tests for mini-batch kappa-sigma integration
 add_executable(test_integration_gpu tests/test_integration_gpu.cu)

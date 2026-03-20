@@ -9,15 +9,18 @@
  * Usage:
  *   dso_stacker -f <frames.csv> [options]
  *
- * Options (existing):
+ * Options (I/O):
  *   -f, --file <path>                Input CSV file (required)
  *   -o, --output <path>              Output FITS file (default: output.fits)
+ *
+ * Options (integration):
  *       --cpu                        Use CPU Lanczos (default: GPU)
  *       --integration <method>       mean | kappa-sigma (default: kappa-sigma)
  *       --kappa <float>              Sigma multiplier for clipping (default: 3.0)
  *       --iterations <int>           Max clipping iterations (default: 3)
+ *       --batch-size <int>           GPU integration mini-batch size (default: 16)
  *
- * Options (new — star detection and alignment):
+ * Options (star detection — 2-column CSV only):
  *       --star-sigma <float>         Detection threshold: accept pixels above
  *                                    mean + star_sigma × σ (default: 3.0)
  *       --moffat-alpha <float>       Moffat PSF alpha (FWHM control, default: 2.5)
@@ -27,8 +30,24 @@
  *       --ransac-iters <int>         Max RANSAC iterations (default: 1000)
  *       --ransac-thresh <float>      Inlier reprojection threshold in px (default: 2.0)
  *       --match-radius <float>       Star matching search radius in px (default: 30.0)
- *       --batch-size <int>           Frames per GPU integration mini-batch (default: 16)
- *       --bayer <pattern>            Bayer override: none | rggb | bggr | grbg | gbrg
+ *
+ * Options (calibration):
+ *       --dark <path>                Master dark FITS or list of dark FITS paths
+ *       --bias <path>                Master bias FITS or list of bias FITS paths
+ *                                    (mutually exclusive with --darkflat)
+ *       --flat <path>                Master flat FITS or list of flat FITS paths
+ *       --darkflat <path>            Master darkflat FITS or list of darkflat FITS paths
+ *                                    (mutually exclusive with --bias)
+ *       --save-master-frames <dir>   Where to save generated masters (default: ./master)
+ *       --dark-method <method>       winsorized-mean | median (default: winsorized-mean)
+ *       --bias-method <method>       winsorized-mean | median (default: winsorized-mean)
+ *       --flat-method <method>       winsorized-mean | median (default: winsorized-mean)
+ *       --darkflat-method <method>   winsorized-mean | median (default: winsorized-mean)
+ *       --wsor-clip <float>          Winsorized mean clipping fraction per side (default: 0.1)
+ *                                    Valid range: [0.0, 0.49]
+ *
+ * Options (sensor):
+ *       --bayer <pattern>            CFA override: none | rggb | bggr | grbg | gbrg
  *                                    (default: auto-detect from FITS header)
  */
 
@@ -39,6 +58,7 @@
 
 #include "dso_types.h"
 #include "csv_parser.h"
+#include "calibration.h"
 #include "integration_gpu.h"   /* INTEGRATION_GPU_MAX_BATCH */
 #include "pipeline.h"
 
@@ -46,7 +66,7 @@
  * Long-option enum values (avoid collision with ASCII short-option chars)
  * ------------------------------------------------------------------------- */
 enum {
-    OPT_CPU          = 256,
+    OPT_CPU             = 256,
     OPT_INTEGRATION,
     OPT_KAPPA,
     OPT_ITERATIONS,
@@ -60,6 +80,17 @@ enum {
     OPT_MATCH_RADIUS,
     OPT_BATCH_SIZE,
     OPT_BAYER,
+    /* Calibration options */
+    OPT_DARK,
+    OPT_BIAS,
+    OPT_FLAT,
+    OPT_DARKFLAT,
+    OPT_SAVE_MASTER_FRAMES,
+    OPT_DARK_METHOD,
+    OPT_BIAS_METHOD,
+    OPT_FLAT_METHOD,
+    OPT_DARKFLAT_METHOD,
+    OPT_WSOR_CLIP,
 };
 
 static void usage(const char *prog)
@@ -90,6 +121,22 @@ static void usage(const char *prog)
         "      --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)\n"
         "      --match-radius <float>     Star matching radius px (default: 30.0)\n"
         "\n"
+        "Calibration:\n"
+        "      --dark <path>              Master dark FITS or text list of dark FITS paths\n"
+        "      --bias <path>              Master bias FITS or text list of bias FITS paths\n"
+        "                                 (mutually exclusive with --darkflat)\n"
+        "      --flat <path>              Master flat FITS or text list of flat FITS paths\n"
+        "      --darkflat <path>          Master darkflat FITS or text list of darkflat paths\n"
+        "                                 (mutually exclusive with --bias)\n"
+        "      --save-master-frames <dir> Directory to save generated master frames\n"
+        "                                 (default: ./master)\n"
+        "      --dark-method <method>     winsorized-mean | median (default: winsorized-mean)\n"
+        "      --bias-method <method>     winsorized-mean | median (default: winsorized-mean)\n"
+        "      --flat-method <method>     winsorized-mean | median (default: winsorized-mean)\n"
+        "      --darkflat-method <method> winsorized-mean | median (default: winsorized-mean)\n"
+        "      --wsor-clip <float>        Winsorized mean clipping fraction per side\n"
+        "                                 Valid range: [0.0, 0.49] (default: 0.1)\n"
+        "\n"
         "Sensor:\n"
         "      --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg\n"
         "                                 (default: auto-detect from FITS BAYERPAT keyword)\n"
@@ -103,6 +150,14 @@ static void check(DsoError err, const char *ctx)
         fprintf(stderr, "Error in %s: code %d\n", ctx, (int)err);
         exit(1);
     }
+}
+
+/* Parse a method string → CalibMethod; returns -1 on unknown value */
+static int parse_calib_method(const char *s, CalibMethod *out)
+{
+    if (strcmp(s, "winsorized-mean") == 0) { *out = CALIB_WINSORIZED_MEAN; return 0; }
+    if (strcmp(s, "median")          == 0) { *out = CALIB_MEDIAN;          return 0; }
+    return -1;
 }
 
 /* -------------------------------------------------------------------------
@@ -131,24 +186,48 @@ int main(int argc, char **argv)
     cfg.output_file     = "output.fits";
     cfg.bayer_override  = BAYER_NONE;   /* auto-detect */
     cfg.use_gpu_lanczos = 1;
+    cfg.calib           = nullptr;
+
+    /* Calibration defaults */
+    const char *dark_path        = nullptr;
+    const char *bias_path        = nullptr;
+    const char *flat_path        = nullptr;
+    const char *darkflat_path    = nullptr;
+    const char *save_master_dir  = "./master";
+    CalibMethod dark_method      = CALIB_WINSORIZED_MEAN;
+    CalibMethod bias_method      = CALIB_WINSORIZED_MEAN;
+    CalibMethod flat_method      = CALIB_WINSORIZED_MEAN;
+    CalibMethod darkflat_method  = CALIB_WINSORIZED_MEAN;
+    float       wsor_clip        = 0.1f;
 
     static struct option long_opts[] = {
-        {"file",          required_argument, nullptr, 'f'},
-        {"output",        required_argument, nullptr, 'o'},
-        {"cpu",           no_argument,       nullptr, OPT_CPU},
-        {"integration",   required_argument, nullptr, OPT_INTEGRATION},
-        {"kappa",         required_argument, nullptr, OPT_KAPPA},
-        {"iterations",    required_argument, nullptr, OPT_ITERATIONS},
-        {"star-sigma",    required_argument, nullptr, OPT_STAR_SIGMA},
-        {"moffat-alpha",  required_argument, nullptr, OPT_MOFFAT_ALPHA},
-        {"moffat-beta",   required_argument, nullptr, OPT_MOFFAT_BETA},
-        {"top-stars",     required_argument, nullptr, OPT_TOP_STARS},
-        {"min-stars",     required_argument, nullptr, OPT_MIN_STARS},
-        {"ransac-iters",  required_argument, nullptr, OPT_RANSAC_ITERS},
-        {"ransac-thresh", required_argument, nullptr, OPT_RANSAC_THRESH},
-        {"match-radius",  required_argument, nullptr, OPT_MATCH_RADIUS},
-        {"batch-size",    required_argument, nullptr, OPT_BATCH_SIZE},
-        {"bayer",         required_argument, nullptr, OPT_BAYER},
+        {"file",              required_argument, nullptr, 'f'},
+        {"output",            required_argument, nullptr, 'o'},
+        {"cpu",               no_argument,       nullptr, OPT_CPU},
+        {"integration",       required_argument, nullptr, OPT_INTEGRATION},
+        {"kappa",             required_argument, nullptr, OPT_KAPPA},
+        {"iterations",        required_argument, nullptr, OPT_ITERATIONS},
+        {"star-sigma",        required_argument, nullptr, OPT_STAR_SIGMA},
+        {"moffat-alpha",      required_argument, nullptr, OPT_MOFFAT_ALPHA},
+        {"moffat-beta",       required_argument, nullptr, OPT_MOFFAT_BETA},
+        {"top-stars",         required_argument, nullptr, OPT_TOP_STARS},
+        {"min-stars",         required_argument, nullptr, OPT_MIN_STARS},
+        {"ransac-iters",      required_argument, nullptr, OPT_RANSAC_ITERS},
+        {"ransac-thresh",     required_argument, nullptr, OPT_RANSAC_THRESH},
+        {"match-radius",      required_argument, nullptr, OPT_MATCH_RADIUS},
+        {"batch-size",        required_argument, nullptr, OPT_BATCH_SIZE},
+        {"bayer",             required_argument, nullptr, OPT_BAYER},
+        /* Calibration */
+        {"dark",              required_argument, nullptr, OPT_DARK},
+        {"bias",              required_argument, nullptr, OPT_BIAS},
+        {"flat",              required_argument, nullptr, OPT_FLAT},
+        {"darkflat",          required_argument, nullptr, OPT_DARKFLAT},
+        {"save-master-frames",required_argument, nullptr, OPT_SAVE_MASTER_FRAMES},
+        {"dark-method",       required_argument, nullptr, OPT_DARK_METHOD},
+        {"bias-method",       required_argument, nullptr, OPT_BIAS_METHOD},
+        {"flat-method",       required_argument, nullptr, OPT_FLAT_METHOD},
+        {"darkflat-method",   required_argument, nullptr, OPT_DARKFLAT_METHOD},
+        {"wsor-clip",         required_argument, nullptr, OPT_WSOR_CLIP},
         {nullptr, 0, nullptr, 0}
     };
 
@@ -169,7 +248,7 @@ int main(int argc, char **argv)
         case OPT_TOP_STARS:    cfg.top_stars         = atoi(optarg);            break;
         case OPT_MIN_STARS:    cfg.min_stars         = atoi(optarg);            break;
 
-        case OPT_RANSAC_ITERS:  cfg.ransac.max_iters     = atoi(optarg);          break;
+        case OPT_RANSAC_ITERS:  cfg.ransac.max_iters     = atoi(optarg);             break;
         case OPT_RANSAC_THRESH: cfg.ransac.inlier_thresh  = strtof(optarg, nullptr); break;
         case OPT_MATCH_RADIUS:  cfg.ransac.match_radius   = strtof(optarg, nullptr); break;
 
@@ -183,6 +262,48 @@ int main(int argc, char **argv)
             else if (strcmp(optarg, "gbrg") == 0) cfg.bayer_override = BAYER_GBRG;
             else {
                 fprintf(stderr, "Error: unknown Bayer pattern '%s'\n", optarg);
+                return 1;
+            }
+            break;
+
+        /* Calibration options */
+        case OPT_DARK:               dark_path       = optarg; break;
+        case OPT_BIAS:               bias_path       = optarg; break;
+        case OPT_FLAT:               flat_path       = optarg; break;
+        case OPT_DARKFLAT:           darkflat_path   = optarg; break;
+        case OPT_SAVE_MASTER_FRAMES: save_master_dir = optarg; break;
+
+        case OPT_DARK_METHOD:
+            if (parse_calib_method(optarg, &dark_method) != 0) {
+                fprintf(stderr, "Error: unknown dark method '%s'\n", optarg);
+                return 1;
+            }
+            break;
+        case OPT_BIAS_METHOD:
+            if (parse_calib_method(optarg, &bias_method) != 0) {
+                fprintf(stderr, "Error: unknown bias method '%s'\n", optarg);
+                return 1;
+            }
+            break;
+        case OPT_FLAT_METHOD:
+            if (parse_calib_method(optarg, &flat_method) != 0) {
+                fprintf(stderr, "Error: unknown flat method '%s'\n", optarg);
+                return 1;
+            }
+            break;
+        case OPT_DARKFLAT_METHOD:
+            if (parse_calib_method(optarg, &darkflat_method) != 0) {
+                fprintf(stderr, "Error: unknown darkflat method '%s'\n", optarg);
+                return 1;
+            }
+            break;
+
+        case OPT_WSOR_CLIP:
+            wsor_clip = strtof(optarg, nullptr);
+            if (wsor_clip < 0.0f || wsor_clip > 0.49f) {
+                fprintf(stderr,
+                        "Error: --wsor-clip must be in [0.0, 0.49] (got %.4f)\n",
+                        (double)wsor_clip);
                 return 1;
             }
             break;
@@ -214,9 +335,44 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* Wire output path into config */
+    /* Validate calibration: bias and darkflat are mutually exclusive */
+    if (bias_path && darkflat_path) {
+        fprintf(stderr,
+                "Error: --bias and --darkflat are mutually exclusive.\n"
+                "  Use --bias for short flat exposures (< 1 s).\n"
+                "  Use --darkflat for longer flat exposures to capture dark current.\n");
+        return 1;
+    }
+
+    /* Warn when no calibration is provided */
+    if (!dark_path && !bias_path && !flat_path && !darkflat_path) {
+        fprintf(stderr,
+                "Warning: no calibration frames provided.\n"
+                "  The stacked output may contain dark current, hot pixels, "
+                "and optical vignetting.\n"
+                "  Consider providing --dark, --flat, and --bias/--darkflat.\n");
+    }
+
+    /* Wire output path and GPU flag into config */
     cfg.output_file     = output_file;
     cfg.use_gpu_lanczos = !use_cpu;
+
+    /* ---- Generate / load calibration master frames ---- */
+    CalibFrames calib   = {};
+    bool        has_calib = dark_path || bias_path || flat_path || darkflat_path;
+
+    if (has_calib) {
+        check(calib_load_or_generate(
+                  dark_path,    dark_method,
+                  bias_path,    bias_method,
+                  flat_path,    flat_method,
+                  darkflat_path, darkflat_method,
+                  save_master_dir,
+                  wsor_clip,
+                  &calib),
+              "calib_load_or_generate");
+        cfg.calib = &calib;
+    }
 
     /* ---- Parse CSV ---- */
     FrameInfo *frames        = nullptr;
@@ -226,6 +382,7 @@ int main(int argc, char **argv)
 
     if (n_frames == 0) {
         fprintf(stderr, "Error: CSV contains no frames\n");
+        calib_free(&calib);
         return 1;
     }
 
@@ -235,6 +392,8 @@ int main(int argc, char **argv)
         if (frames[i].is_reference) {
             if (ref_idx != -1) {
                 fprintf(stderr, "Error: multiple reference frames found\n");
+                free(frames);
+                calib_free(&calib);
                 return 1;
             }
             ref_idx = i;
@@ -242,6 +401,8 @@ int main(int argc, char **argv)
     }
     if (ref_idx == -1) {
         fprintf(stderr, "Error: no reference frame found in CSV\n");
+        free(frames);
+        calib_free(&calib);
         return 1;
     }
 
@@ -251,11 +412,17 @@ int main(int argc, char **argv)
     printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s\n",
            integ_str, (double)cfg.kappa, cfg.iterations, cfg.batch_size,
            use_cpu ? "CPU" : "GPU");
+    if (has_calib) {
+        printf("Calibration: dark=%s flat=%s\n",
+               calib.has_dark ? "yes" : "no",
+               calib.has_flat ? "yes" : "no");
+    }
 
     /* ---- Run pipeline ---- */
     check(pipeline_run(frames, n_frames, has_transforms, ref_idx, &cfg),
           "pipeline_run");
 
     free(frames);
+    calib_free(&calib);
     return 0;
 }

@@ -56,6 +56,8 @@ gpu-dso-stacker/
 │   ├── star_detect_cpu.h        ← Moffat conv + threshold + CCL + CoM (CPU)
 │   ├── ransac.h                 ← DLT homography + RANSAC alignment
 │   ├── integration_gpu.h        ← GPU mini-batch kappa-sigma context + API
+│   ├── calibration.h            ← CalibFrames, CalibMethod, calib_load_or_generate, calib_apply_cpu
+│   ├── calibration_gpu.h        ← CalibGpuCtx, calib_gpu_init/apply_d2d/cleanup
 │   └── pipeline.h               ← pipeline_run (GPU) + pipeline_run_cpu + PipelineConfig
 ├── src/
 │   ├── fits_io.c                ← CFITSIO-based I/O
@@ -69,16 +71,19 @@ gpu-dso-stacker/
 │   ├── star_detect_cpu.c        ← Moffat conv + threshold (OpenMP) + CCL + CoM
 │   ├── ransac.c                 ← Jacobi eigendecomp DLT + RANSAC loop
 │   ├── integration_gpu.cu       ← Mini-batch kappa-sigma + finalize kernels
+│   ├── calibration.c            ← Master frame generation (winsorized mean / median) + CPU apply
+│   ├── calibration_gpu.cu       ← GPU calibration kernel (dark subtract + flat divide, D2D)
 │   ├── pipeline.cu              ← GPU orchestrator; dispatches to pipeline_cpu if --cpu
 │   └── pipeline_cpu.c           ← Pure-C CPU orchestrator (no CUDA)
 ├── tests/
 │   ├── test_framework.h         ← Minimal test harness (ASSERT_*, RUN, SUITE)
 │   ├── test_cpu.c               ← 29 tests: CSV, FITS, integration, Lanczos CPU
-│   ├── test_gpu.cu              ← 5 tests: GPU Lanczos (2 known pre-existing failures)
+│   ├── test_gpu.cu              ← 5 tests: GPU Lanczos (all passing)
 │   ├── test_star_detect.c       ← 21 tests: CCL + CoM + Moffat conv + threshold
 │   ├── test_ransac.c            ← 13 tests: DLT + RANSAC
 │   ├── test_debayer_cpu.c       ← 10 tests: VNG debayer CPU (all patterns + edge cases)
-│   └── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
+│   ├── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
+│   └── test_calibration.c       ← 26 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, bias sub, flat normalization)
 └── python/
     ├── stacker.py               ← Reference stacker: OpenCV Lanczos4 + kappa-sigma
     └── compute_transforms.py    ← Independently compute homographies via astroalign
@@ -152,6 +157,19 @@ RANSAC (2-column CSV only):
 
 Sensor:
       --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg
+
+Calibration (applied before debayering; bias and darkflat are mutually exclusive):
+      --dark <path>              Master dark FITS or text list of dark FITS paths
+      --bias <path>              Master bias FITS or text list of bias FITS paths
+      --flat <path>              Master flat FITS or text list of flat FITS paths
+      --darkflat <path>          Master darkflat FITS or text list of darkflat FITS paths
+      --save-master-frames <dir> Directory to save generated masters (default: ./master)
+      --dark-method <method>     winsorized-mean | median (default: winsorized-mean)
+      --bias-method <method>     winsorized-mean | median (default: winsorized-mean)
+      --flat-method <method>     winsorized-mean | median (default: winsorized-mean)
+      --darkflat-method <method> winsorized-mean | median (default: winsorized-mean)
+      --wsor-clip <float>        Winsorized mean clipping fraction per side (default: 0.1)
+                                 Valid range: [0.0, 0.49]
 ```
 
 ### Input CSV Format
@@ -318,6 +336,52 @@ DsoError integration_gpu_finalize(IntegrationGpuCtx *ctx, int n_frames,
 
 `IntegrationGpuCtx` is now a **public** struct (in the header) exposing `d_frames[]`, `d_xmap`, `d_ymap` so `pipeline.cu` can fill frames without extra indirection. Mini-batch approximation: per-batch kappa-sigma combined with survivor-count-weighted mean across batches. All-clipped fallback uses raw (unclipped) per-pixel sum.
 
+### `calibration.h`
+
+```c
+typedef enum { CALIB_WINSORIZED_MEAN = 0, CALIB_MEDIAN } CalibMethod;
+
+typedef struct CalibFrames {
+    Image dark;    /* master dark (bias-subtracted if bias was provided) */
+    Image flat;    /* master flat (bias/darkflat-subtracted, normalized to mean ≈ 1.0) */
+    int   has_dark;
+    int   has_flat;
+} CalibFrames;
+
+DsoError calib_load_or_generate(
+    const char *dark_path,    CalibMethod dark_method,
+    const char *bias_path,    CalibMethod bias_method,
+    const char *flat_path,    CalibMethod flat_method,
+    const char *darkflat_path, CalibMethod darkflat_method,
+    const char *save_dir,
+    float        wsor_clip,   /* clipping fraction per side [0.0, 0.49], default 0.1 */
+    CalibFrames *calib_out);
+
+DsoError calib_apply_cpu(Image *img, const CalibFrames *calib);
+void     calib_free(CalibFrames *calib);
+```
+
+- Each path argument accepts either a FITS file (loaded directly as master) or a text file (one FITS path per line; frames are stacked).
+- Generated masters are saved to `<save_dir>/master_{dark,flat,bias,darkflat}.fits`.
+- `calib_apply_cpu`: validates dimensions, subtracts dark, divides by flat (in-place). Returns `DSO_ERR_INVALID_ARG` on dimension mismatch.
+
+### `calibration_gpu.h`
+
+```c
+typedef struct {
+    float *d_dark;   /* device dark master (NULL = not used) */
+    float *d_flat;   /* device flat master (NULL = not used) */
+    int    W, H;
+} CalibGpuCtx;
+
+DsoError calib_gpu_init(const CalibFrames *calib, CalibGpuCtx **ctx_out);
+void     calib_gpu_cleanup(CalibGpuCtx *ctx);
+DsoError calib_gpu_apply_d2d(float *d_frame, int W, int H,
+                               const CalibGpuCtx *ctx, cudaStream_t stream);
+```
+
+Single CUDA kernel (256 threads/block): subtract dark, divide by flat, dead-pixel guard (flat < 1e-6 → 0). Upload happens once in `pipeline_run` before Phase 1.
+
 ### `pipeline.h`
 
 ```c
@@ -356,6 +420,18 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 - **Moffat constant memory cap**: max kernel radius is 15 (alpha ≤ 5 → R = ceil(3·alpha) ≤ 15, diameter 31, 961 floats × 4 = ~3.8 KB within 64 KB constant limit).
 - **Phase 1 reads each file twice**: once for star detection, once for Phase 2 transform+integration. Acceptable trade-off versus caching all frames in RAM.
 - **CPU vs GPU output agreement**: not bit-identical due to different Moffat conv precision (→ slightly different homographies), different Lanczos implementations (nppi vs hand-coded), and different integration paths. Empirical PSNR ≈ 44.6 dB; mean relative error ≈ 0.25% in the interior on 10 × 4656×3520 frames.
+- **`lanczos_transform_cpu` weight_sum guard**: uses `fabsf(weight_sum) < 1e-6f`, not `== 0.f`. When the Lanczos kernel center tap lands exactly on an integer OOB coordinate, `sinf(k·π)` floating-point error leaves `weight_sum` near but not exactly zero; an exact equality test would divide by ≈−1e-9 and amplify noise to ≈1560. The threshold correctly returns 0 for the OOB case.
+- **`lanczos_transform_gpu` singular-H guard**: checks `det(H) < 1e-12` before any CUDA allocation and returns `DSO_ERR_INVALID_ARG`. The `invert_homography_h` helper in the same file is dead code (kept for reference).
+- **GPU kappa-sigma variance uses `double`**: `kappa_sigma_batch_kernel` accumulates squared deviations into `double sq` (not `float`). For pixel values up to 65535 and batch size 64, max sq ≈ 2.75×10¹¹ exceeds float precision; using double matches the CPU `integrate_kappa_sigma` implementation.
+- **Calibration formula**: `light_cal = (light - dark_master) / flat_master`. Applied before debayering. With bias: `dark_master = stack(dark_raw - bias)`, `flat_master = stack(normalize(flat_raw - bias))`. With darkflat: `dark_master = stack(dark_raw)`, `flat_master = stack(normalize(flat_raw - darkflat))`. Bias and darkflat are mutually exclusive.
+- **Winsorized mean (γ=0.1)**: Sort N pixel values per pixel; replace bottom `g = floor(0.1·N)` values with `vals[g]` and top g with `vals[N-1-g]`; compute mean using `double` accumulator to prevent overflow for N·(65535)² accumulations. Insertion sort used for per-pixel sort (N typically < 100).
+- **Flat normalization**: Each flat frame is divided by its own (double-precision) mean before stacking. The stacked master flat has mean ≈ 1.0 and is used directly as a divisor.
+- **Dead-pixel guard**: Flat pixels below `1e-6f` → output 0 (not divide). Both CPU and GPU paths apply this guard.
+- **Calibration dimension validation**: `calib_apply_cpu` and `calib_gpu_apply_d2d` return `DSO_ERR_INVALID_ARG` if the frame dimensions do not match the master frame dimensions.
+- **FITS vs. text-list detection**: `is_fits_file()` probes with CFITSIO `fits_open_file`; if it succeeds the path is a pre-computed master, otherwise it is treated as a newline-separated text frame list.
+- **CalibFrames forward declaration**: `pipeline.h` uses `typedef struct CalibFrames CalibFrames` (forward decl with tag) so that it can hold a pointer without pulling in `calibration.h` and its CFITSIO dependency into all translation units. `calibration.h` defines `typedef struct CalibFrames { ... } CalibFrames` with the same tag — both declarations must agree on the tag name.
+- **GPU calibration timing**: `calib_gpu_init` uploads masters once at the start of `pipeline_run`. `calib_gpu_apply_d2d` is inserted on `stream_compute` after `cudaStreamWaitEvent(e_h2d[slot])` and before `debayer_gpu_d2d`, in both Phase 1 and Phase 2.
+- **VNG debayer gradients are one-sided**: each of the 8 directional gradients samples only the pixel in its named direction — `g[i] = |P(neighbor_i) − P(0,0)|`. The previous two-sided formula `|A−center| + |center−B|` made opposite pairs equal (g[4]≡g[0] etc.), reducing effective direction selection from 8-way to 4-way. Fixed in both `debayer_gpu.cu` and `debayer_cpu.c`.
 
 ---
 

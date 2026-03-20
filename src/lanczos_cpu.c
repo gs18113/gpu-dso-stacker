@@ -134,7 +134,7 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
                 }
             }
 
-            dst->data[dy * DW + dx] = (weight_sum == 0.f) ? 0.f : accum / weight_sum;
+            dst->data[dy * DW + dx] = (fabsf(weight_sum) < 1e-6f) ? 0.f : accum / weight_sum;
         }
     }
 

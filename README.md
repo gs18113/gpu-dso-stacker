@@ -26,6 +26,13 @@
 
 When the input CSV already contains pre-computed homographies (11-column format), stages 1–3 are skipped for both paths.
 
+**Calibration pre-processing** (applied to every raw frame before debayering when `--dark`/`--flat` are provided):
+
+| Step | What it does |
+|---|---|
+| Subtract dark master | Removes thermal noise and hot pixels |
+| Divide by flat master | Corrects pixel sensitivity, vignetting, and dust |
+
 ---
 
 ## Build
@@ -106,6 +113,19 @@ RANSAC (2-column CSV only):
       --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)
       --match-radius <float>     Star matching search radius px (default: 30.0)
 
+Calibration (applied before debayering; bias and darkflat are mutually exclusive):
+      --dark <path>              Master dark FITS or text list of dark FITS paths
+      --bias <path>              Master bias FITS or text list of bias FITS paths
+      --flat <path>              Master flat FITS or text list of flat FITS paths
+      --darkflat <path>          Master darkflat FITS or text list of darkflat FITS paths
+      --save-master-frames <dir> Directory to save generated masters (default: ./master)
+      --dark-method <method>     winsorized-mean | median (default: winsorized-mean)
+      --bias-method <method>     winsorized-mean | median (default: winsorized-mean)
+      --flat-method <method>     winsorized-mean | median (default: winsorized-mean)
+      --darkflat-method <method> winsorized-mean | median (default: winsorized-mean)
+      --wsor-clip <float>        Winsorized mean clipping fraction per side (default: 0.1)
+                                 Valid range: [0.0, 0.49]
+
 Sensor:
       --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg
                                  (default: auto-detect from FITS BAYERPAT keyword)
@@ -137,6 +157,25 @@ Stack a color camera image (RGGB sensor) with tighter outlier rejection:
 dso_stacker -f frames.csv -o stacked.fits --bayer rggb --kappa 2.5 --iterations 5
 ```
 
+Stack with calibration frames generated from lists (bias + dark + flat):
+
+```bash
+dso_stacker -f frames.csv -o stacked.fits \
+    --bias  bias_frames.txt \
+    --dark  dark_frames.txt \
+    --flat  flat_frames.txt \
+    --save-master-frames ./masters
+```
+
+Stack with pre-computed master FITS files and darkflat instead of bias:
+
+```bash
+dso_stacker -f frames.csv -o stacked.fits \
+    --dark     master_dark.fits \
+    --flat     flat_frames.txt \
+    --darkflat master_darkflat.fits
+```
+
 ---
 
 ## Tests
@@ -153,6 +192,7 @@ cd build && ctest --output-on-failure -V
 | `test_ransac` | 13 | DLT homography + RANSAC |
 | `test_debayer_cpu` | 10 | VNG debayer CPU: all patterns, uniform, non-uniform, edge cases |
 | `test_integration_gpu` | 9 | GPU mini-batch kappa-sigma |
+| `test_calibration` | 26 | CPU calibration: dark/flat apply, dead-pixel guard, dimension validation, FITS master loading, frame-list stacking, winsorized mean, median, bias/darkflat subtraction, flat normalization |
 
 GPU test suites return exit code 77 (CTest SKIP) when no CUDA device is found.
 

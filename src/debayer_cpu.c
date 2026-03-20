@@ -82,22 +82,14 @@ DsoError debayer_cpu(const float *src, float *dst,
              * Each gradient uses ±2-pixel offsets so both ends sample the same
              * channel (they span one full 2×2 CFA period). */
             float g[8];
-            g[0] = fabsf(src_at(src,x, y-2,W,H) - src_at(src,x,   y,  W,H))
-                 + fabsf(src_at(src,x, y,  W,H) - src_at(src,x,   y+2,W,H)); /* N  */
-            g[1] = fabsf(src_at(src,x-2,y-2,W,H) - src_at(src,x,  y,  W,H))
-                 + fabsf(src_at(src,x,  y,  W,H) - src_at(src,x+2,y+2,W,H)); /* NE */
-            g[2] = fabsf(src_at(src,x-2,y,  W,H) - src_at(src,x,  y,  W,H))
-                 + fabsf(src_at(src,x,  y,  W,H) - src_at(src,x+2,y,  W,H)); /* E  */
-            g[3] = fabsf(src_at(src,x-2,y+2,W,H) - src_at(src,x,  y,  W,H))
-                 + fabsf(src_at(src,x,  y,  W,H) - src_at(src,x+2,y-2,W,H)); /* SE */
-            g[4] = fabsf(src_at(src,x, y+2,W,H) - src_at(src,x,  y,  W,H))
-                 + fabsf(src_at(src,x, y,  W,H) - src_at(src,x,  y-2,W,H)); /* S  */
-            g[5] = fabsf(src_at(src,x+2,y+2,W,H) - src_at(src,x,  y,  W,H))
-                 + fabsf(src_at(src,x,  y,  W,H) - src_at(src,x-2,y-2,W,H)); /* SW */
-            g[6] = fabsf(src_at(src,x+2,y,  W,H) - src_at(src,x,  y,  W,H))
-                 + fabsf(src_at(src,x,  y,  W,H) - src_at(src,x-2,y,  W,H)); /* W  */
-            g[7] = fabsf(src_at(src,x+2,y-2,W,H) - src_at(src,x,  y,  W,H))
-                 + fabsf(src_at(src,x,  y,  W,H) - src_at(src,x-2,y+2,W,H)); /* NW */
+            g[0] = fabsf(src_at(src,x,   y-2,W,H) - src_at(src,x, y,W,H));  /* N  */
+            g[1] = fabsf(src_at(src,x+2, y-2,W,H) - src_at(src,x, y,W,H));  /* NE */
+            g[2] = fabsf(src_at(src,x+2, y,  W,H) - src_at(src,x, y,W,H));  /* E  */
+            g[3] = fabsf(src_at(src,x+2, y+2,W,H) - src_at(src,x, y,W,H));  /* SE */
+            g[4] = fabsf(src_at(src,x,   y+2,W,H) - src_at(src,x, y,W,H));  /* S  */
+            g[5] = fabsf(src_at(src,x-2, y+2,W,H) - src_at(src,x, y,W,H));  /* SW */
+            g[6] = fabsf(src_at(src,x-2, y,  W,H) - src_at(src,x, y,W,H));  /* W  */
+            g[7] = fabsf(src_at(src,x-2, y-2,W,H) - src_at(src,x, y,W,H));  /* NW */
 
             /* ---- 3. Gradient threshold τ = mean + min ---- */
             float gsum = 0.f, gmin = g[0];

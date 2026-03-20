@@ -122,14 +122,14 @@ __global__ static void vng_debayer_kernel(
      * which guarantees same-channel comparisons.
      */
     float g[8];
-    g[0] = fabsf(P( 0,-2) - P( 0, 0)) + fabsf(P( 0, 0) - P( 0, 2)); /* N */
-    g[1] = fabsf(P(-2,-2) - P( 0, 0)) + fabsf(P( 0, 0) - P( 2, 2)); /* NW-SE diag */
-    g[2] = fabsf(P(-2, 0) - P( 0, 0)) + fabsf(P( 0, 0) - P( 2, 0)); /* E */
-    g[3] = fabsf(P(-2, 2) - P( 0, 0)) + fabsf(P( 0, 0) - P( 2,-2)); /* NE-SW diag */
-    g[4] = fabsf(P( 0, 2) - P( 0, 0)) + fabsf(P( 0, 0) - P( 0,-2)); /* S */
-    g[5] = fabsf(P( 2, 2) - P( 0, 0)) + fabsf(P( 0, 0) - P(-2,-2)); /* SW */
-    g[6] = fabsf(P( 2, 0) - P( 0, 0)) + fabsf(P( 0, 0) - P(-2, 0)); /* W */
-    g[7] = fabsf(P( 2,-2) - P( 0, 0)) + fabsf(P( 0, 0) - P(-2, 2)); /* NW */
+    g[0] = fabsf(P( 0,-2) - P( 0, 0));  /* N  */
+    g[1] = fabsf(P( 2,-2) - P( 0, 0));  /* NE */
+    g[2] = fabsf(P( 2, 0) - P( 0, 0));  /* E  */
+    g[3] = fabsf(P( 2, 2) - P( 0, 0));  /* SE */
+    g[4] = fabsf(P( 0, 2) - P( 0, 0));  /* S  */
+    g[5] = fabsf(P(-2, 2) - P( 0, 0));  /* SW */
+    g[6] = fabsf(P(-2, 0) - P( 0, 0));  /* W  */
+    g[7] = fabsf(P(-2,-2) - P( 0, 0));  /* NW */
 
     /* ---- 3. Threshold τ = mean + min ---- */
     float gsum = 0.f, gmin = g[0];

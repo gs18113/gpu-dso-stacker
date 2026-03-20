@@ -165,14 +165,21 @@ DsoError lanczos_transform_gpu(const Image *src, Image *dst, const Homography *H
 {
     if (!src || !dst || !H || !src->data || !dst->data) return DSO_ERR_INVALID_ARG;
 
+    /* Reject singular homographies before touching any GPU resources. */
+    const double *hi = H->h;
+    double det = hi[0]*(hi[4]*hi[8] - hi[5]*hi[7])
+               - hi[1]*(hi[3]*hi[8] - hi[5]*hi[6])
+               + hi[2]*(hi[3]*hi[7] - hi[4]*hi[6]);
+    if (fabs(det) < 1e-12) {
+        fprintf(stderr, "lanczos_transform_gpu: singular homography (det=%g)\n", det);
+        return DSO_ERR_INVALID_ARG;
+    }
+
     int SW = src->width,  SH = src->height;
     int DW = dst->width,  DH = dst->height;
     size_t src_bytes = (size_t)SW * SH * sizeof(float);
     size_t dst_bytes = (size_t)DW * DH * sizeof(float);
     size_t map_bytes = (size_t)DW * DH * sizeof(float);
-
-    /* H is already the backward map (ref → src); use it directly. */
-    const double *hi = H->h;
 
     float *d_src = NULL, *d_dst = NULL, *d_xmap = NULL, *d_ymap = NULL;
     cudaError_t cerr;
