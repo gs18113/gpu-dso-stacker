@@ -77,6 +77,11 @@ static __inline void compat_usleep(unsigned int us)
 }
 #define usleep(us) compat_usleep(us)
 
-/* MSVC does not have <unistd.h>; provide a no-op replacement. */
+/*
+ * isatty / fileno — POSIX terminal detection vs MSVC _isatty / _fileno.
+ */
+#include <io.h>
+#define isatty(fd) _isatty(fd)
+#define fileno(f)  _fileno(f)
 
 #endif /* _MSC_VER */

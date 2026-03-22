@@ -21,14 +21,14 @@ from __future__ import annotations
 import subprocess
 from typing import Optional
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 
 
 class SubprocessRunner(QThread):
     """Run dso_stacker in a background thread and stream its output."""
 
-    line_ready = pyqtSignal(str)   # one output line at a time
-    finished   = pyqtSignal(int)   # process exit code
+    line_ready = Signal(str)   # one output line at a time
+    finished   = Signal(int)   # process exit code
 
     def __init__(self, argv: list[str], parent=None) -> None:
         super().__init__(parent)

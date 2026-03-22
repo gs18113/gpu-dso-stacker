@@ -9,11 +9,13 @@ frame added becomes the default reference.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
+    QHeaderView,
     QRadioButton,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -36,7 +38,7 @@ _N_BASE_COLS = 4  # original FrameTableWidget columns
 class LightTab(QWidget):
     """Light frames tab with reference-frame radio buttons."""
 
-    files_changed = pyqtSignal()
+    files_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -51,9 +53,8 @@ class LightTab(QWidget):
         self._table.insertColumn(COL_REF)
         self._table.setHorizontalHeaderItem(
             COL_REF,
-            __import__("PyQt6.QtWidgets", fromlist=["QTableWidgetItem"]).QTableWidgetItem("Ref"),
+            QTableWidgetItem("Ref"),
         )
-        from PyQt6.QtWidgets import QHeaderView
         self._table.horizontalHeader().setSectionResizeMode(
             COL_REF, QHeaderView.ResizeMode.ResizeToContents
         )

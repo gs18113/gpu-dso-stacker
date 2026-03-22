@@ -22,9 +22,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QStandardItem, QStandardItemModel
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QStandardItem, QStandardItemModel
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -52,7 +52,7 @@ class StackingOptionsTab(QWidget):
     """Stacking-options tab with all CLI parameters and conditional visibility."""
 
     # Emitted whenever the output path text changes (so MainWindow can sync).
-    output_path_changed = pyqtSignal(str)
+    output_path_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

@@ -20,9 +20,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QThreadPool, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QThreadPool, Signal
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
@@ -58,7 +58,7 @@ def _is_fits(url_path: str) -> bool:
 class FrameTableWidget(QWidget):
     """Frame list with drag-and-drop, toolbar, and async FITS metadata loading."""
 
-    files_changed = pyqtSignal()
+    files_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -213,7 +213,7 @@ class FrameTableWidget(QWidget):
 class _InnerTable(QTableWidget):
     """QTableWidget that accepts FITS-file drops from the OS file manager."""
 
-    files_dropped = pyqtSignal(list)
+    files_dropped = Signal(list)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

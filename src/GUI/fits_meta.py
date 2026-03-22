@@ -15,7 +15,7 @@ FITS header format (FITS Standard 4.0 §4):
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QObject, QRunnable, pyqtSignal, pyqtSlot
+from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 _BLOCK = 2880
 _CARD  = 80
@@ -52,7 +52,7 @@ def _read_fits_keywords(path: str, want: set[str]) -> dict[str, str]:
 
 class _MetaSignals(QObject):
     """Carrier object for signals, since QRunnable doesn't inherit QObject."""
-    result = pyqtSignal(int, dict)   # (row, meta_dict)
+    result = Signal(int, dict)   # (row, meta_dict)
 
 
 class FitsMetaWorker(QRunnable):
@@ -72,7 +72,7 @@ class FitsMetaWorker(QRunnable):
         self.path = path
         self.signals = _MetaSignals()
 
-    @pyqtSlot()
+    @Slot()
     def run(self) -> None:
         meta: dict = {"width": None, "height": None, "bayer": None}
         kw = _read_fits_keywords(self.path, {"NAXIS1", "NAXIS2", "BAYERPAT"})

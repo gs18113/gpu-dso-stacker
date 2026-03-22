@@ -41,6 +41,8 @@ When the input CSV already contains homographies (11-column format), stages 1–
 
 ```
 gpu-dso-stacker/
+├── LICENSE                      ← Proprietary license
+├── THIRD_PARTY_LICENSES         ← Third-party license texts and attribution notices
 ├── CMakeLists.txt               ← CMake build definition
 ├── main.cpp                     ← CLI entry point (getopt_long)
 ├── bench.sh                     ← GPU vs CPU benchmark script
@@ -583,7 +585,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 - PyInstaller spec: `dso_stacker_gui.spec`
 - Bundles CLI binary in `bin/` subdirectory alongside the GUI executable
 - `src/GUI/utils.py:_binary_path()` resolves binary via: (1) PyInstaller frozen `<exe_dir>/bin/`, (2) dev layout `<repo>/build/`
-- Hidden imports: `PyQt6.sip`, `PyQt6.QtCore`, `PyQt6.QtGui`, `PyQt6.QtWidgets`
+- Hidden imports: `shiboken6`, `PySide6.QtCore`, `PySide6.QtGui`, `PySide6.QtWidgets`
 
 ### Release Artifacts
 
@@ -641,12 +643,12 @@ astropy, numpy, opencv-python (cv2), astroalign
 
 ## GUI Frontend (`src/GUI/`)
 
-A PyQt6 desktop frontend for the `dso_stacker` CLI.
+A PySide6 desktop frontend for the `dso_stacker` CLI.
 
 ### Launch
 
 ```bash
-pip install PyQt6 pyyaml astropy   # one-time
+pip install PySide6 pyyaml astropy   # one-time
 python src/GUI/main.py
 ```
 

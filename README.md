@@ -309,14 +309,14 @@ GPU mini-batch vs single-pass CPU kappa-sigma, slight homography differences fro
 
 ## GUI Frontend
 
-A PyQt6 desktop application wrapping the CLI. Provides drag-and-drop frame management, all stacking options with conditional visibility, and YAML project save/load.
+A PySide6 desktop application wrapping the CLI. Provides drag-and-drop frame management, all stacking options with conditional visibility, and YAML project save/load.
 
 Pre-built GUI bundles (Linux and Windows) are available on the [Releases](https://github.com/youruser/gpu-dso-stacker/releases) page — no Python installation required.
 
 ### Install (from source)
 
 ```bash
-pip install PyQt6 pyyaml
+pip install PySide6 pyyaml
 ```
 
 ### Launch

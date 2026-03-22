@@ -1,0 +1,186 @@
+THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
+=============================================
+
+This project incorporates components from the projects listed below. The
+original copyright notices and license terms are reproduced below. Changes
+may have been made to the original software as part of integrating it into
+this project.
+
+================================================================================
+1. CFITSIO — FITS I/O Library
+   https://heasarc.gsfc.nasa.gov/fitsio/
+================================================================================
+
+Copyright (Unpublished-all rights reserved under the copyright laws of
+the United States), U.S. Government as represented by the Administrator
+of the National Aeronautics and Space Administration. No copyright is
+claimed in the United States under Title 17, U.S. Code.
+
+Permission to freely use, copy, modify, and distribute this software and
+its documentation without fee is hereby granted, provided that this
+copyright notice and disclaimer of warranty appears in all copies.
+
+DISCLAIMER:
+
+THE SOFTWARE IS PROVIDED 'AS IS' WITHOUT ANY WARRANTY OF ANY KIND,
+EITHER EXPRESSED, IMPLIED, OR STATUTORY, INCLUDING, BUT NOT LIMITED TO,
+ANY WARRANTY THAT THE SOFTWARE WILL CONFORM TO SPECIFICATIONS, ANY
+IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+AND FREEDOM FROM INFRINGEMENT, AND ANY WARRANTY THAT THE DOCUMENTATION
+WILL CONFORM TO THE SOFTWARE, OR ANY WARRANTY THAT THE SOFTWARE WILL BE
+ERROR FREE. IN NO EVENT SHALL NASA BE LIABLE FOR ANY DAMAGES, INCLUDING,
+BUT NOT LIMITED TO, DIRECT, INDIRECT, SPECIAL OR CONSEQUENTIAL DAMAGES,
+ARISING OUT OF, RESULTING FROM, OR IN ANY WAY CONNECTED WITH THIS
+SOFTWARE, WHETHER OR NOT BASED UPON WARRANTY, CONTRACT, TORT, OR
+OTHERWISE, WHETHER OR NOT INJURY WAS SUSTAINED BY PERSONS OR PROPERTY OR
+OTHERWISE, AND WHETHER OR NOT LOSS WAS SUSTAINED FROM, OR AROSE OUT OF
+THE RESULTS OF, OR USE OF, THE SOFTWARE OR SERVICES PROVIDED HEREUNDER.
+
+================================================================================
+2. libtiff — TIFF Library
+   https://libtiff.gitlab.io/libtiff/
+================================================================================
+
+Copyright (c) 1988-1997 Sam Leffler
+Copyright (c) 1991-1997 Silicon Graphics, Inc.
+
+Permission to use, copy, modify, distribute, and sell this software and
+its documentation for any purpose is hereby granted without fee, provided
+that (i) the above copyright notices and this permission notice appear in
+all copies of the software and related documentation, and (ii) the names
+of Sam Leffler and Silicon Graphics may not be used in any advertising or
+publicity relating to the software without the specific, prior written
+permission of Sam Leffler and Silicon Graphics.
+
+THE SOFTWARE IS PROVIDED "AS-IS" AND WITHOUT WARRANTY OF ANY KIND,
+EXPRESS, IMPLIED OR OTHERWISE, INCLUDING WITHOUT LIMITATION, ANY WARRANTY
+OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+
+IN NO EVENT SHALL SAM LEFFLER OR SILICON GRAPHICS BE LIABLE FOR ANY
+SPECIAL, INCIDENTAL, INDIRECT OR CONSEQUENTIAL DAMAGES OF ANY KIND, OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER OR NOT ADVISED OF THE POSSIBILITY OF DAMAGE, AND ON ANY THEORY OF
+LIABILITY, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+
+================================================================================
+3. libpng — PNG Reference Library
+   http://www.libpng.org/pub/png/libpng.html
+================================================================================
+
+Copyright (c) 1995-2024 The PNG Reference Library Authors.
+Copyright (c) 1998-2018 Glenn Randers-Pehrson
+Copyright (c) 2018-2024 Cosmin Truta
+
+The PNG Reference Library is supplied "AS IS". The Contributing Authors
+and Group 42, Inc. disclaim all warranties, expressed or implied,
+including, without limitation, the warranties of merchantability and of
+fitness for any purpose. The Contributing Authors and Group 42, Inc.
+assume no liability for direct, indirect, incidental, special, exemplary,
+or consequential damages, which may result from the use of the PNG
+Reference Library, even if advised of the possibility of such damage.
+
+Permission is hereby granted to use, copy, modify, and distribute this
+source code, or portions hereof, for any purpose, without fee, subject
+to the following restrictions:
+
+  1. The origin of this source code must not be misrepresented.
+
+  2. Altered versions must be plainly marked as such and must not be
+     misrepresented as being the original source.
+
+  3. This Copyright notice may not be removed or altered from any source
+     or altered source distribution.
+
+The Contributing Authors and Group 42, Inc. specifically permit, without
+fee, and encourage the use of this source code as a component to
+supporting the PNG file format in commercial products. If you use this
+source code in a product, acknowledgment is not required but would be
+appreciated.
+
+================================================================================
+4. NVIDIA CUDA Toolkit and NPP (NVIDIA Performance Primitives)
+   https://developer.nvidia.com/cuda-toolkit
+================================================================================
+
+This software uses the NVIDIA CUDA Toolkit and NVIDIA Performance
+Primitives (NPP) library, which are subject to the NVIDIA Software
+Development Kit End User License Agreement (EULA).
+
+The full EULA text is available at:
+  https://docs.nvidia.com/cuda/eula/index.html
+
+NVIDIA Attribution Notice:
+  This software contains source code provided by NVIDIA Corporation.
+
+Redistribution of CUDA runtime libraries and NPP libraries is permitted
+under the terms of the NVIDIA CUDA EULA (Attachment A — List of
+Redistributable CUDA Software). End users must agree to the NVIDIA EULA
+terms when using this software.
+
+NVIDIA, the NVIDIA logo, CUDA, and NPP are trademarks and/or registered
+trademarks of NVIDIA Corporation in the U.S. and other countries.
+
+================================================================================
+5. getopt_port — Portable getopt / getopt_long
+   (Bundled in src/getopt_port.c and include/getopt_port.h)
+================================================================================
+
+Derived from public-domain implementations (musl libc, NetBSD).
+
+Copyright (c) 2012-2024 Various contributors
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in
+   the documentation and/or other materials provided with the
+   distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED.
+
+================================================================================
+6. PySide6 — Qt for Python (GUI only)
+   https://wiki.qt.io/Qt_for_Python
+================================================================================
+
+Copyright (C) 2022 The Qt Company Ltd.
+
+PySide6 is licensed under the GNU Lesser General Public License version 3
+(LGPLv3). The full text of the LGPL v3 is available at:
+  https://www.gnu.org/licenses/lgpl-3.0.html
+
+Qt itself (the C++ framework) is used under the LGPL v3.
+  https://www.qt.io/licensing/
+
+================================================================================
+7. PyYAML (GUI only)
+   https://pyyaml.org/
+================================================================================
+
+Copyright (c) 2017-2021 Ingy dot Net
+Copyright (c) 2006-2016 Kirill Simonov
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.

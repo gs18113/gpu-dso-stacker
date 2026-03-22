@@ -9,14 +9,14 @@ for master generation.
 
 from __future__ import annotations
 
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import pyqtSignal
+from PySide6.QtCore import Signal
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -30,7 +30,7 @@ _METHODS = ["winsorized-mean", "median"]
 class CalibTab(QWidget):
     """Calibration frame tab: file list + stacking method selector."""
 
-    files_changed = pyqtSignal()
+    files_changed = Signal()
 
     def __init__(self, tab_name: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)

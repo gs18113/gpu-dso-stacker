@@ -137,7 +137,7 @@ jobs:
           path: bundled_bin/
 
       - name: Install Python dependencies
-        run: pip install PyQt6 pyyaml pyinstaller
+        run: pip install PySide6 pyyaml pyinstaller
 
       - name: Package GUI
         run: |
@@ -172,7 +172,7 @@ jobs:
           path: bundled_bin/
 
       - name: Install Python dependencies
-        run: pip install PyQt6 pyyaml pyinstaller
+        run: pip install PySide6 pyyaml pyinstaller
 
       - name: Package GUI
         run: pyinstaller dso_stacker_gui.spec
