@@ -15,6 +15,7 @@
  */
 
 #include "star_detect_cpu.h"
+#include "compat.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -62,7 +63,7 @@ DsoError star_detect_cpu_moffat_convolve(const float        *src,
     for (int i = 0; i < kn; i++) kern[i] /= ksum;
 
     /* 2-D convolution with zero-boundary padding */
-#pragma omp parallel for collapse(2) schedule(static)
+OMP_PARALLEL_FOR_COLLAPSE2
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             float acc = 0.f;

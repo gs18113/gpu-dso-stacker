@@ -55,7 +55,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#ifdef _MSC_VER
+#include "compat.h"
+#else
 #include <getopt.h>
+#endif
 
 #include "dso_types.h"
 #include "csv_parser.h"

@@ -47,6 +47,8 @@ gpu-dso-stacker/
 ├── include/
 │   ├── dso_types.h              ← Shared types: Image, Homography, FrameInfo, DsoError,
 │   │                               StarPos, StarList, BayerPattern, MoffatParams
+│   ├── compat.h                 ← POSIX compatibility shims for MSVC (getopt, strtok_r, rand_r, mkdir, usleep, OMP collapse)
+│   ├── getopt_port.h            ← Portable getopt_long for MSVC (BSD-licensed)
 │   ├── fits_io.h                ← FITS load/save/free + fits_save_rgb + fits_get_bayer_pattern
 │   ├── image_io.h               ← Format-agnostic save layer: ImageSaveOptions, image_save, image_save_rgb
 │   ├── csv_parser.h             ← CSV frame-list parser (2-col and 11-col formats)
@@ -78,7 +80,8 @@ gpu-dso-stacker/
 │   ├── calibration.c            ← Master frame generation (winsorized mean / median) + CPU apply
 │   ├── calibration_gpu.cu       ← GPU calibration kernel (dark subtract + flat divide, D2D)
 │   ├── pipeline.cu              ← GPU orchestrator; dispatches to pipeline_cpu if --cpu
-│   └── pipeline_cpu.c           ← Pure-C CPU orchestrator (no CUDA)
+│   ├── pipeline_cpu.c           ← Pure-C CPU orchestrator (no CUDA)
+│   └── getopt_port.c            ← Portable getopt_long (compiled only on MSVC)
 ├── tests/
 │   ├── test_framework.h         ← Minimal test harness (ASSERT_*, RUN, SUITE)
 │   ├── test_cpu.c               ← 29 tests: CSV, FITS, integration, Lanczos CPU
@@ -91,6 +94,11 @@ gpu-dso-stacker/
 │   ├── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
 │   ├── test_color.c             ← 33 tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
 │   └── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
+├── .github/workflows/
+│   ├── ci.yml                   ← CI: build + test on push/PR (Linux + Windows)
+│   └── release.yml              ← Release: build + package + GitHub Release on tag v*
+├── vcpkg.json                   ← vcpkg dependency manifest (Windows builds)
+├── dso_stacker_gui.spec         ← PyInstaller spec for GUI packaging
 └── python/
     ├── stacker.py               ← Reference stacker: OpenCV Lanczos4 + kappa-sigma
     ├── compute_transforms.py    ← Independently compute homographies via astroalign
@@ -105,16 +113,16 @@ gpu-dso-stacker/
 
 | Dependency | Version | Location |
 |---|---|---|
-| CFITSIO | 4.6.3 | `/home/donut/.local` |
-| CUDA Toolkit | 12.x | `/usr/local/cuda` |
+| CFITSIO | 4.6.3 | `/home/donut/.local` (Linux); vcpkg (Windows) |
+| CUDA Toolkit | 12.x | `/usr/local/cuda` (Linux); installer (Windows) |
 | NPP+ (`libnppig`) | bundled with CUDA | `/usr/local/cuda/lib64` |
-| OpenMP | any | system (GCC) |
-| libtiff | 4.5.1 | system (`pkg-config libtiff-4`) |
-| libpng | 1.6.43 | system (`pkg-config libpng`) |
+| OpenMP | any | system (GCC on Linux; MSVC on Windows) |
+| libtiff | 4.5.1 | system pkg-config (Linux); vcpkg (Windows) |
+| libpng | 1.6.43 | system pkg-config (Linux); vcpkg (Windows) |
 | CMake | >= 3.18 | system |
-| pkg-config | any | system |
+| pkg-config | any | system (Linux only) |
 
-### Build
+### Build (Linux)
 
 ```bash
 # Configure (Debug)
@@ -132,8 +140,35 @@ cmake --build build --parallel $(nproc)
 ./build/dso_stacker
 ```
 
-CUDA architectures are hardcoded to `86;89` (RTX 30xx / 40xx) in `CMakeLists.txt`.
-Adjust `CUDA_ARCHITECTURES` if targeting a different GPU family.
+### Build (Windows)
+
+Requires Visual Studio 2022, CUDA Toolkit 12.x, and [vcpkg](https://vcpkg.io/).
+
+```powershell
+vcpkg install cfitsio tiff libpng --triplet x64-windows
+
+cmake -B build -G "Visual Studio 17 2022" -A x64 `
+      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+      -DCMAKE_CUDA_COMPILER="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/bin/nvcc.exe"
+
+cmake --build build --config Release --parallel
+```
+
+### CUDA Architectures
+
+Default: `86;89` (RTX 30xx / 40xx). Override at configure time:
+
+```bash
+cmake -B build -DDSO_CUDA_ARCHITECTURES="75;80;86;89;90" ...
+```
+
+### CFITSIO in CI
+
+Set `CFITSIO_PREFIX` env var to the CFITSIO install prefix so CMake can find it via pkg-config:
+
+```bash
+CFITSIO_PREFIX=/opt/cfitsio cmake -B build ...
+```
 
 ---
 
@@ -457,8 +492,8 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 - **CPU dispatch is a no-cost early return**: `pipeline_run()` checks `!config->use_gpu_lanczos` as its very first statement and returns `pipeline_run_cpu(...)`. No GPU resources are allocated, no CUDA context is created.
 - **`MoffatParams` lives in `dso_types.h`**: moved from `star_detect_gpu.h` (which includes `cuda_runtime.h`) so that `pipeline_cpu.c` and `star_detect_cpu.c` can use it without any CUDA dependency.
 - **OpenMP parallelism strategy**:
-  - `debayer_cpu`: `collapse(2) schedule(static)` — each pixel is independent.
-  - `star_detect_cpu_moffat_convolve`: `collapse(2) schedule(static)` — inner kernel loops serial per pixel.
+  - `debayer_cpu`: `OMP_PARALLEL_FOR_COLLAPSE2` (collapse(2) on GCC/Clang, outer-only on MSVC) — each pixel is independent.
+  - `star_detect_cpu_moffat_convolve`: `OMP_PARALLEL_FOR_COLLAPSE2` — inner kernel loops serial per pixel.
   - `star_detect_cpu_threshold`: three passes — `reduction(+:sum)`, `reduction(+:sq)`, then parallel mask write.
   - `lanczos_cpu`: `schedule(static)` on outer `dy` row loop.
   - `integrate_mean`: pixel-outer loop (restructured from frame-outer) — `schedule(static)`.
@@ -494,6 +529,70 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 - **Integer stretch semantics**: for INT8/INT16 output, `stretch_min`/`stretch_max` are NAN by default (auto min/max of the image). For RGB, the stretch bounds are derived globally across all three planes so that colour ratios are preserved. Setting both to the same value (hi == lo) produces a black image.
 - **FP16 TIFF precision**: values outside the IEEE 754 half-precision representable range (~[6e-8, 65504]) are flushed to ±0 / ±infinity. For astronomical data with wide dynamic range, prefer FP32 or INT16.
 - **TIFF RGB interleaving**: `PLANARCONFIG_CONTIG` (RGBRGB…) — the three `Image` planes are interleaved into a per-row buffer at write time, no full-image allocation.
+
+---
+
+## Cross-Platform Compatibility (`compat.h`)
+
+`include/compat.h` provides a POSIX-to-MSVC shim layer. On GCC/Clang it is effectively empty. Include it in any source file that uses POSIX APIs not available on MSVC.
+
+| POSIX API | MSVC Replacement | Files |
+|---|---|---|
+| `getopt_long` | `getopt_port.h/.c` (bundled BSD impl) | `main.cpp` |
+| `strtok_r` | `strtok_s` (same signature) | `csv_parser.c` |
+| `rand_r` | inline LCG (`compat_rand_r`) | `ransac.c` |
+| `mkdir(dir, mode)` | `_mkdir(dir)` via `<direct.h>` | `calibration.c` |
+| `usleep(us)` | `Sleep(us/1000)` via `<windows.h>` | `test_audit.c` |
+| `collapse(2)` pragma | `OMP_PARALLEL_FOR_COLLAPSE2` macro (drops collapse on MSVC OpenMP 2.0) | `debayer_cpu.c`, `star_detect_cpu.c` |
+
+**MSVC OpenMP**: MSVC only supports OpenMP 2.0. The `OMP_PARALLEL_FOR_COLLAPSE2` macro falls back to `#pragma omp parallel for schedule(static)` (outer loop only). Performance impact is minimal since the outer loop iterates over image rows (thousands of iterations).
+
+**`getopt_port.c`**: compiled only on MSVC via conditional `list(APPEND LIB_SOURCES ...)` in `CMakeLists.txt`. BSD-2-Clause licensed.
+
+**`test_framework.h`**: `SUMMARY()` macro uses `static inline` function instead of GCC statement expression `({...})` for MSVC compatibility.
+
+---
+
+## CI/CD
+
+### Workflows
+
+| File | Trigger | Jobs |
+|---|---|---|
+| `.github/workflows/ci.yml` | Push / PR to `main` | `linux`, `windows`, `gui-linux`, `gui-windows` |
+| `.github/workflows/release.yml` | Tag push `v*` | Same 4 build jobs + `create-release` |
+
+### Linux CI
+
+- Container: `nvidia/cuda:12.6.3-devel-ubuntu22.04` (includes nvcc, NPP, CUDA headers)
+- CFITSIO 4.6.3 built from source and cached at `/opt/cfitsio`
+- libtiff, libpng via `apt-get`
+- CUDA architectures: `61;70;75;80;86;89` (Pascal GTX 10xx through Ada Lovelace RTX 40xx)
+- GPU tests auto-skip via exit code 77 (no GPU on CI runners)
+
+### Windows CI
+
+- Runner: `windows-2022`
+- CUDA via `Jimver/cuda-toolkit@v0.2.19` with sub-packages: `nvcc, cudart, npp, npp_dev, visual_studio_integration`
+- C libraries via vcpkg (manifest: `vcpkg.json`): cfitsio, tiff, libpng
+- CMake generator: `Visual Studio 17 2022` with vcpkg toolchain file
+- GPU tests auto-skip
+
+### GUI Packaging
+
+- PyInstaller spec: `dso_stacker_gui.spec`
+- Bundles CLI binary in `bin/` subdirectory alongside the GUI executable
+- `src/GUI/utils.py:_binary_path()` resolves binary via: (1) PyInstaller frozen `<exe_dir>/bin/`, (2) dev layout `<repo>/build/`
+- Hidden imports: `PyQt6.sip`, `PyQt6.QtCore`, `PyQt6.QtGui`, `PyQt6.QtWidgets`
+
+### Release Artifacts
+
+| Archive | Contents |
+|---|---|
+| `dso-stacker-cli-linux-x86_64.tar.gz` | CLI binary |
+| `dso-stacker-gui-linux-x86_64.tar.gz` | GUI + CLI bundle |
+| `dso-stacker-cli-windows-x86_64.zip` | CLI .exe + DLLs |
+| `dso-stacker-gui-windows-x86_64.zip` | GUI + CLI bundle |
 
 ---
 

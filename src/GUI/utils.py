@@ -10,6 +10,8 @@ Provides:
 from __future__ import annotations
 
 import os
+import sys
+import platform
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -43,20 +45,37 @@ def detect_output_format(path: str) -> str:
 
 
 def _binary_path() -> Path:
-    """Resolve the dso_stacker binary relative to this file's location.
+    """Resolve the dso_stacker binary.
 
-    Expected layout:  <repo>/src/GUI/utils.py
-                      <repo>/build/dso_stacker
+    Search order:
+      1. PyInstaller bundle: <exe_dir>/bin/dso_stacker[.exe]
+      2. Development layout:  <repo>/build/dso_stacker[.exe]
+
     Raises FileNotFoundError if the binary is absent.
     """
-    candidate = Path(__file__).parent.parent.parent / "build" / "dso_stacker"
-    if not candidate.is_file():
-        raise FileNotFoundError(
-            f"dso_stacker binary not found at '{candidate}'.\n"
-            "Please build the project first:\n"
-            "  cmake --build build --parallel $(nproc)"
-        )
-    return candidate
+    exe_name = "dso_stacker.exe" if platform.system() == "Windows" else "dso_stacker"
+    searched: list[Path] = []
+
+    # 1. PyInstaller / frozen bundle (one-dir mode)
+    if getattr(sys, "frozen", False):
+        bundle_dir = Path(sys.executable).parent
+        candidate = bundle_dir / "bin" / exe_name
+        searched.append(candidate)
+        if candidate.is_file():
+            return candidate
+
+    # 2. Standard development layout: <repo>/build/dso_stacker
+    candidate = Path(__file__).parent.parent.parent / "build" / exe_name
+    searched.append(candidate)
+    if candidate.is_file():
+        return candidate
+
+    locations = "\n".join(f"  {p}" for p in searched)
+    raise FileNotFoundError(
+        f"dso_stacker binary not found.\nSearched:\n{locations}\n"
+        "Please build the project first:\n"
+        "  cmake --build build --parallel $(nproc)"
+    )
 
 
 def build_command(

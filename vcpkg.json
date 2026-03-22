@@ -1,0 +1,11 @@
+{
+  "name": "dso-stacker",
+  "version-string": "0.1.0",
+  "description": "GPU-accelerated Deep Sky Object image stacker",
+  "builtin-baseline": "b472291f295551b7127359ea38fdd2ca092f6f1b",
+  "dependencies": [
+    "cfitsio",
+    "tiff",
+    "libpng"
+  ]
+}

@@ -35,13 +35,16 @@
 
 #include "calibration.h"
 #include "fits_io.h"
+#include "compat.h"
 
 #include <fitsio.h>   /* fits_open_file, fits_close_file (for FITS probe) */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>  /* mkdir */
+#ifndef _MSC_VER
+#include <sys/stat.h>  /* mkdir (POSIX) */
+#endif
 #include <errno.h>
 
 #ifdef _OPENMP

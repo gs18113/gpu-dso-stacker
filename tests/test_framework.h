@@ -39,11 +39,12 @@ static int _g_failed  = 0;
     else          { printf("FAIL\n"); _g_failed++; } \
 } while(0)
 
-#define SUMMARY() ({ \
-    printf("\n--- %d passed, %d failed, %d total ---\n", \
-           _g_passed, _g_failed, _g_total); \
-    (_g_failed > 0) ? 1 : 0; \
-})
+static inline int _summary_result(void) {
+    printf("\n--- %d passed, %d failed, %d total ---\n",
+           _g_passed, _g_failed, _g_total);
+    return (_g_failed > 0) ? 1 : 0;
+}
+#define SUMMARY() _summary_result()
 
 /* All ASSERT macros immediately return 1 on failure, printing the location. */
 #define ASSERT(cond) do { \

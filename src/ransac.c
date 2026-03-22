@@ -22,6 +22,7 @@
  */
 
 #include "ransac.h"
+#include "compat.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>

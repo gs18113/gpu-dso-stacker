@@ -1,6 +1,10 @@
 # gpu-dso-stacker
 
+[![CI](https://github.com/youruser/gpu-dso-stacker/actions/workflows/ci.yml/badge.svg)](https://github.com/youruser/gpu-dso-stacker/actions/workflows/ci.yml)
+
 > A high-performance DSO (Deep Sky Object) stacker using CUDA for GPU-accelerated processing
+
+**Pre-built binaries** (CLI + GUI) for Linux and Windows are available on the [Releases](https://github.com/youruser/gpu-dso-stacker/releases) page.
 
 ---
 
@@ -53,6 +57,8 @@ When the input CSV already contains pre-computed homographies (11-column format)
 | OpenMP | any (GCC) |
 | CMake | >= 3.18 |
 
+### Linux
+
 ```bash
 # Configure
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
@@ -62,7 +68,30 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build --parallel $(nproc)
 ```
 
-CUDA architectures are set to `86;89` (RTX 30xx / 40xx). Edit `CUDA_ARCHITECTURES` in `CMakeLists.txt` for other GPU families.
+### Windows
+
+Requires Visual Studio 2022, CUDA Toolkit 12.x, and [vcpkg](https://vcpkg.io/) for C library dependencies.
+
+```powershell
+# Install C dependencies via vcpkg
+vcpkg install cfitsio tiff libpng --triplet x64-windows
+
+# Configure
+cmake -B build -G "Visual Studio 17 2022" -A x64 `
+      -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+      -DCMAKE_CUDA_COMPILER="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/bin/nvcc.exe"
+
+# Compile
+cmake --build build --config Release --parallel
+```
+
+### CUDA Architectures
+
+Default: `86;89` (RTX 30xx / 40xx). Override with:
+
+```bash
+cmake -B build -DDSO_CUDA_ARCHITECTURES="75;80;86;89;90" ...
+```
 
 ---
 
@@ -282,7 +311,9 @@ GPU mini-batch vs single-pass CPU kappa-sigma, slight homography differences fro
 
 A PyQt6 desktop application wrapping the CLI. Provides drag-and-drop frame management, all stacking options with conditional visibility, and YAML project save/load.
 
-### Install
+Pre-built GUI bundles (Linux and Windows) are available on the [Releases](https://github.com/youruser/gpu-dso-stacker/releases) page — no Python installation required.
+
+### Install (from source)
 
 ```bash
 pip install PyQt6 pyyaml
@@ -322,6 +353,28 @@ src/GUI/
     ├── calib_tab.py             # Dark/Flat/Bias/Darkflat tabs
     └── stacking_options_tab.py  # All CLI parameters with conditional visibility
 ```
+
+---
+
+## CI/CD
+
+GitHub Actions build and test on every push to `main` and every PR.
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | Push / PR to `main` | Build + test (Linux & Windows), package GUI bundles |
+| `release.yml` | Tag push `v*` | Same as CI, then creates a GitHub Release with archives |
+
+**Linux** builds inside `nvidia/cuda:12.6.3-devel-ubuntu22.04`; **Windows** uses `Jimver/cuda-toolkit` + vcpkg. GPU tests auto-skip (exit code 77) on runners without a GPU. GUI packaging uses PyInstaller.
+
+Release artifacts:
+
+| Archive | Contents |
+|---|---|
+| `dso-stacker-cli-linux-x86_64.tar.gz` | CLI binary |
+| `dso-stacker-gui-linux-x86_64.tar.gz` | GUI bundle (includes CLI) |
+| `dso-stacker-cli-windows-x86_64.zip` | CLI .exe + DLLs |
+| `dso-stacker-gui-windows-x86_64.zip` | GUI bundle (includes CLI) |
 
 ---
 

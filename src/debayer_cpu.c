@@ -8,6 +8,7 @@
  */
 
 #include "debayer_cpu.h"
+#include "compat.h"
 #include <string.h>
 #include <math.h>
 #include <omp.h>
@@ -46,7 +47,7 @@ DsoError debayer_cpu(const float *src, float *dst,
 
     int pat = (int)pattern;
 
-#pragma omp parallel for collapse(2) schedule(static)
+OMP_PARALLEL_FOR_COLLAPSE2
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             /* 1. Calculate 8 gradients in a 5x5 area */
@@ -157,7 +158,7 @@ DsoError debayer_cpu_rgb(const float *src,
 
     int pat = (int)pattern;
 
-#pragma omp parallel for collapse(2) schedule(static)
+OMP_PARALLEL_FOR_COLLAPSE2
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             float g8[8];

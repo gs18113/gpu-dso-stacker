@@ -89,3 +89,11 @@ samples/
 __pycache__/
 *.pyc
 *.pyo
+
+# PyInstaller
+dist/
+*.manifest
+bundled_bin/
+
+# Plan files
+plan-*.md
