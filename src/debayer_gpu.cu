@@ -108,106 +108,61 @@ __global__ static void vng_debayer_kernel(
     /* Convenience macro: read from shared memory with apron offset. */
 #define P(dx, dy) sm[(sy)+(dy)][(sx)+(dx)]
 
-    /* ---- 1. Identify the CFA channel at (gx, gy) ---- */
-    int chan = bayer_channel(gx, gy, pattern);
-
-    /* ---- 2. Compute 8 directional gradients ----
-     * Each gradient is designed to cross the 2×2 CFA period so that both
-     * elements being compared have the same channel type.
-     *
-     * For a standard RGGB layout:
-     *   N gradient:  |P(0,-1) - P(0,1)|  + |P(0,0) - P(0,-2)|  + |P(0,2) - P(0,0)|
-     * We use a simpler but effective formulation: the sum of absolute
-     * differences of the pixel with its ±2 neighbours in the given direction,
-     * which guarantees same-channel comparisons.
-     */
+    /* 1. Calculate 8 gradients in a 5x5 area */
     float g[8];
-    g[0] = fabsf(P( 0,-2) - P( 0, 0));  /* N  */
-    g[1] = fabsf(P( 2,-2) - P( 0, 0));  /* NE */
-    g[2] = fabsf(P( 2, 0) - P( 0, 0));  /* E  */
-    g[3] = fabsf(P( 2, 2) - P( 0, 0));  /* SE */
-    g[4] = fabsf(P( 0, 2) - P( 0, 0));  /* S  */
-    g[5] = fabsf(P(-2, 2) - P( 0, 0));  /* SW */
-    g[6] = fabsf(P(-2, 0) - P( 0, 0));  /* W  */
-    g[7] = fabsf(P(-2,-2) - P( 0, 0));  /* NW */
+    float self = P(0, 0);
 
-    /* ---- 3. Threshold τ = mean + min ---- */
-    float gsum = 0.f, gmin = g[0];
+    /* North, South, East, West */
+    g[0] = fabsf(P(0,-2) - P(0,0)) + fabsf(P(0,-1) - P(0,1))*0.5f + fabsf(P(-1,-1) - P(-1,1))*0.5f + fabsf(P(1,-1) - P(1,1))*0.5f; /* N */
+    g[1] = fabsf(P(0, 2) - P(0,0)) + fabsf(P(0, 1) - P(0,-1))*0.5f + fabsf(P(-1, 1) - P(-1,-1))*0.5f + fabsf(P(1, 1) - P(1,-1))*0.5f; /* S */
+    g[2] = fabsf(P( 2,0) - P(0,0)) + fabsf(P( 1,0) - P(-1,0))*0.5f + fabsf(P( 1,-1) - P(-1,-1))*0.5f + fabsf(P( 1,1) - P(-1,1))*0.5f; /* E */
+    g[3] = fabsf(P(-2,0) - P(0,0)) + fabsf(P(-1,0) - P( 1,0))*0.5f + fabsf(P(-1,-1) - P( 1,-1))*0.5f + fabsf(P(-1,1) - P( 1,1))*0.5f; /* W */
+
+    /* Diagonals */
+    g[4] = fabsf(P( 2,-2) - P(0,0)) + fabsf(P( 1,-1) - P(-1, 1))*0.5f + fabsf(P(0,-1) - P(-1,0))*0.5f + fabsf(P( 1,0) - P(0, 1))*0.5f; /* NE */
+    g[5] = fabsf(P(-2,-2) - P(0,0)) + fabsf(P(-1,-1) - P( 1, 1))*0.5f + fabsf(P(0,-1) - P( 1,0))*0.5f + fabsf(P(-1,0) - P(0, 1))*0.5f; /* NW */
+    g[6] = fabsf(P( 2, 2) - P(0,0)) + fabsf(P( 1, 1) - P(-1,-1))*0.5f + fabsf(P(0, 1) - P( 1,0))*0.5f + fabsf(P(-1,0) - P(0,-1))*0.5f; /* SE */
+    g[7] = fabsf(P(-2, 2) - P(0,0)) + fabsf(P(-1, 1) - P( 1,-1))*0.5f + fabsf(P(0, 1) - P(-1,0))*0.5f + fabsf(P( 1,0) - P(0,-1))*0.5f; /* SW */
+
+    /* 2. Threshold */
+    float gsum = 0.f, gmin = g[0], gmax = g[0];
     for (int i = 0; i < 8; i++) {
         gsum += g[i];
         if (g[i] < gmin) gmin = g[i];
+        if (g[i] > gmax) gmax = g[i];
     }
-    float tau = gsum / 8.f + gmin;
+    float tau = 1.5f * gmin + 0.5f * (gmax - gmin);
 
-    /* ---- 4. Estimate R, G, B from selected (smooth) directions ----
-     * For each selected direction, we form estimates of the two missing
-     * channels using adjacent same-channel pixels.  The exact formulas
-     * depend on the pixel's own channel type.
-     *
-     * Here we use a simplified but robust implementation:
-     *   G estimates: bilinear from ±1 neighbours in the cardinal directions.
-     *   R/B estimates: diagonal neighbours at ±1 in both axes.
-     *
-     * Each estimate is accumulated with a weight of 1 for selected directions.
-     */
+    /* 3. Interpolate R, G, B */
     float R_sum = 0.f, G_sum = 0.f, B_sum = 0.f;
-    float R_w   = 0.f, G_w   = 0.f, B_w   = 0.f;
+    int R_count = 0, G_count = 0, B_count = 0;
+    int chan = bayer_channel(gx, gy, pattern);
 
-    /* Cardinal direction estimates: N, E, S, W */
-    int card_dx[4] = { 0, 1,  0, -1};
-    int card_dy[4] = {-1, 0,  1,  0};
-    int card_gi[4] = { 0, 2,  4,  6};
+    const int dx[8] = {0, 0, 1, -1, 1, -1, 1, -1};
+    const int dy[8] = {-1, 1, 0, 0, -1, -1, 1, 1};
 
-    for (int d = 0; d < 4; d++) {
-        if (g[card_gi[d]] > tau) continue;  /* direction not selected */
-        int dx = card_dx[d], dy = card_dy[d];
-        /* The neighbour at (gx+dx, gy+dy) has a different channel in a 2×2 tile.
-         * For a Green pixel at (gx,gy) the neighbours at ±1 are R or B.
-         * For an R pixel the N/S/E/W neighbours are G.
-         * This gives us G estimates for R/B pixels and R/B estimates for G pixels. */
-        float nb_val = P(dx, dy);
-        int nb_chan = bayer_channel(gx + dx, gy + dy, pattern);
-        /* This neighbour's channel is nb_chan.  The current pixel is chan.
-         * We assign the neighbour value to the appropriate channel bucket. */
-        /* For the missing channel(s) we interpolate: current_val + (nb - current)/2 */
-        /* Simplified: use midpoint between current pixel and its same-channel ±2 neighbour
-         * as an estimate of the missing channel in this direction. */
-        float est = (P(0,0) + nb_val) * 0.5f;
-        if (nb_chan == 0) { R_sum += est; R_w += 1.f; }
-        else if (nb_chan == 1) { G_sum += est; G_w += 1.f; }
-        else { B_sum += est; B_w += 1.f; }
+    for (int i = 0; i < 8; i++) {
+        if (g[i] <= tau) {
+            int n_gx = gx + dx[i], n_gy = gy + dy[i];
+            int nchan = bayer_channel(n_gx, n_gy, pattern);
+            float nv = P(dx[i], dy[i]);
+            
+            if (nchan == 0)      { R_sum += nv; R_count++; }
+            else if (nchan == 1) { G_sum += nv; G_count++; }
+            else                 { B_sum += nv; B_count++; }
+        }
     }
 
-    /* Diagonal direction estimates: NE, SE, SW, NW */
-    int diag_dx[4] = { 1,  1, -1, -1};
-    int diag_dy[4] = {-1,  1,  1, -1};
-    int diag_gi[4] = { 1,  3,  5,  7};
+    if (chan == 0)      { R_sum += self; R_count++; }
+    else if (chan == 1) { G_sum += self; G_count++; }
+    else                { B_sum += self; B_count++; }
 
-    for (int d = 0; d < 4; d++) {
-        if (g[diag_gi[d]] > tau) continue;
-        int dx = diag_dx[d], dy = diag_dy[d];
-        float nb_val = P(dx, dy);
-        int nb_chan = bayer_channel(gx + dx, gy + dy, pattern);
-        float est = (P(0,0) + nb_val) * 0.5f;
-        if (nb_chan == 0) { R_sum += est; R_w += 1.f; }
-        else if (nb_chan == 1) { G_sum += est; G_w += 1.f; }
-        else { B_sum += est; B_w += 1.f; }
-    }
+    float R_est = (R_count > 0) ? (R_sum / R_count) : self;
+    float G_est = (G_count > 0) ? (G_sum / G_count) : self;
+    float B_est = (B_count > 0) ? (B_sum / B_count) : self;
 
-    /* The pixel's own known channel */
-    float self = P(0,0);
-    if (chan == 0) { R_sum += self; R_w += 1.f; }
-    else if (chan == 1) { G_sum += self; G_w += 1.f; }
-    else { B_sum += self; B_w += 1.f; }
-
-    /* Avoid division by zero when no direction was selected */
-    float R_est = (R_w > 0.f) ? (R_sum / R_w) : self;
-    float G_est = (G_w > 0.f) ? (G_sum / G_w) : self;
-    float B_est = (B_w > 0.f) ? (B_sum / B_w) : self;
-
-    /* ---- 5. Convert to luminance (ITU-R BT.709 coefficients) ---- */
-    float L = 0.2126f * R_est + 0.7152f * G_est + 0.0722f * B_est;
-    d_dst[gy * W + gx] = L;
+    /* Convert to luminance (ITU-R BT.709) */
+    d_dst[gy * W + gx] = 0.2126f * R_est + 0.7152f * G_est + 0.0722f * B_est;
 
 #undef P
 }

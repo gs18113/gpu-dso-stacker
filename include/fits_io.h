@@ -27,6 +27,15 @@ extern "C" {
 DsoError fits_load(const char *filepath, Image *out);
 
 /*
+ * fits_load_to_buffer — Load FITS image data directly into a provided buffer.
+ *
+ * Avoids extra allocations/memcpys when loading into pre-allocated memory
+ * (e.g., pinned memory for CUDA).
+ * W, H must match the actual file dimensions exactly.
+ */
+DsoError fits_load_to_buffer(const char *filepath, float *buffer, int W, int H);
+
+/*
  * fits_save — write a host float32 image to a FITS file (BITPIX=-32).
  *
  * Overwrites any existing file at filepath (CFITSIO '!' prefix).

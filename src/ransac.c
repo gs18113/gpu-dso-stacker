@@ -347,7 +347,8 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
     }
 
     /* ---- RANSAC main loop ---- */
-    srand((unsigned)time(NULL));
+    static int call_counter = 0;
+    unsigned int seed = (unsigned int)(time(NULL) ^ clock() ^ call_counter++);
 
     Homography best_H; memset(&best_H, 0, sizeof(best_H));
     int best_inliers = 0;
@@ -362,7 +363,7 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
         int idx[4];
         int used[4] = {-1,-1,-1,-1};
         for (int k = 0; k < 4; ) {
-            int j = rand() % n_matches;
+            int j = rand_r(&seed) % n_matches;
             int dup = 0;
             for (int m = 0; m < k; m++) if (used[m] == j) { dup = 1; break; }
             if (!dup) { used[k] = j; idx[k] = j; k++; }

@@ -213,11 +213,22 @@ static DsoError stack_frames(const char **paths, int n,
 
     float *master = master_out->data;
 
+    int max_threads = 1;
+#ifdef _OPENMP
+    max_threads = omp_get_max_threads();
+#endif
+    float *all_vals = (float *)malloc((size_t)max_threads * n * sizeof(float));
+    if (!all_vals) { err = DSO_ERR_ALLOC; goto cleanup; }
+
     /* Per-pixel stacking (parallelised across pixels) */
 #pragma omp parallel for schedule(dynamic, 64)
     for (int p = 0; p < npix; p++) {
-        /* Collect pixel values across frames into a local VLA */
-        float vals[n];   /* VLA: stack-allocated per OMP thread iteration */
+        int tid = 0;
+#ifdef _OPENMP
+        tid = omp_get_thread_num();
+#endif
+        /* Collect pixel values across frames into a local buffer */
+        float *vals = &all_vals[tid * n];
         for (int i = 0; i < n; i++)
             vals[i] = bufs[i][p];
 
@@ -253,6 +264,7 @@ static DsoError stack_frames(const char **paths, int n,
     }
 
 cleanup:
+    free(all_vals);
     for (int i = 0; i < n; i++) free(bufs[i]);
     free(bufs);
     return err;

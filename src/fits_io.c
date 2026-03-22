@@ -27,14 +27,11 @@ DsoError fits_load(const char *filepath, Image *out)
         return DSO_ERR_FITS;
     }
 
-    /* Read pixel type and image dimensions.
-     * naxes[0] = NAXIS1 = number of columns (width)
-     * naxes[1] = NAXIS2 = number of rows    (height) */
-    int bitpix = 0;
+    /* Read pixel type and image dimensions. */
     long naxes[2] = {0, 0};
-    ffgidt(fptr, &bitpix, &status);
     ffgisz(fptr, 2, naxes, &status);
     if (status) {
+        fprintf(stderr, "fits_load: ffgisz failed for '%s'\n", filepath);
         fits_report_error(stderr, status);
         ffclos(fptr, &status);
         return DSO_ERR_FITS;
@@ -50,13 +47,12 @@ DsoError fits_load(const char *filepath, Image *out)
         return DSO_ERR_ALLOC;
     }
 
-    /* CFITSIO converts any BITPIX to TFLOAT automatically.
-     * firstpix is a 1-based pixel index array per NAXIS dimension. */
-    float nulval = 0.f;   /* replacement value for undefined pixels */
+    float nulval = 0.f;
     int anynul = 0;
     long firstpix[2] = {1, 1};
     ffgpxv(fptr, TFLOAT, firstpix, nelem, &nulval, data, &anynul, &status);
     if (status) {
+        fprintf(stderr, "fits_load: ffgpxv failed for '%s'\n", filepath);
         fits_report_error(stderr, status);
         free(data);
         ffclos(fptr, &status);
@@ -68,6 +64,44 @@ DsoError fits_load(const char *filepath, Image *out)
     out->data   = data;
     out->width  = width;
     out->height = height;
+    return DSO_OK;
+}
+
+DsoError fits_load_to_buffer(const char *filepath, float *buffer, int W, int H)
+{
+    if (!filepath || !buffer) return DSO_ERR_INVALID_ARG;
+
+    fitsfile *fptr = NULL;
+    int status = 0;
+
+    if (ffopen(&fptr, filepath, READONLY, &status)) {
+        fprintf(stderr, "fits_load_to_buffer: cannot open '%s' (status=%d)\n", filepath, status);
+        return DSO_ERR_FITS;
+    }
+
+    long naxes[2] = {0, 0};
+    ffgisz(fptr, 2, naxes, &status);
+    if (status || (int)naxes[0] != W || (int)naxes[1] != H) {
+        fprintf(stderr, "fits_load_to_buffer: size mismatch or error for '%s' (expected %dx%d, got %dx%d)\n",
+                filepath, W, H, (int)naxes[0], (int)naxes[1]);
+        ffclos(fptr, &status);
+        return DSO_ERR_INVALID_ARG;
+    }
+
+    LONGLONG nelem = (LONGLONG)W * H;
+    float nulval = 0.f;
+    int anynul = 0;
+    long firstpix[2] = {1, 1};
+    ffgpxv(fptr, TFLOAT, firstpix, nelem, &nulval, buffer, &anynul, &status);
+    
+    if (status) {
+        fprintf(stderr, "fits_load_to_buffer: ffgpxv failed for '%s'\n", filepath);
+        fits_report_error(stderr, status);
+        ffclos(fptr, &status);
+        return DSO_ERR_FITS;
+    }
+
+    ffclos(fptr, &status);
     return DSO_OK;
 }
 

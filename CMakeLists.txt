@@ -96,6 +96,12 @@ target_include_directories(test_calibration PRIVATE tests)
 target_link_libraries(test_calibration PRIVATE dso_stacker_lib m)
 add_test(NAME test_calibration COMMAND test_calibration)
 
+# Audit/Fixes verification tests
+add_executable(test_audit tests/test_audit.c)
+target_include_directories(test_audit PRIVATE tests)
+target_link_libraries(test_audit PRIVATE dso_stacker_lib m)
+add_test(NAME test_audit COMMAND test_audit)
+
 # GPU tests for mini-batch kappa-sigma integration
 add_executable(test_integration_gpu tests/test_integration_gpu.cu)
 set_target_properties(test_integration_gpu PROPERTIES

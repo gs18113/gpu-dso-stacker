@@ -58,8 +58,9 @@ extern "C" {
 /*
  * INTEGRATION_GPU_MAX_BATCH — compile-time maximum frames per batch.
  * The GPU kappa-sigma kernel uses stack arrays of this size.
+ * Recommended range: 8-32.
  */
-#define INTEGRATION_GPU_MAX_BATCH 64
+#define INTEGRATION_GPU_MAX_BATCH 32
 
 /*
  * IntegrationGpuCtx — GPU integration context.

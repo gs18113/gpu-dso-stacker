@@ -56,19 +56,22 @@
  * ------------------------------------------------------------------------- */
 
 /* Wrap a DsoError call; jump to label on failure. */
-#define PIPE_CHECK(call, label)                                      \
+#define PIPE_CHECK(call, label, path)                                \
     do {                                                             \
         DsoError _pe = (call);                                       \
-        if (_pe != DSO_OK) { err = _pe; goto label; }               \
+        if (_pe != DSO_OK) {                                         \
+            fprintf(stderr, "pipeline error %d at %s\n", (int)_pe, (path)); \
+            err = _pe; goto label;                                   \
+        }                                                            \
     } while (0)
 
 /* Wrap a CUDA call; print message, set err, jump to label on failure. */
-#define CUDA_CHECK(call, label)                                      \
+#define CUDA_CHECK(call, label, path)                                \
     do {                                                             \
         cudaError_t _ce = (call);                                    \
         if (_ce != cudaSuccess) {                                    \
-            fprintf(stderr, "pipeline CUDA error %s:%d — %s\n",     \
-                    __FILE__, __LINE__, cudaGetErrorString(_ce));    \
+            fprintf(stderr, "pipeline CUDA error %s:%d at %s — %s\n", \
+                    __FILE__, __LINE__, (path), cudaGetErrorString(_ce)); \
             err = DSO_ERR_CUDA; goto label;                         \
         }                                                            \
     } while (0)
@@ -82,7 +85,7 @@
  * ------------------------------------------------------------------------- */
 
 static DsoError phase1_detect_stars(
-    FrameInfo          *frames,
+    FrameInfo            *frames,
     int                 n_frames,
     int                 ref_idx,
     int                 W, int H,
@@ -105,10 +108,10 @@ static DsoError phase1_detect_stars(
     float   *convolved_host = NULL;
     uint8_t *mask_host      = NULL;
 
-    CUDA_CHECK(cudaMalloc(&d_raw,     npix_f), cleanup);
-    CUDA_CHECK(cudaMalloc(&d_debayed, npix_f), cleanup);
-    CUDA_CHECK(cudaMalloc(&d_conv,    npix_f), cleanup);
-    CUDA_CHECK(cudaMalloc(&d_mask,    npix_b), cleanup);
+    CUDA_CHECK(cudaMalloc(&d_raw,     npix_f), cleanup, "d_raw");
+    CUDA_CHECK(cudaMalloc(&d_debayed, npix_f), cleanup, "d_debayed");
+    CUDA_CHECK(cudaMalloc(&d_conv,    npix_f), cleanup, "d_conv");
+    CUDA_CHECK(cudaMalloc(&d_mask,    npix_b), cleanup, "d_mask");
 
     original_host  = (float   *)malloc(npix_f);
     convolved_host = (float   *)malloc(npix_f);
@@ -122,7 +125,7 @@ static DsoError phase1_detect_stars(
 
         /* Load raw FITS frame */
         Image raw = {NULL, 0, 0};
-        PIPE_CHECK(fits_load(frames[i].filepath, &raw), cleanup);
+        PIPE_CHECK(fits_load(frames[i].filepath, &raw), cleanup, frames[i].filepath);
         if (raw.width != W || raw.height != H) {
             fprintf(stderr, "pipeline: frame %d size %dx%d != ref %dx%d\n",
                     i, raw.width, raw.height, W, H);
@@ -134,32 +137,37 @@ static DsoError phase1_detect_stars(
         if (pat == BAYER_NONE)
             fits_get_bayer_pattern(frames[i].filepath, &pat);
 
+        /* Cache metadata for Phase 2 */
+        frames[i].width   = W;
+        frames[i].height  = H;
+        frames[i].pattern = (int)pat;
+
         /* H2D raw → device */
-        CUDA_CHECK(cudaMemcpy(d_raw, raw.data, npix_f, cudaMemcpyHostToDevice), frame_err);
+        CUDA_CHECK(cudaMemcpy(d_raw, raw.data, npix_f, cudaMemcpyHostToDevice), frame_err, frames[i].filepath);
 
         /* Apply calibration (dark subtract + flat divide) before debayering */
-        PIPE_CHECK(calib_gpu_apply_d2d(d_raw, W, H, calib_ctx, 0), frame_err);
+        PIPE_CHECK(calib_gpu_apply_d2d(d_raw, W, H, calib_ctx, 0), frame_err, frames[i].filepath);
 
         /* Debayer → luminance */
-        PIPE_CHECK(debayer_gpu_d2d(d_raw, d_debayed, W, H, pat, 0), frame_err);
+        PIPE_CHECK(debayer_gpu_d2d(d_raw, d_debayed, W, H, pat, 0), frame_err, frames[i].filepath);
 
         /* Moffat convolution + sigma threshold → d_conv, d_mask */
         PIPE_CHECK(star_detect_gpu_d2d(d_debayed, d_conv, d_mask,
                                         W, H, &config->moffat,
-                                        config->star_sigma, 0), frame_err);
+                                        config->star_sigma, 0), frame_err, frames[i].filepath);
 
         /* D2H: three arrays needed by CCL+CoM */
         CUDA_CHECK(cudaMemcpy(original_host,  d_debayed, npix_f,
-                              cudaMemcpyDeviceToHost), frame_err);
+                              cudaMemcpyDeviceToHost), frame_err, frames[i].filepath);
         CUDA_CHECK(cudaMemcpy(convolved_host, d_conv,    npix_f,
-                              cudaMemcpyDeviceToHost), frame_err);
+                              cudaMemcpyDeviceToHost), frame_err, frames[i].filepath);
         CUDA_CHECK(cudaMemcpy(mask_host,      d_mask,    npix_b,
-                              cudaMemcpyDeviceToHost), frame_err);
+                              cudaMemcpyDeviceToHost), frame_err, frames[i].filepath);
 
         /* CPU: connected-component labeling + weighted center-of-mass */
         PIPE_CHECK(star_detect_cpu_ccl_com(mask_host, original_host, convolved_host,
                                             W, H, config->top_stars,
-                                            &star_lists[i]), frame_err);
+                                            &star_lists[i]), frame_err, frames[i].filepath);
         printf("[Phase 1] Frame %d: %d star(s) detected\n", i, star_lists[i].n);
 
         image_free(&raw);
@@ -244,19 +252,19 @@ static DsoError phase2_transform_integrate(
     float       *d_debayed     = NULL;
     int          processed     = 0;
 
-    CUDA_CHECK(cudaStreamCreate(&stream_copy),    cleanup);
-    CUDA_CHECK(cudaStreamCreate(&stream_compute), cleanup);
+    CUDA_CHECK(cudaStreamCreate(&stream_copy),    cleanup, "stream_copy");
+    CUDA_CHECK(cudaStreamCreate(&stream_compute), cleanup, "stream_compute");
 
     for (int j = 0; j < 2; j++) {
-        CUDA_CHECK(cudaEventCreate(&e_h2d[j]), cleanup);
-        CUDA_CHECK(cudaEventCreate(&e_gpu[j]),  cleanup);
+        CUDA_CHECK(cudaEventCreate(&e_h2d[j]), cleanup, "e_h2d");
+        CUDA_CHECK(cudaEventCreate(&e_gpu[j]),  cleanup, "e_gpu");
     }
 
-    CUDA_CHECK(cudaMallocHost(&pinned[0], npix_f), cleanup);
-    CUDA_CHECK(cudaMallocHost(&pinned[1], npix_f), cleanup);
-    CUDA_CHECK(cudaMalloc(&d_raw[0], npix_f), cleanup);
-    CUDA_CHECK(cudaMalloc(&d_raw[1], npix_f), cleanup);
-    CUDA_CHECK(cudaMalloc(&d_debayed, npix_f), cleanup);
+    CUDA_CHECK(cudaMallocHost(&pinned[0], npix_f), cleanup, "pinned[0]");
+    CUDA_CHECK(cudaMallocHost(&pinned[1], npix_f), cleanup, "pinned[1]");
+    CUDA_CHECK(cudaMalloc(&d_raw[0], npix_f), cleanup, "d_raw[0]");
+    CUDA_CHECK(cudaMalloc(&d_raw[1], npix_f), cleanup, "d_raw[1]");
+    CUDA_CHECK(cudaMalloc(&d_debayed, npix_f), cleanup, "d_debayed");
 
     while (processed < n_frames) {
         /* Clamp batch to remaining frames */
@@ -267,18 +275,11 @@ static DsoError phase2_transform_integrate(
         /* -----------------------------------------------------------------
          * Kickstart: load frame 0 of this batch into pinned[0], start H2D.
          * ----------------------------------------------------------------- */
-        {
-            Image raw = {NULL, 0, 0};
-            PIPE_CHECK(fits_load(frames[batch_start].filepath, &raw), cleanup);
-            if (raw.width != W || raw.height != H) {
-                image_free(&raw); err = DSO_ERR_INVALID_ARG; goto cleanup;
-            }
-            memcpy(pinned[0], raw.data, npix_f);
-            image_free(&raw);
-        }
+        PIPE_CHECK(fits_load_to_buffer(frames[batch_start].filepath, pinned[0], W, H), cleanup, frames[batch_start].filepath);
+        
         CUDA_CHECK(cudaMemcpyAsync(d_raw[0], pinned[0], npix_f,
-                                   cudaMemcpyHostToDevice, stream_copy), cleanup);
-        CUDA_CHECK(cudaEventRecord(e_h2d[0], stream_copy), cleanup);
+                                   cudaMemcpyHostToDevice, stream_copy), cleanup, frames[batch_start].filepath);
+        CUDA_CHECK(cudaEventRecord(e_h2d[0], stream_copy), cleanup, "event_record");
 
         /* -----------------------------------------------------------------
          * Process each frame in the mini-batch.
@@ -288,34 +289,37 @@ static DsoError phase2_transform_integrate(
             int slot       = m % 2;
             int next_slot  = (m + 1) % 2;
 
-            /* Determine Bayer pattern */
-            BayerPattern pat = config->bayer_override;
-            if (pat == BAYER_NONE)
+            /* Determine Bayer pattern (Use cached value if available) */
+            BayerPattern pat = (BayerPattern)frames[global_idx].pattern;
+            if (pat == BAYER_NONE && config->bayer_override == BAYER_NONE) {
                 fits_get_bayer_pattern(frames[global_idx].filepath, &pat);
+            } else if (config->bayer_override != BAYER_NONE) {
+                pat = config->bayer_override;
+            }
 
             /* ---- stream_compute: process frame m ---- */
 
             /* Wait (GPU-side) for H2D of this slot to complete */
-            CUDA_CHECK(cudaStreamWaitEvent(stream_compute, e_h2d[slot], 0), cleanup);
+            CUDA_CHECK(cudaStreamWaitEvent(stream_compute, e_h2d[slot], 0), cleanup, "stream_wait");
 
             /* Apply calibration (dark subtract + flat divide) before debayering */
             PIPE_CHECK(calib_gpu_apply_d2d(d_raw[slot], W, H,
-                                            calib_ctx, stream_compute), cleanup);
+                                            calib_ctx, stream_compute), cleanup, frames[global_idx].filepath);
 
             /* Debayer raw → luminance (or plain device-to-device for monochrome) */
             if (pat != BAYER_NONE) {
                 PIPE_CHECK(debayer_gpu_d2d(d_raw[slot], d_debayed,
-                                            W, H, pat, stream_compute), cleanup);
+                                            W, H, pat, stream_compute), cleanup, frames[global_idx].filepath);
             } else {
                 CUDA_CHECK(cudaMemcpyAsync(d_debayed, d_raw[slot], npix_f,
                                            cudaMemcpyDeviceToDevice, stream_compute),
-                           cleanup);
+                           cleanup, frames[global_idx].filepath);
             }
 
             /* Zero-fill destination: lanczos_transform_gpu_d2d leaves out-of-bounds
              * pixels unwritten, so the destination must start as all-zero. */
             CUDA_CHECK(cudaMemsetAsync(ctx->d_frames[m], 0, npix_f,
-                                       stream_compute), cleanup);
+                                       stream_compute), cleanup, "memset");
 
             /* Lanczos-3 warp using pre-computed backward homography (ref → src) */
             PIPE_CHECK(lanczos_transform_gpu_d2d(
@@ -324,10 +328,10 @@ static DsoError phase2_transform_integrate(
                            W, H,   /* source dimensions  */
                            W, H,   /* destination dimensions */
                            &frames[global_idx].H,
-                           stream_compute), cleanup);
+                           stream_compute), cleanup, frames[global_idx].filepath);
 
             /* Record GPU-done event for this slot */
-            CUDA_CHECK(cudaEventRecord(e_gpu[slot], stream_compute), cleanup);
+            CUDA_CHECK(cudaEventRecord(e_gpu[slot], stream_compute), cleanup, "event_record");
 
             /* ---- CPU overlap: load next frame while GPU runs ---- */
             if (m + 1 < M) {
@@ -338,34 +342,24 @@ static DsoError phase2_transform_integrate(
                  * e_gpu[next_slot] fires when stream_compute finishes that frame.
                  * For m == 0 the event was never set, so skip the sync. */
                 if (m >= 1) {
-                    CUDA_CHECK(cudaEventSynchronize(e_gpu[next_slot]), cleanup);
+                    CUDA_CHECK(cudaEventSynchronize(e_gpu[next_slot]), cleanup, "event_sync");
                 }
 
                 /* CPU: read next frame from disk into pinned[next_slot].
                  * This is the key overlap: disk I/O runs concurrently with
                  * GPU processing the current frame on stream_compute. */
-                {
-                    Image raw_next = {NULL, 0, 0};
-                    PIPE_CHECK(fits_load(frames[global_next].filepath, &raw_next),
-                               cleanup);
-                    if (raw_next.width != W || raw_next.height != H) {
-                        image_free(&raw_next);
-                        err = DSO_ERR_INVALID_ARG;
-                        goto cleanup;
-                    }
-                    memcpy(pinned[next_slot], raw_next.data, npix_f);
-                    image_free(&raw_next);
-                }
+                PIPE_CHECK(fits_load_to_buffer(frames[global_next].filepath, pinned[next_slot], W, H),
+                           cleanup, frames[global_next].filepath);
 
                 /* H2D next frame into device slot */
                 CUDA_CHECK(cudaMemcpyAsync(d_raw[next_slot], pinned[next_slot], npix_f,
-                                           cudaMemcpyHostToDevice, stream_copy), cleanup);
-                CUDA_CHECK(cudaEventRecord(e_h2d[next_slot], stream_copy), cleanup);
+                                           cudaMemcpyHostToDevice, stream_copy), cleanup, frames[global_next].filepath);
+                CUDA_CHECK(cudaEventRecord(e_h2d[next_slot], stream_copy), cleanup, "event_record");
             }
         } /* end per-frame loop */
 
         /* Wait for all GPU work in this batch to complete */
-        CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup);
+        CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup, "stream_sync");
 
         /* -----------------------------------------------------------------
          * Integration: accumulate this batch into the global accumulators.
@@ -376,24 +370,26 @@ static DsoError phase2_transform_integrate(
         if (config->use_kappa_sigma) {
             PIPE_CHECK(integration_gpu_process_batch(ctx, M, config->kappa,
                                                       config->iterations,
-                                                      stream_compute), cleanup);
+                                                      stream_compute), cleanup, "batch integration");
         } else {
             PIPE_CHECK(integration_gpu_process_batch_mean(ctx, M, stream_compute),
-                       cleanup);
+                       cleanup, "batch integration");
         }
-        CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup);
+        CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup, "stream_sync");
 
         processed += M;
     } /* end batch loop */
 
 cleanup:
-    cudaFreeHost(pinned[0]);
-    cudaFreeHost(pinned[1]);
+    if (pinned[0]) cudaFreeHost(pinned[0]);
+    if (pinned[1]) cudaFreeHost(pinned[1]);
     cudaFree(d_raw[0]);
     cudaFree(d_raw[1]);
     cudaFree(d_debayed);
-    cudaEventDestroy(e_h2d[0]); cudaEventDestroy(e_h2d[1]);
-    cudaEventDestroy(e_gpu[0]);  cudaEventDestroy(e_gpu[1]);
+    if (e_h2d[0]) cudaEventDestroy(e_h2d[0]);
+    if (e_h2d[1]) cudaEventDestroy(e_h2d[1]);
+    if (e_gpu[0]) cudaEventDestroy(e_gpu[0]);
+    if (e_gpu[1]) cudaEventDestroy(e_gpu[1]);
     if (stream_copy)    cudaStreamDestroy(stream_copy);
     if (stream_compute) cudaStreamDestroy(stream_compute);
     return err;
@@ -428,7 +424,7 @@ DsoError pipeline_run(FrameInfo            *frames,
     /* ---- Load reference frame to determine output dimensions ---- */
     {
         Image ref_img = {NULL, 0, 0};
-        PIPE_CHECK(fits_load(frames[ref_idx].filepath, &ref_img), done);
+        PIPE_CHECK(fits_load(frames[ref_idx].filepath, &ref_img), done, frames[ref_idx].filepath);
         W = ref_img.width;
         H = ref_img.height;
         image_free(&ref_img);
@@ -436,12 +432,12 @@ DsoError pipeline_run(FrameInfo            *frames,
     printf("pipeline: output dimensions %d × %d, %d frame(s)\n", W, H, n_frames);
 
     /* ---- Initialise GPU subsystems ---- */
-    PIPE_CHECK(lanczos_gpu_init(0 /* default stream */), done);
-    PIPE_CHECK(integration_gpu_init(W, H, config->batch_size, &ctx), done);
+    PIPE_CHECK(lanczos_gpu_init(0 /* default stream */), done, "lanczos_gpu_init");
+    PIPE_CHECK(integration_gpu_init(W, H, config->batch_size, &ctx), done, "integration_gpu_init");
 
     /* Upload calibration master frames to device (if calibration was requested) */
     if (config->calib)
-        PIPE_CHECK(calib_gpu_init(config->calib, &calib_ctx), done);
+        PIPE_CHECK(calib_gpu_init(config->calib, &calib_ctx), done, "calib_gpu_init");
 
     if (!has_transforms) {
         printf("pipeline: Phase 1 — star detection (%d frames)\n", n_frames);
@@ -450,7 +446,7 @@ DsoError pipeline_run(FrameInfo            *frames,
         if (!star_lists) { err = DSO_ERR_ALLOC; goto done; }
 
         PIPE_CHECK(phase1_detect_stars(frames, n_frames, ref_idx,
-                                        W, H, config, calib_ctx, star_lists), done);
+                                        W, H, config, calib_ctx, star_lists), done, "Phase 1");
         printf("pipeline: Phase 1 complete\n");
     }
 
@@ -460,7 +456,7 @@ DsoError pipeline_run(FrameInfo            *frames,
            n_frames, config->batch_size);
 
     PIPE_CHECK(phase2_transform_integrate(frames, n_frames, W, H,
-                                           config, calib_ctx, ctx), done);
+                                           config, calib_ctx, ctx), done, "Phase 2");
     printf("pipeline: Phase 2 complete\n");
 
     /* ---- Finalise: compute output image and save ---- */
@@ -469,7 +465,7 @@ DsoError pipeline_run(FrameInfo            *frames,
         out.data = (float *)calloc((size_t)W * H, sizeof(float));
         if (!out.data) { err = DSO_ERR_ALLOC; goto done; }
 
-        PIPE_CHECK(integration_gpu_finalize(ctx, n_frames, &out, 0), finalize_err);
+        PIPE_CHECK(integration_gpu_finalize(ctx, n_frames, &out, 0), finalize_err, "finalize");
 
         printf("pipeline: saving to %s\n", config->output_file);
         err = fits_save(config->output_file, &out);

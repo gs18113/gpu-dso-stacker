@@ -51,11 +51,16 @@ typedef struct {
  * filepath     : absolute or relative path to the FITS frame
  * is_reference : 1 if this frame is the alignment reference, 0 otherwise
  * H            : backward homography (ref → src); zero-init when not provided
+ * width, height: cached image dimensions
+ * pattern      : cached BayerPattern
  */
 typedef struct {
     char       filepath[4096];
     int        is_reference;
     Homography H;
+    int        width;
+    int        height;
+    int        pattern;
 } FrameInfo;
 
 /*

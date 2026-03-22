@@ -88,6 +88,16 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
     int SW = src->width,  SH = src->height;
     int DW = dst->width,  DH = dst->height;
 
+    /* Check for identity transform (fast path) */
+    int is_identity = (fabs(hi[0]-1.0) < 1e-9 && fabs(hi[4]-1.0) < 1e-9 && fabs(hi[8]-1.0) < 1e-9 &&
+                       fabs(hi[1]) < 1e-9 && fabs(hi[2]) < 1e-9 && fabs(hi[3]) < 1e-9 &&
+                       fabs(hi[5]) < 1e-9 && fabs(hi[6]) < 1e-9 && fabs(hi[7]) < 1e-9);
+
+    if (is_identity && SW == DW && SH == DH) {
+        memcpy(dst->data, src->data, (size_t)SW * SH * sizeof(float));
+        return DSO_OK;
+    }
+
 #pragma omp parallel for schedule(static)
     for (int dy = 0; dy < DH; dy++) {
         for (int dx = 0; dx < DW; dx++) {
@@ -119,15 +129,23 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
             float accum      = 0.f;
             float weight_sum = 0.f;
 
-            for (int j = -2; j <= 3; j++) {
-                int row = iy + j;
-                float wy = lanczos_weight(sy - (float)(iy + j));
+            /* Pre-calculate 6 weights for x and 6 for y */
+            float wx_arr[6], wy_arr[6];
+            for (int k = 0; k < 6; k++) {
+                wx_arr[k] = lanczos_weight(sx - (float)(ix - 2 + k));
+                wy_arr[k] = lanczos_weight(sy - (float)(iy - 2 + k));
+            }
 
-                for (int i = -2; i <= 3; i++) {
-                    int col = ix + i;
-                    if (row < 0 || row >= SH || col < 0 || col >= SW) continue;
+            for (int j = 0; j < 6; j++) {
+                int row = iy - 2 + j;
+                if (row < 0 || row >= SH) continue;
+                float wy = wy_arr[j];
 
-                    float wx = lanczos_weight(sx - (float)(ix + i));
+                for (int i = 0; i < 6; i++) {
+                    int col = ix - 2 + i;
+                    if (col < 0 || col >= SW) continue;
+
+                    float wx = wx_arr[i];
                     float w  = wx * wy;
                     accum      += w * src->data[row * SW + col];
                     weight_sum += w;

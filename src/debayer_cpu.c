@@ -1,12 +1,10 @@
 /*
  * debayer_cpu.c — CPU VNG Bayer demosaicing with OpenMP.
  *
- * Direct port of the vng_debayer_kernel in debayer_gpu.cu.  The algorithm is
- * identical; the only differences are:
- *   - No shared memory: pixels are read directly from the source array with an
- *     inline bounds-clamping helper (out-of-bounds → 0, matching GPU behaviour).
- *   - OpenMP parallelism: the outer y × x pixel loops are parallelised with
- *     #pragma omp parallel for collapse(2); each pixel is fully independent.
+ * Implements the Variable Number of Gradients (VNG) algorithm.
+ * For each pixel, 8 directional gradients are computed in a 5x5
+ * neighborhood. Missing colors are interpolated by averaging colors along
+ * directions with low gradients.
  */
 
 #include "debayer_cpu.h"
@@ -18,20 +16,12 @@
  * Internal helpers
  * ------------------------------------------------------------------------- */
 
-/*
- * src_at — read source pixel with zero out-of-bounds padding.
- * Matches the GPU shared-memory apron strategy (boundary pixels = 0).
- */
 static inline float src_at(const float *src, int x, int y, int W, int H)
 {
     if (x < 0 || x >= W || y < 0 || y >= H) return 0.f;
     return src[y * W + x];
 }
 
-/*
- * bayer_channel — return 0=R, 1=G, 2=B for pixel at (x,y) given pattern.
- * Exact copy of the device function in debayer_gpu.cu.
- */
 static inline int bayer_channel(int x, int y, int pattern)
 {
     int px = x & 1, py = y & 1;
@@ -44,98 +34,106 @@ static inline int bayer_channel(int x, int y, int pattern)
     }
 }
 
-/* -------------------------------------------------------------------------
- * Public API
- * ------------------------------------------------------------------------- */
-
 DsoError debayer_cpu(const float *src, float *dst,
                      int W, int H, BayerPattern pattern)
 {
     if (!src || !dst || W <= 0 || H <= 0) return DSO_ERR_INVALID_ARG;
 
-    /* Monochrome fast path */
     if (pattern == BAYER_NONE) {
         memcpy(dst, src, (size_t)W * H * sizeof(float));
         return DSO_OK;
     }
 
-    int pat = (int)pattern;   /* integer for switch inside parallel region */
-
-    /* Cardinal direction offsets and gradient-index mapping (N, E, S, W) */
-    static const int card_dx[4] = { 0, 1,  0, -1};
-    static const int card_dy[4] = {-1, 0,  1,  0};
-    static const int card_gi[4] = { 0, 2,  4,  6};
-
-    /* Diagonal direction offsets and gradient-index mapping (NE, SE, SW, NW) */
-    static const int diag_dx[4] = { 1,  1, -1, -1};
-    static const int diag_dy[4] = {-1,  1,  1, -1};
-    static const int diag_gi[4] = { 1,  3,  5,  7};
+    int pat = (int)pattern;
 
 #pragma omp parallel for collapse(2) schedule(static)
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
-
-            /* ---- 1. Channel of this CFA pixel ---- */
-            int chan = bayer_channel(x, y, pat);
-
-            /* ---- 2. Eight directional gradients ----
-             * Each gradient uses ±2-pixel offsets so both ends sample the same
-             * channel (they span one full 2×2 CFA period). */
+            /* 1. Calculate 8 gradients in a 5x5 area */
             float g[8];
-            g[0] = fabsf(src_at(src,x,   y-2,W,H) - src_at(src,x, y,W,H));  /* N  */
-            g[1] = fabsf(src_at(src,x+2, y-2,W,H) - src_at(src,x, y,W,H));  /* NE */
-            g[2] = fabsf(src_at(src,x+2, y,  W,H) - src_at(src,x, y,W,H));  /* E  */
-            g[3] = fabsf(src_at(src,x+2, y+2,W,H) - src_at(src,x, y,W,H));  /* SE */
-            g[4] = fabsf(src_at(src,x,   y+2,W,H) - src_at(src,x, y,W,H));  /* S  */
-            g[5] = fabsf(src_at(src,x-2, y+2,W,H) - src_at(src,x, y,W,H));  /* SW */
-            g[6] = fabsf(src_at(src,x-2, y,  W,H) - src_at(src,x, y,W,H));  /* W  */
-            g[7] = fabsf(src_at(src,x-2, y-2,W,H) - src_at(src,x, y,W,H));  /* NW */
+            float self = src_at(src, x, y, W, H);
 
-            /* ---- 3. Gradient threshold τ = mean + min ---- */
-            float gsum = 0.f, gmin = g[0];
+            /* North, South, East, West */
+            g[0] = fabsf(src_at(src,x,y-2,W,H) - src_at(src,x,y,W,H)) +
+                   fabsf(src_at(src,x,y-1,W,H) - src_at(src,x,y+1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x-1,y-1,W,H) - src_at(src,x-1,y+1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x+1,y-1,W,H) - src_at(src,x+1,y+1,W,H)) * 0.5f; /* N */
+            
+            g[1] = fabsf(src_at(src,x,y+2,W,H) - src_at(src,x,y,W,H)) +
+                   fabsf(src_at(src,x,y+1,W,H) - src_at(src,x,y-1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x-1,y+1,W,H) - src_at(src,x-1,y-1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x+1,y+1,W,H) - src_at(src,x+1,y-1,W,H)) * 0.5f; /* S */
+
+            g[2] = fabsf(src_at(src,x+2,y,W,H) - src_at(src,x,y,W,H)) +
+                   fabsf(src_at(src,x+1,y,W,H) - src_at(src,x-1,y,W,H)) * 0.5f +
+                   fabsf(src_at(src,x+1,y-1,W,H) - src_at(src,x-1,y-1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x+1,y+1,W,H) - src_at(src,x-1,y+1,W,H)) * 0.5f; /* E */
+
+            g[3] = fabsf(src_at(src,x-2,y,W,H) - src_at(src,x,y,W,H)) +
+                   fabsf(src_at(src,x-1,y,W,H) - src_at(src,x+1,y,W,H)) * 0.5f +
+                   fabsf(src_at(src,x-1,y-1,W,H) - src_at(src,x+1,y-1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x-1,y+1,W,H) - src_at(src,x+1,y+1,W,H)) * 0.5f; /* W */
+
+            /* Diagonals */
+            g[4] = fabsf(src_at(src,x+2,y-2,W,H) - src_at(src,x,y,W,H)) +
+                   fabsf(src_at(src,x+1,y-1,W,H) - src_at(src,x-1,y+1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x,y-1,W,H) - src_at(src,x-1,y,W,H)) * 0.5f +
+                   fabsf(src_at(src,x+1,y,W,H) - src_at(src,x,y+1,W,H)) * 0.5f; /* NE */
+
+            g[5] = fabsf(src_at(src,x-2,y-2,W,H) - src_at(src,x,y,W,H)) +
+                   fabsf(src_at(src,x-1,y-1,W,H) - src_at(src,x+1,y+1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x,y-1,W,H) - src_at(src,x+1,y,W,H)) * 0.5f +
+                   fabsf(src_at(src,x-1,y,W,H) - src_at(src,x,y+1,W,H)) * 0.5f; /* NW */
+
+            g[6] = fabsf(src_at(src,x+2,y+2,W,H) - src_at(src,x,y,W,H)) +
+                   fabsf(src_at(src,x+1,y+1,W,H) - src_at(src,x-1,y-1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x,y+1,W,H) - src_at(src,x+1,y,W,H)) * 0.5f +
+                   fabsf(src_at(src,x-1,y,W,H) - src_at(src,x,y-1,W,H)) * 0.5f; /* SE */
+
+            g[7] = fabsf(src_at(src,x-2,y+2,W,H) - src_at(src,x,y,W,H)) +
+                   fabsf(src_at(src,x-1,y+1,W,H) - src_at(src,x+1,y-1,W,H)) * 0.5f +
+                   fabsf(src_at(src,x,y+1,W,H) - src_at(src,x-1,y,W,H)) * 0.5f +
+                   fabsf(src_at(src,x+1,y,W,H) - src_at(src,x,y-1,W,H)) * 0.5f; /* SW */
+
+            /* 2. Threshold */
+            float gsum = 0.f, gmin = g[0], gmax = g[0];
             for (int i = 0; i < 8; i++) {
                 gsum += g[i];
                 if (g[i] < gmin) gmin = g[i];
+                if (g[i] > gmax) gmax = g[i];
             }
-            float tau = gsum / 8.f + gmin;
+            float tau = 1.5f * gmin + 0.5f * (gmax - gmin);
 
-            /* ---- 4. Accumulate colour estimates from selected directions ---- */
+            /* 3. Interpolate R, G, B */
             float R_sum = 0.f, G_sum = 0.f, B_sum = 0.f;
-            float R_w   = 0.f, G_w   = 0.f, B_w   = 0.f;
-            float self  = src_at(src, x, y, W, H);
+            int R_count = 0, G_count = 0, B_count = 0;
+            int chan = bayer_channel(x, y, pat);
 
-            for (int d = 0; d < 4; d++) {
-                if (g[card_gi[d]] > tau) continue;
-                int nx = x + card_dx[d], ny = y + card_dy[d];
-                float nb_val  = src_at(src, nx, ny, W, H);
-                int   nb_chan = bayer_channel(nx, ny, pat);
-                float est     = (self + nb_val) * 0.5f;
-                if      (nb_chan == 0) { R_sum += est; R_w += 1.f; }
-                else if (nb_chan == 1) { G_sum += est; G_w += 1.f; }
-                else                  { B_sum += est; B_w += 1.f; }
+            /* Directions: N, S, E, W, NE, NW, SE, SW */
+            const int dx[8] = {0, 0, 1, -1, 1, -1, 1, -1};
+            const int dy[8] = {-1, 1, 0, 0, -1, -1, 1, 1};
+
+            for (int i = 0; i < 8; i++) {
+                if (g[i] <= tau) {
+                    int nx = x + dx[i], ny = y + dy[i];
+                    int nchan = bayer_channel(nx, ny, pat);
+                    float nv = src_at(src, nx, ny, W, H);
+                    
+                    if (nchan == 0)      { R_sum += nv; R_count++; }
+                    else if (nchan == 1) { G_sum += nv; G_count++; }
+                    else                 { B_sum += nv; B_count++; }
+                }
             }
 
-            for (int d = 0; d < 4; d++) {
-                if (g[diag_gi[d]] > tau) continue;
-                int nx = x + diag_dx[d], ny = y + diag_dy[d];
-                float nb_val  = src_at(src, nx, ny, W, H);
-                int   nb_chan = bayer_channel(nx, ny, pat);
-                float est     = (self + nb_val) * 0.5f;
-                if      (nb_chan == 0) { R_sum += est; R_w += 1.f; }
-                else if (nb_chan == 1) { G_sum += est; G_w += 1.f; }
-                else                  { B_sum += est; B_w += 1.f; }
-            }
+            /* Own channel */
+            if (chan == 0)      { R_sum += self; R_count++; }
+            else if (chan == 1) { G_sum += self; G_count++; }
+            else                { B_sum += self; B_count++; }
 
-            /* Own channel contributes directly */
-            if      (chan == 0) { R_sum += self; R_w += 1.f; }
-            else if (chan == 1) { G_sum += self; G_w += 1.f; }
-            else                { B_sum += self; B_w += 1.f; }
+            float R_est = (R_count > 0) ? (R_sum / R_count) : self;
+            float G_est = (G_count > 0) ? (G_sum / G_count) : self;
+            float B_est = (B_count > 0) ? (B_sum / B_count) : self;
 
-            float R_est = (R_w > 0.f) ? (R_sum / R_w) : self;
-            float G_est = (G_w > 0.f) ? (G_sum / G_w) : self;
-            float B_est = (B_w > 0.f) ? (B_sum / B_w) : self;
-
-            /* ---- 5. ITU-R BT.709 luminance ---- */
             dst[y * W + x] = 0.2126f * R_est + 0.7152f * G_est + 0.0722f * B_est;
         }
     }

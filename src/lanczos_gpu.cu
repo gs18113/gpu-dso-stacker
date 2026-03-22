@@ -68,35 +68,6 @@ __global__ static void build_coord_maps(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Host-side 3×3 homography inversion (unused; kept for reference)            */
-/* -------------------------------------------------------------------------- */
-
-static DsoError invert_homography_h(const double *h, double *hi)
-{
-    double c00 =  h[4]*h[8] - h[5]*h[7];
-    double c01 = -(h[3]*h[8] - h[5]*h[6]);
-    double c02 =  h[3]*h[7] - h[4]*h[6];
-    double c10 = -(h[1]*h[8] - h[2]*h[7]);
-    double c11 =  h[0]*h[8] - h[2]*h[6];
-    double c12 = -(h[0]*h[7] - h[1]*h[6]);
-    double c20 =  h[1]*h[5] - h[2]*h[4];
-    double c21 = -(h[0]*h[5] - h[2]*h[3]);
-    double c22 =  h[0]*h[4] - h[1]*h[3];
-
-    double det = h[0]*c00 + h[1]*c01 + h[2]*c02;
-    if (fabs(det) < 1e-12) {
-        fprintf(stderr, "lanczos_gpu: homography is singular (det=%g)\n", det);
-        return DSO_ERR_INVALID_ARG;
-    }
-
-    double inv = 1.0 / det;
-    hi[0] = c00*inv; hi[1] = c10*inv; hi[2] = c20*inv;
-    hi[3] = c01*inv; hi[4] = c11*inv; hi[5] = c21*inv;
-    hi[6] = c02*inv; hi[7] = c12*inv; hi[8] = c22*inv;
-    return DSO_OK;
-}
-
-/* -------------------------------------------------------------------------- */
 /* Public API                                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -158,6 +129,10 @@ void lanczos_gpu_cleanup(void) {}
  *   4. Launch build_coord_maps kernel with 16×16 thread blocks.
  *   5. Call nppiRemap_32f_C1R_Ctx (NPPI_INTER_LANCZOS).
  *   6. Async-copy result back, synchronise, free device buffers.
+ *
+ * NOTE: This function synchronises internally before returning to safely
+ * free the temporary device-local scratch buffers.  For high-performance
+ * multi-stream overlap, use the `d2d` variant with pre-allocated scratch.
  *
  * Steps in bytes for row-major float32: step = width * sizeof(float).
  */

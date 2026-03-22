@@ -22,9 +22,11 @@
  * Data-flow (11-column CSV, pre-computed transforms):
  *   Phase 1 is skipped.  Phase 2 proceeds as above.
  *
- * Memory:
- *   All N transformed frames are held in RAM simultaneously before integration.
- *   For the reference frame the identity transform produces a direct copy.
+ * Memory Optimization:
+ *   Previous implementation held all N transformed frames in RAM.  Current
+ *   implementation uses mini-batching (default B=32) to cap memory usage.
+ *   For kappa-sigma integration, this uses a mini-batch approximation
+ *   identical to the GPU pipeline.
  */
 
 #include "pipeline.h"
@@ -40,14 +42,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <omp.h>
+
+#define PIPELINE_CPU_BATCH_SIZE 32
 
 /* -------------------------------------------------------------------------
  * Convenience error-check macro: jump to label on non-OK DsoError.
+ * Includes the current filename in the error message for context.
  * ------------------------------------------------------------------------- */
-#define PIPE_CHECK(call, label)                      \
+#define PIPE_CHECK(call, label, path)                \
     do {                                             \
         DsoError _pe = (call);                       \
-        if (_pe != DSO_OK) { err = _pe; goto label; }\
+        if (_pe != DSO_OK) {                         \
+            fprintf(stderr, "pipeline error %d at %s\n", (int)_pe, (path)); \
+            err = _pe; goto label;                   \
+        }                                            \
     } while (0)
 
 /* -------------------------------------------------------------------------
@@ -81,7 +90,7 @@ static DsoError phase1_cpu(FrameInfo            *frames,
 
         /* Load FITS */
         Image raw = {NULL, 0, 0};
-        PIPE_CHECK(fits_load(frames[i].filepath, &raw), cleanup);
+        PIPE_CHECK(fits_load(frames[i].filepath, &raw), cleanup, frames[i].filepath);
         if (raw.width != W || raw.height != H) {
             fprintf(stderr, "pipeline_cpu phase1: frame %d size mismatch "
                     "(%d×%d vs %d×%d)\n", i, raw.width, raw.height, W, H);
@@ -93,7 +102,10 @@ static DsoError phase1_cpu(FrameInfo            *frames,
         /* Apply calibration (dark subtract + flat divide) before debayering */
         if (config->calib) {
             err = calib_apply_cpu(&raw, config->calib);
-            if (err != DSO_OK) { image_free(&raw); goto cleanup; }
+            if (err != DSO_OK) { 
+                fprintf(stderr, "pipeline_cpu phase1: calibration failed for %s\n", frames[i].filepath);
+                image_free(&raw); goto cleanup; 
+            }
         }
 
         /* Determine Bayer pattern */
@@ -108,18 +120,32 @@ static DsoError phase1_cpu(FrameInfo            *frames,
 
         err = debayer_cpu(raw.data, lum.data, W, H, pat);
         image_free(&raw);
-        if (err != DSO_OK) { image_free(&lum); goto cleanup; }
+        if (err != DSO_OK) { 
+            fprintf(stderr, "pipeline_cpu phase1: debayer failed for %s\n", frames[i].filepath);
+            image_free(&lum); goto cleanup; 
+        }
+
+        /* Cache metadata for Phase 2 */
+        frames[i].width   = W;
+        frames[i].height  = H;
+        frames[i].pattern = (int)pat;
 
         /* Moffat convolve + threshold */
         err = star_detect_cpu_detect(lum.data, conv_buf, mask_buf, W, H,
                                       &config->moffat, config->star_sigma);
-        if (err != DSO_OK) { image_free(&lum); goto cleanup; }
+        if (err != DSO_OK) { 
+            fprintf(stderr, "pipeline_cpu phase1: detection failed for %s\n", frames[i].filepath);
+            image_free(&lum); goto cleanup; 
+        }
 
         /* CCL + weighted CoM */
         err = star_detect_cpu_ccl_com(mask_buf, lum.data, conv_buf, W, H,
                                        config->top_stars, &star_lists[i]);
         image_free(&lum);
-        if (err != DSO_OK) goto cleanup;
+        if (err != DSO_OK) {
+            fprintf(stderr, "pipeline_cpu phase1: CCL failed for %s\n", frames[i].filepath);
+            goto cleanup;
+        }
         printf("[Phase 1 CPU] Frame %d: %d star(s) detected\n",
                i, star_lists[i].n);
     }
@@ -140,7 +166,7 @@ static DsoError phase1_cpu(FrameInfo            *frames,
         int n_inliers = 0;
         PIPE_CHECK(ransac_compute_homography(
                        &star_lists[ref_idx], &star_lists[i],
-                       &config->ransac, &frames[i].H, &n_inliers), cleanup);
+                       &config->ransac, &frames[i].H, &n_inliers), cleanup, frames[i].filepath);
 
         printf("[Phase 1 CPU] Frame %d: aligned with %d inlier star match(es)\n",
                i, n_inliers);
@@ -164,7 +190,7 @@ cleanup:
 }
 
 /* -------------------------------------------------------------------------
- * Phase 2: Lanczos transform + integration
+ * Phase 2: Lanczos transform + integration (mini-batched)
  * ------------------------------------------------------------------------- */
 
 static DsoError phase2_cpu(FrameInfo            *frames,
@@ -174,77 +200,101 @@ static DsoError phase2_cpu(FrameInfo            *frames,
 {
     DsoError     err     = DSO_OK;
     long         npix    = (long)W * H;
-    Image       *xformed = NULL;   /* array of n_frames transformed Images */
-    const Image **ptrs   = NULL;   /* pointer array for integrate_* */
-    Image        out     = {NULL, 0, 0};
+    Image        out     = {NULL, W, H};
+    float       *global_sum   = NULL;
+    int         *global_count = NULL;
 
-    xformed = (Image *)calloc((size_t)n_frames, sizeof(Image));
-    ptrs    = (const Image **)malloc((size_t)n_frames * sizeof(Image *));
+    global_sum   = (float *)calloc((size_t)npix, sizeof(float));
+    global_count = (int   *)calloc((size_t)npix, sizeof(int));
+    if (!global_sum || !global_count) { err = DSO_ERR_ALLOC; goto cleanup; }
+
+    int batch_size = PIPELINE_CPU_BATCH_SIZE;
+    Image       *xformed = (Image *)calloc((size_t)batch_size, sizeof(Image));
+    const Image **ptrs   = (const Image **)malloc((size_t)batch_size * sizeof(Image *));
     if (!xformed || !ptrs) { err = DSO_ERR_ALLOC; goto cleanup; }
 
-    /* Transform every frame */
-    for (int i = 0; i < n_frames; i++) {
-        Image raw = {NULL, 0, 0};
-        Image lum = {NULL, W, H};
+    for (int b_start = 0; b_start < n_frames; b_start += batch_size) {
+        int b_end = b_start + batch_size;
+        if (b_end > n_frames) b_end = n_frames;
+        int n_batch = b_end - b_start;
 
-        PIPE_CHECK(fits_load(frames[i].filepath, &raw), cleanup);
-        if (raw.width != W || raw.height != H) {
-            fprintf(stderr, "pipeline_cpu phase2: frame %d size mismatch\n", i);
+        printf("[Phase 2 CPU] Processing batch %d-%d/%d...\n",
+               b_start + 1, b_end, n_frames);
+
+        /* 1. Transform batch frames */
+        for (int i = 0; i < n_batch; i++) {
+            int f_idx = b_start + i;
+            Image raw = {NULL, 0, 0};
+            PIPE_CHECK(fits_load(frames[f_idx].filepath, &raw), cleanup, frames[f_idx].filepath);
+
+            /* Calibration */
+            if (config->calib) calib_apply_cpu(&raw, config->calib);
+
+            /* Bayer → Luminance (Use cached pattern if available) */
+            BayerPattern pat = (BayerPattern)frames[f_idx].pattern;
+            if (pat == BAYER_NONE && config->bayer_override == BAYER_NONE) {
+                /* Fallback if Phase 1 was skipped or cached as NONE */
+                fits_get_bayer_pattern(frames[f_idx].filepath, &pat);
+            } else if (config->bayer_override != BAYER_NONE) {
+                pat = config->bayer_override;
+            }
+
+            Image lum = {NULL, W, H};
+            lum.data = (float *)malloc((size_t)npix * sizeof(float));
+            PIPE_CHECK(debayer_cpu(raw.data, lum.data, W, H, pat), cleanup, frames[f_idx].filepath);
             image_free(&raw);
-            err = DSO_ERR_INVALID_ARG;
-            goto cleanup;
+
+            /* Transform */
+            xformed[i].width  = W;
+            xformed[i].height = H;
+            xformed[i].data   = (float *)calloc((size_t)npix, sizeof(float));
+            PIPE_CHECK(lanczos_transform_cpu(&lum, &xformed[i], &frames[f_idx].H), cleanup, frames[f_idx].filepath);
+            image_free(&lum);
+
+            ptrs[i] = &xformed[i];
         }
 
-        /* Apply calibration (dark subtract + flat divide) before debayering */
-        if (config->calib) {
-            err = calib_apply_cpu(&raw, config->calib);
-            if (err != DSO_OK) { image_free(&raw); goto cleanup; }
+        /* 2. Integrate batch */
+        Image b_out = {NULL, W, H};
+        if (config->use_kappa_sigma) {
+            PIPE_CHECK(integrate_kappa_sigma(ptrs, n_batch, &b_out,
+                                              config->kappa, config->iterations),
+                       cleanup, "batch integration");
+        } else {
+            PIPE_CHECK(integrate_mean(ptrs, n_batch, &b_out), cleanup, "batch integration");
         }
 
-        /* Bayer pattern */
-        BayerPattern pat = config->bayer_override;
-        if (pat == BAYER_NONE)
-            fits_get_bayer_pattern(frames[i].filepath, &pat);
+        /* 3. Accumulate batch into global */
+#pragma omp parallel for schedule(static)
+        for (long p = 0; p < npix; p++) {
+            global_sum[p]   += b_out.data[p] * n_batch;
+            global_count[p] += n_batch;
+        }
+        image_free(&b_out);
 
-        /* Debayer → luminance */
-        lum.data = (float *)malloc((size_t)npix * sizeof(float));
-        if (!lum.data) { image_free(&raw); err = DSO_ERR_ALLOC; goto cleanup; }
-
-        err = debayer_cpu(raw.data, lum.data, W, H, pat);
-        image_free(&raw);
-        if (err != DSO_OK) { image_free(&lum); goto cleanup; }
-
-        /* Allocate output frame (zero-filled; lanczos leaves OOB pixels unset) */
-        xformed[i].data   = (float *)calloc((size_t)npix, sizeof(float));
-        xformed[i].width  = W;
-        xformed[i].height = H;
-        if (!xformed[i].data) { image_free(&lum); err = DSO_ERR_ALLOC; goto cleanup; }
-
-        /* Lanczos-3 warp using backward homography (ref → src) */
-        err = lanczos_transform_cpu(&lum, &xformed[i], &frames[i].H);
-        image_free(&lum);
-        if (err != DSO_OK) goto cleanup;
-
-        ptrs[i] = &xformed[i];
+        /* 4. Free batch transformed frames */
+        for (int i = 0; i < n_batch; i++) {
+            image_free(&xformed[i]);
+        }
     }
 
-    /* Integration */
-    if (config->use_kappa_sigma) {
-        PIPE_CHECK(integrate_kappa_sigma(ptrs, n_frames, &out,
-                                          config->kappa, config->iterations),
-                   cleanup);
-    } else {
-        PIPE_CHECK(integrate_mean(ptrs, n_frames, &out), cleanup);
+    /* Finalize: global_sum / global_count */
+    out.data = (float *)malloc((size_t)npix * sizeof(float));
+    if (!out.data) { err = DSO_ERR_ALLOC; goto cleanup; }
+#pragma omp parallel for schedule(static)
+    for (long p = 0; p < npix; p++) {
+        out.data[p] = (global_count[p] > 0) ? (global_sum[p] / global_count[p]) : 0.0f;
     }
 
     /* Save result */
-    PIPE_CHECK(fits_save(config->output_file, &out), cleanup);
+    PIPE_CHECK(fits_save(config->output_file, &out), cleanup, config->output_file);
 
 cleanup:
     image_free(&out);
+    free(global_sum);
+    free(global_count);
     if (xformed) {
-        for (int i = 0; i < n_frames; i++)
-            image_free(&xformed[i]);
+        for (int i = 0; i < batch_size; i++) image_free(&xformed[i]);
         free(xformed);
     }
     free(ptrs);

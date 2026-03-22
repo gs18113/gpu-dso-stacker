@@ -87,17 +87,33 @@ DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
 
     long npix = (long)W * H;
 
+    int max_threads = 1;
+#ifdef _OPENMP
+    max_threads = omp_get_max_threads();
+#endif
+
+    /* Per-thread workspaces to avoid VLAs on stack */
+    float *all_vals = (float *)malloc((size_t)max_threads * n * sizeof(float));
+    int   *all_actv = (int   *)malloc((size_t)max_threads * n * sizeof(int));
+
+    if (!all_vals || !all_actv) {
+        free(all_vals); free(all_actv);
+        free(out->data); out->data = NULL;
+        return DSO_ERR_ALLOC;
+    }
+
     /*
-     * Each pixel is fully independent: per-pixel vals[] and mask[] are
-     * declared as VLAs inside the loop body so every OpenMP thread gets
-     * its own stack copy.  schedule(dynamic) handles the variable work
-     * per pixel (different numbers of clipping iterations).
+     * Each pixel is fully independent. Each OpenMP thread uses its own
+     * dedicated slice of the all_vals/all_actv workspace.
      */
 #pragma omp parallel for schedule(dynamic, 64)
     for (long p = 0; p < npix; p++) {
-        /* Per-iteration work buffers (VLA: one per OpenMP thread iteration) */
-        float vals[n];
-        int   actv[n];
+        int tid = 0;
+#ifdef _OPENMP
+        tid = omp_get_thread_num();
+#endif
+        float *vals = &all_vals[tid * n];
+        int   *actv = &all_actv[tid * n];
 
         for (int i = 0; i < n; i++) {
             vals[i] = frames[i]->data[p];
@@ -148,5 +164,7 @@ DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
         }
     }
 
+    free(all_vals);
+    free(all_actv);
     return DSO_OK;
 }

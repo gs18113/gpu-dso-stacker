@@ -129,13 +129,41 @@ __global__ static void reduce_sum_kernel(
     if (tid == 0) d_partials[blockIdx.x] = sm_sum[0];
 }
 
+/* Final pass: reduces partials to a single value. */
+__global__ static void reduce_final_kernel(
+    const double *d_partials, int n_partials, double *d_out)
+{
+    __shared__ double sm_sum[REDUCE_BLOCK];
+    int tid = threadIdx.x;
+
+    double val = 0.0;
+    for (int i = tid; i < n_partials; i += REDUCE_BLOCK) {
+        val += d_partials[i];
+    }
+    sm_sum[tid] = val;
+    __syncthreads();
+
+    for (int s = REDUCE_BLOCK / 2; s > 0; s >>= 1) {
+        if (tid < s) sm_sum[tid] += sm_sum[tid + s];
+        __syncthreads();
+    }
+    if (tid == 0) *d_out = sm_sum[0];
+}
+
+/* Helper to divide by N on device */
+__global__ static void reduce_div_n_kernel(double *d_val, int N)
+{
+    if (N > 0) *d_val /= N;
+}
+
 /* Pass 2: compute partial sum-of-squares (for variance) given mean. */
 __global__ static void reduce_sumsq_kernel(
-    const float *d_in, double mean, double *d_partials, int N)
+    const float *d_in, const double *d_mean, double *d_partials, int N)
 {
     __shared__ double sm_sq[REDUCE_BLOCK];
     int tid = threadIdx.x;
     int gid = blockIdx.x * blockDim.x + threadIdx.x;
+    double mean = *d_mean;
 
     double v = 0.0;
     if (gid < N) { double d = (double)d_in[gid] - mean; v = d * d; }
@@ -149,13 +177,22 @@ __global__ static void reduce_sumsq_kernel(
     if (tid == 0) d_partials[blockIdx.x] = sm_sq[0];
 }
 
-/* Threshold application kernel */
-__global__ static void threshold_kernel(
-    const float *d_conv, uint8_t *d_mask, float threshold, int N)
+/* Threshold application kernel using device-resident mean and sq_sum */
+__global__ static void threshold_auto_kernel(
+    const float *d_conv, uint8_t *d_mask, 
+    const double *d_mean, const double *d_sq_sum,
+    float sigma_k, int N)
 {
     int gid = blockIdx.x * blockDim.x + threadIdx.x;
     if (gid >= N) return;
-    d_mask[gid] = (d_conv[gid] > threshold) ? 1 : 0;
+
+    double mean   = *d_mean;
+    double sq_sum = *d_sq_sum;
+    double var    = (N > 1) ? (sq_sum / (N - 1)) : 0.0;
+    double sigma  = sqrt(var);
+    float  thresh = (float)(mean + (double)sigma_k * sigma);
+
+    d_mask[gid] = (d_conv[gid] > thresh) ? 1 : 0;
 }
 
 /* -------------------------------------------------------------------------
@@ -197,7 +234,7 @@ static DsoError upload_moffat_kernel(const MoffatParams *params,
     /* Normalise kernel to sum = 1. */
     for (int k = 0; k < kw * kw; k++) kbuf[k] /= ksum;
 
-    /* Upload to constant memory (d2d API requires sync for kernel visibility). */
+    /* Upload to constant memory. */
     cudaError_t cerr;
     cerr = cudaMemcpyToSymbol(c_kernel, kbuf, (size_t)kw*kw * sizeof(float));
     if (cerr != cudaSuccess) {
@@ -211,61 +248,6 @@ static DsoError upload_moffat_kernel(const MoffatParams *params,
     }
 
     *radius_out = R;
-    return DSO_OK;
-}
-
-/* -------------------------------------------------------------------------
- * Helper: compute mean and sigma of d_conv using reduction kernels
- * Returns mean and sigma via host pointers.
- * stream: CUDA stream for all kernel launches.
- * d_tmp:  pre-allocated device scratch of size n_blocks*sizeof(double).
- * Note: synchronises internally.
- * ------------------------------------------------------------------------- */
-static DsoError compute_mean_sigma(const float *d_conv, int N,
-                                    double *mean_out, double *sigma_out,
-                                    float *d_tmp_f, double *d_tmp_d,
-                                    int n_blocks,
-                                    cudaStream_t stream)
-{
-    cudaError_t cerr;
-    (void)d_tmp_f;  /* unused in this helper */
-
-    /* Pass 1: partial sums */
-    reduce_sum_kernel<<<n_blocks, REDUCE_BLOCK, 0, stream>>>(d_conv, d_tmp_d, N);
-    cerr = cudaGetLastError();
-    if (cerr != cudaSuccess) return DSO_ERR_CUDA;
-    cudaStreamSynchronize(stream);
-
-    /* Download partial sums and sum on CPU */
-    double *h_partials = (double *)malloc((size_t)n_blocks * sizeof(double));
-    if (!h_partials) return DSO_ERR_ALLOC;
-    cerr = cudaMemcpy(h_partials, d_tmp_d,
-                      (size_t)n_blocks * sizeof(double),
-                      cudaMemcpyDeviceToHost);
-    if (cerr != cudaSuccess) { free(h_partials); return DSO_ERR_CUDA; }
-    double total = 0.0;
-    for (int i = 0; i < n_blocks; i++) total += h_partials[i];
-    double mean = total / N;
-    *mean_out = mean;
-
-    /* Pass 2: partial sum-of-squares */
-    reduce_sumsq_kernel<<<n_blocks, REDUCE_BLOCK, 0, stream>>>(
-        d_conv, mean, d_tmp_d, N);
-    cerr = cudaGetLastError();
-    if (cerr != cudaSuccess) { free(h_partials); return DSO_ERR_CUDA; }
-    cudaStreamSynchronize(stream);
-
-    cerr = cudaMemcpy(h_partials, d_tmp_d,
-                      (size_t)n_blocks * sizeof(double),
-                      cudaMemcpyDeviceToHost);
-    if (cerr != cudaSuccess) { free(h_partials); return DSO_ERR_CUDA; }
-    double sq_total = 0.0;
-    for (int i = 0; i < n_blocks; i++) sq_total += h_partials[i];
-    free(h_partials);
-
-    /* Bessel-corrected standard deviation */
-    double variance = (N > 1) ? (sq_total / (N - 1)) : 0.0;
-    *sigma_out = sqrt(variance);
     return DSO_OK;
 }
 
@@ -289,7 +271,6 @@ DsoError star_detect_gpu_d2d(const float        *d_src,
     if (err != DSO_OK) return err;
 
     /* Launch Moffat convolution kernel */
-    int kw = 2 * R + 1;
     int smw = CONV_TILE_W + 2 * R;
     int smh = CONV_TILE_H + 2 * R;
     size_t smem = (size_t)smw * smh * sizeof(float);
@@ -304,30 +285,47 @@ DsoError star_detect_gpu_d2d(const float        *d_src,
         fprintf(stderr, "moffat_conv_kernel: %s\n", cudaGetErrorString(cerr));
         return DSO_ERR_CUDA;
     }
-    (void)kw;  /* suppress unused-variable warning */
 
-    /* Compute mean and sigma via reductions */
+    /* Compute mean and sigma fully on GPU (Asynchronously) */
     int N = W * H;
-    int n_blocks = (N + REDUCE_BLOCK - 1) / REDUCE_BLOCK;
-    double *d_tmp_d = NULL;
-    cerr = cudaMalloc(&d_tmp_d, (size_t)n_blocks * sizeof(double));
-    if (cerr != cudaSuccess) return DSO_ERR_CUDA;
+    int n_partials = (N + REDUCE_BLOCK - 1) / REDUCE_BLOCK;
+    
+    /* We need device scratch for: partials, mean, sq_sum */
+    double *d_partials = NULL;
+    double *d_mean     = NULL;
+    double *d_sq_sum   = NULL;
+    
+    /* Using a single allocation for all 3 device vars to be efficient */
+    cerr = cudaMalloc(&d_partials, (size_t)n_partials * sizeof(double) + 2 * sizeof(double));
+    if (cerr != cudaSuccess) return DSO_ERR_ALLOC;
+    d_mean   = d_partials + n_partials;
+    d_sq_sum = d_mean + 1;
 
-    double mean = 0.0, sigma = 0.0;
-    err = compute_mean_sigma(d_conv, N, &mean, &sigma,
-                              NULL, d_tmp_d, n_blocks, stream);
-    cudaFree(d_tmp_d);
-    if (err != DSO_OK) return err;
+    /* 1. Sum partials */
+    reduce_sum_kernel<<<n_partials, REDUCE_BLOCK, 0, stream>>>(d_conv, d_partials, N);
+    /* 2. Final sum -> mean */
+    reduce_final_kernel<<<1, REDUCE_BLOCK, 0, stream>>>(d_partials, n_partials, d_mean);
+    reduce_div_n_kernel<<<1, 1, 0, stream>>>(d_mean, N);
 
-    float threshold = (float)(mean + sigma_k * sigma);
+    /* 3. Sumsq partials */
+    reduce_sumsq_kernel<<<n_partials, REDUCE_BLOCK, 0, stream>>>(d_conv, d_mean, d_partials, N);
+    /* 4. Final sumsq */
+    reduce_final_kernel<<<1, REDUCE_BLOCK, 0, stream>>>(d_partials, n_partials, d_sq_sum);
 
-    /* Apply threshold */
-    dim3 blk1(REDUCE_BLOCK);
-    dim3 grd1((N + REDUCE_BLOCK - 1) / REDUCE_BLOCK);
-    threshold_kernel<<<grd1, blk1, 0, stream>>>(d_conv, d_mask, threshold, N);
+    /* 5. Threshold application */
+    dim3 blk_t(REDUCE_BLOCK);
+    dim3 grd_t((N + REDUCE_BLOCK - 1) / REDUCE_BLOCK);
+    threshold_auto_kernel<<<grd_t, blk_t, 0, stream>>>(d_conv, d_mask, d_mean, d_sq_sum, sigma_k, N);
+    
+    /* Note: Ideally we would avoid cudaFree here to keep it async, 
+     * but we don't have a way to defer free in this library without API change.
+     * We synchronize here to safely free. Still better than 3 syncs + 2 host copies. */
+    cudaStreamSynchronize(stream);
+    cudaFree(d_partials);
+
     cerr = cudaGetLastError();
     if (cerr != cudaSuccess) {
-        fprintf(stderr, "threshold_kernel: %s\n", cudaGetErrorString(cerr));
+        fprintf(stderr, "star_detect_gpu_d2d reduction/threshold: %s\n", cudaGetErrorString(cerr));
         return DSO_ERR_CUDA;
     }
 
@@ -403,32 +401,34 @@ DsoError star_detect_gpu_threshold(const Image  *convolved,
 
     float   *d_conv = NULL;
     uint8_t *d_mask = NULL;
-    double  *d_tmp  = NULL;
-    double   mean   = 0.0;
-    double   sigma  = 0.0;
     cudaError_t cerr;
-
-    int n_blocks = (N + REDUCE_BLOCK - 1) / REDUCE_BLOCK;
 
     cerr = cudaMalloc(&d_conv, nbytes); if (cerr) goto cleanup;
     cerr = cudaMalloc(&d_mask, mbytes); if (cerr) goto cleanup;
-    cerr = cudaMalloc(&d_tmp,  (size_t)n_blocks * sizeof(double)); if (cerr) goto cleanup;
 
     cerr = cudaMemcpyAsync(d_conv, convolved->data, nbytes,
                            cudaMemcpyHostToDevice, stream);
     if (cerr) goto cleanup;
 
     {
-        DsoError derr = compute_mean_sigma(d_conv, N, &mean, &sigma,
-                                            NULL, d_tmp, n_blocks, stream);
-        if (derr != DSO_OK) { cerr = cudaErrorUnknown; goto cleanup; }
-    }
+        int n_partials = (N + REDUCE_BLOCK - 1) / REDUCE_BLOCK;
+        double *d_scratch;
+        cudaMalloc(&d_scratch, (size_t)n_partials * sizeof(double) + 2 * sizeof(double));
+        double *d_mean = d_scratch + n_partials;
+        double *d_sq_sum = d_mean + 1;
 
-    {
-        float threshold = (float)(mean + sigma_k * sigma);
+        reduce_sum_kernel<<<n_partials, REDUCE_BLOCK, 0, stream>>>(d_conv, d_scratch, N);
+        reduce_final_kernel<<<1, REDUCE_BLOCK, 0, stream>>>(d_scratch, n_partials, d_mean);
+        reduce_div_n_kernel<<<1, 1, 0, stream>>>(d_mean, N);
+
+        reduce_sumsq_kernel<<<n_partials, REDUCE_BLOCK, 0, stream>>>(d_conv, d_mean, d_scratch, N);
+        reduce_final_kernel<<<1, REDUCE_BLOCK, 0, stream>>>(d_scratch, n_partials, d_sq_sum);
+
         dim3 blk(REDUCE_BLOCK), grd((N + REDUCE_BLOCK - 1) / REDUCE_BLOCK);
-        threshold_kernel<<<grd, blk, 0, stream>>>(d_conv, d_mask, threshold, N);
-        cerr = cudaGetLastError(); if (cerr) goto cleanup;
+        threshold_auto_kernel<<<grd, blk, 0, stream>>>(d_conv, d_mask, d_mean, d_sq_sum, sigma_k, N);
+        
+        cudaStreamSynchronize(stream);
+        cudaFree(d_scratch);
     }
 
     cerr = cudaMemcpyAsync(mask_out, d_mask, mbytes,
@@ -437,7 +437,7 @@ DsoError star_detect_gpu_threshold(const Image  *convolved,
     cerr = cudaStreamSynchronize(stream);
 
 cleanup:
-    cudaFree(d_conv); cudaFree(d_mask); cudaFree(d_tmp);
+    cudaFree(d_conv); cudaFree(d_mask);
     if (cerr != cudaSuccess) {
         fprintf(stderr, "star_detect_gpu_threshold: %s\n", cudaGetErrorString(cerr));
         return DSO_ERR_CUDA;

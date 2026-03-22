@@ -266,15 +266,42 @@ DsoError star_detect_cpu_ccl_com(const uint8_t *mask,
             label[i] = uf_find(parent, label[i]);
     }
 
-    /* ---- Allocate component statistics indexed by label (1..npix) ---- */
-    CompStats *stats = (CompStats *)calloc((size_t)(npix + 1), sizeof(CompStats));
-    if (!stats) {
+    /* ---- Pass 3: Re-map roots to a contiguous range [1, n_unique] ----
+     * This avoids allocating stats[npix+1] which is mostly empty. */
+    int *label_map = (int *)malloc((size_t)(npix + 1) * sizeof(int));
+    if (!label_map) {
         free(label); free(parent);
+        return DSO_ERR_ALLOC;
+    }
+    memset(label_map, 0, (size_t)(npix + 1) * sizeof(int));
+
+    int n_unique = 0;
+    for (int i = 0; i < npix; i++) {
+        int root = label[i];
+        if (root > 0 && label_map[root] == 0) {
+            label_map[root] = ++n_unique;
+        }
+    }
+    /* Apply map to label array */
+    for (int i = 0; i < npix; i++) {
+        if (label[i]) label[i] = label_map[label[i]];
+    }
+    free(label_map);
+    free(parent);
+
+    if (n_unique == 0) {
+        free(label);
+        return DSO_OK;
+    }
+
+    /* ---- Allocate component statistics indexed by re-mapped label (1..n_unique) ---- */
+    CompStats *stats = (CompStats *)calloc((size_t)(n_unique + 1), sizeof(CompStats));
+    if (!stats) {
+        free(label);
         return DSO_ERR_ALLOC;
     }
 
     /* ---- Accumulate per-component statistics ---- */
-    int n_components = 0;
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             int idx = y * W + x;
@@ -282,7 +309,7 @@ DsoError star_detect_cpu_ccl_com(const uint8_t *mask,
             if (!lbl) continue;  /* background */
 
             CompStats *s = &stats[lbl];
-            if (!s->valid) { s->valid = 1; n_components++; }
+            s->valid = 1;
 
             float orig_v  = original[idx];
             float conv_v  = convolved[idx];
@@ -299,24 +326,18 @@ DsoError star_detect_cpu_ccl_com(const uint8_t *mask,
     }
 
     free(label);
-    free(parent);
-
-    if (n_components == 0) {
-        free(stats);
-        return DSO_OK;
-    }
 
     /* ---- Build flat array of StarPos from valid component stats ---- */
-    int n_out = (n_components < top_k) ? n_components : top_k;
+    int n_out = (n_unique < top_k) ? n_unique : top_k;
     /* We need all components first to sort, then truncate to top_k. */
-    StarPos *tmp = (StarPos *)malloc((size_t)n_components * sizeof(StarPos));
+    StarPos *tmp = (StarPos *)malloc((size_t)n_unique * sizeof(StarPos));
     if (!tmp) {
         free(stats);
         return DSO_ERR_ALLOC;
     }
 
     int k = 0;
-    for (int lbl = 1; lbl <= npix && k < n_components; lbl++) {
+    for (int lbl = 1; lbl <= n_unique; lbl++) {
         CompStats *s = &stats[lbl];
         if (!s->valid) continue;
 
@@ -335,10 +356,10 @@ DsoError star_detect_cpu_ccl_com(const uint8_t *mask,
     free(stats);
 
     /* Sort by flux descending */
-    qsort(tmp, (size_t)n_components, sizeof(StarPos), cmp_flux_desc);
+    qsort(tmp, (size_t)n_unique, sizeof(StarPos), cmp_flux_desc);
 
-    /* Allocate final output array of size min(n_components, top_k) */
-    n_out = (n_components < top_k) ? n_components : top_k;
+    /* Allocate final output array of size min(n_unique, top_k) */
+    n_out = (n_unique < top_k) ? n_unique : top_k;
     if (n_out == 0) {
         free(tmp);
         return DSO_OK;
