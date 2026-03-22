@@ -222,7 +222,7 @@ static int test_detect_unknown(void)
 
 static int test_fits_passthrough(void)
 {
-    const char *path = "/tmp/test_io_fits.fits";
+    char path[512]; TEST_TMPPATH(path, "test_io_fits.fits");
     int W = 8, H = 8;
     Image img = make_gradient(W, H, 1000.0f);
     ASSERT(img.data != NULL);
@@ -248,7 +248,7 @@ static int test_fits_passthrough(void)
 
 static int test_tiff_fp32_mono(void)
 {
-    const char *path = "/tmp/test_io_tiff_fp32.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_fp32.tiff");
     int W = 16, H = 12;
     Image img = make_gradient(W, H, 500.0f);
     ASSERT(img.data != NULL);
@@ -269,7 +269,7 @@ static int test_tiff_fp32_mono(void)
 
 static int test_tiff_fp16_mono(void)
 {
-    const char *path = "/tmp/test_io_tiff_fp16.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_fp16.tiff");
     int W = 8, H = 8;
     Image img = make_gradient(W, H, 1.0f);  /* [0,1]: well within FP16 range */
     ASSERT(img.data != NULL);
@@ -295,7 +295,7 @@ static int test_tiff_fp16_mono(void)
 
 static int test_tiff_int16_mono(void)
 {
-    const char *path = "/tmp/test_io_tiff_int16.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_int16.tiff");
     int W = 8, H = 8;
     Image img = make_gradient(W, H, 1.0f);
 
@@ -318,7 +318,7 @@ static int test_tiff_int16_mono(void)
 
 static int test_tiff_int8_mono(void)
 {
-    const char *path = "/tmp/test_io_tiff_int8.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_int8.tiff");
     int W = 8, H = 8;
     Image img = make_gradient(W, H, 1.0f);
 
@@ -343,7 +343,7 @@ static int test_tiff_int8_mono(void)
 
 static int test_tiff_zip_roundtrip(void)
 {
-    const char *path = "/tmp/test_io_tiff_zip.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_zip.tiff");
     int W = 32, H = 32;
     Image img = make_gradient(W, H, 100.0f);
     ASSERT(img.data != NULL);
@@ -363,7 +363,7 @@ static int test_tiff_zip_roundtrip(void)
 
 static int test_tiff_lzw_roundtrip(void)
 {
-    const char *path = "/tmp/test_io_tiff_lzw.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_lzw.tiff");
     int W = 32, H = 32;
     Image img = make_gradient(W, H, 100.0f);
     ASSERT(img.data != NULL);
@@ -383,7 +383,7 @@ static int test_tiff_lzw_roundtrip(void)
 
 static int test_tiff_rle_roundtrip(void)
 {
-    const char *path = "/tmp/test_io_tiff_rle.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_rle.tiff");
     int W = 32, H = 32;
     Image img = make_gradient(W, H, 100.0f);
     ASSERT(img.data != NULL);
@@ -405,7 +405,7 @@ static int test_tiff_rle_roundtrip(void)
 
 static int test_tiff_fp32_rgb(void)
 {
-    const char *path = "/tmp/test_io_tiff_fp32_rgb.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_fp32_rgb.tiff");
     int W = 8, H = 6;
     Image r = make_gradient(W, H, 1.0f);
     Image g = make_gradient(W, H, 0.5f);
@@ -449,7 +449,7 @@ static int test_tiff_fp32_rgb(void)
 
 static int test_tiff_int16_rgb_global_scale(void)
 {
-    const char *path = "/tmp/test_io_tiff_int16_rgb.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_int16_rgb.tiff");
     int W = 4, H = 4;
     Image r = make_gradient(W, H, 1.0f);
     Image g = make_gradient(W, H, 0.5f);
@@ -499,7 +499,7 @@ static int test_tiff_int16_rgb_global_scale(void)
 
 static int test_png_8bit_mono(void)
 {
-    const char *path = "/tmp/test_io_png8.png";
+    char path[512]; TEST_TMPPATH(path, "test_io_png8.png");
     int W = 16, H = 8;
     Image img = make_gradient(W, H, 1.0f);
     ASSERT(img.data != NULL);
@@ -523,7 +523,7 @@ static int test_png_8bit_mono(void)
 
 static int test_png_16bit_mono(void)
 {
-    const char *path = "/tmp/test_io_png16.png";
+    char path[512]; TEST_TMPPATH(path, "test_io_png16.png");
     int W = 16, H = 8;
     Image img = make_gradient(W, H, 1.0f);
     ASSERT(img.data != NULL);
@@ -551,7 +551,7 @@ static int test_png_16bit_mono(void)
 
 static int test_png_8bit_rgb(void)
 {
-    const char *path = "/tmp/test_io_png8_rgb.png";
+    char path[512]; TEST_TMPPATH(path, "test_io_png8_rgb.png");
     int W = 8, H = 4;
     Image r = make_gradient(W, H, 1.0f);
     Image g = make_gradient(W, H, 0.5f);
@@ -594,7 +594,7 @@ static int test_png_8bit_rgb(void)
 
 static int test_png_16bit_rgb(void)
 {
-    const char *path = "/tmp/test_io_png16_rgb.png";
+    char path[512]; TEST_TMPPATH(path, "test_io_png16_rgb.png");
     int W = 8, H = 4;
     Image r = make_gradient(W, H, 1.0f);
     Image g = make_gradient(W, H, 0.5f);
@@ -644,7 +644,7 @@ static int test_png_16bit_rgb(void)
 
 static int test_png_fp32_returns_error(void)
 {
-    const char *path = "/tmp/test_io_png_fp32_err.png";
+    char path[512]; TEST_TMPPATH(path, "test_io_png_fp32_err.png");
     int W = 4, H = 4;
     Image img = make_gradient(W, H, 1.0f);
     ASSERT(img.data != NULL);
@@ -658,7 +658,7 @@ static int test_png_fp32_returns_error(void)
 
 static int test_unknown_ext_returns_error(void)
 {
-    const char *path = "/tmp/test_io_unknown.xyz";
+    char path[512]; TEST_TMPPATH(path, "test_io_unknown.xyz");
     int W = 4, H = 4;
     Image img = make_gradient(W, H, 1.0f);
     ASSERT(img.data != NULL);
@@ -675,7 +675,7 @@ static int test_unknown_ext_returns_error(void)
 
 static int test_tiff_int16_auto_stretch(void)
 {
-    const char *path = "/tmp/test_io_tiff_auto.tiff";
+    char path[512]; TEST_TMPPATH(path, "test_io_tiff_auto.tiff");
     int W = 4, H = 4;
     /* Gradient [100, 200]; auto stretch should map 100→0 and 200→65535 */
     Image img = make_gradient(W, H, 100.0f);

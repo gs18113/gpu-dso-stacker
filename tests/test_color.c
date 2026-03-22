@@ -647,19 +647,23 @@ static int test_save_rgb_null_filepath(void)
 
 static int test_save_rgb_null_plane(void)
 {
+    char path[512];
+    TEST_TMPPATH(path, "tc_null_plane.fits");
     float data[4] = {0.1f, 0.2f, 0.3f, 0.4f};
     Image img = {data, 2, 2};
-    ASSERT_ERR(fits_save_rgb("/tmp/tc_null_plane.fits", NULL, &img, &img),
+    ASSERT_ERR(fits_save_rgb(path, NULL, &img, &img),
                DSO_ERR_INVALID_ARG);
-    ASSERT_ERR(fits_save_rgb("/tmp/tc_null_plane.fits", &img, NULL, &img),
+    ASSERT_ERR(fits_save_rgb(path, &img, NULL, &img),
                DSO_ERR_INVALID_ARG);
-    ASSERT_ERR(fits_save_rgb("/tmp/tc_null_plane.fits", &img, &img, NULL),
+    ASSERT_ERR(fits_save_rgb(path, &img, &img, NULL),
                DSO_ERR_INVALID_ARG);
     return 0;
 }
 
 static int test_save_rgb_dim_mismatch(void)
 {
+    char path[512];
+    TEST_TMPPATH(path, "tc_dim_mismatch.fits");
     float *dr = alloc_float(4, 0.1f);
     float *dg = alloc_float(4, 0.2f);
     float *db = alloc_float(9, 0.3f); /* different size */
@@ -669,7 +673,7 @@ static int test_save_rgb_dim_mismatch(void)
     Image g = {dg, 2, 2};
     Image b = {db, 3, 3}; /* mismatched dimensions */
 
-    ASSERT_ERR(fits_save_rgb("/tmp/tc_dim_mismatch.fits", &r, &g, &b),
+    ASSERT_ERR(fits_save_rgb(path, &r, &g, &b),
                DSO_ERR_INVALID_ARG);
 
     free(dr); free(dg); free(db);
@@ -689,7 +693,8 @@ static int test_save_rgb_naxis3(void)
     ASSERT_NOT_NULL(dr); ASSERT_NOT_NULL(dg); ASSERT_NOT_NULL(db);
 
     Image r = {dr, W, H}, g = {dg, W, H}, b = {db, W, H};
-    const char *path = "/tmp/tc_rgb_naxis3.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_rgb_naxis3.fits");
     ASSERT_OK(fits_save_rgb(path, &r, &g, &b));
 
     int ndim = 0;
@@ -719,7 +724,8 @@ static int test_save_rgb_r_plane(void)
     ASSERT_NOT_NULL(db); ASSERT_NOT_NULL(back);
 
     Image r = {dr, W, H}, g = {dg, W, H}, b = {db, W, H};
-    const char *path = "/tmp/tc_rgb_planes.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_rgb_planes.fits");
     ASSERT_OK(fits_save_rgb(path, &r, &g, &b));
     ASSERT_OK(fits_load_plane(path, 1, back, W, H));
 
@@ -741,7 +747,8 @@ static int test_save_rgb_g_plane(void)
     ASSERT_NOT_NULL(db); ASSERT_NOT_NULL(back);
 
     Image r = {dr, W, H}, g = {dg, W, H}, b = {db, W, H};
-    const char *path = "/tmp/tc_rgb_planes.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_rgb_planes.fits");
     ASSERT_OK(fits_save_rgb(path, &r, &g, &b));
     ASSERT_OK(fits_load_plane(path, 2, back, W, H));
 
@@ -763,7 +770,8 @@ static int test_save_rgb_b_plane(void)
     ASSERT_NOT_NULL(db); ASSERT_NOT_NULL(back);
 
     Image r = {dr, W, H}, g = {dg, W, H}, b = {db, W, H};
-    const char *path = "/tmp/tc_rgb_planes.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_rgb_planes.fits");
     ASSERT_OK(fits_save_rgb(path, &r, &g, &b));
     ASSERT_OK(fits_load_plane(path, 3, back, W, H));
 
@@ -795,7 +803,8 @@ static int test_save_rgb_gradient_planes(void)
     }
 
     Image r = {dr, W, H}, g = {dg, W, H}, b = {db, W, H};
-    const char *path = "/tmp/tc_rgb_gradient.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_rgb_gradient.fits");
     ASSERT_OK(fits_save_rgb(path, &r, &g, &b));
 
     /* Check R plane */
@@ -823,7 +832,8 @@ static int test_save_rgb_gradient_planes(void)
 
 static int test_bayerpat_rggb(void)
 {
-    const char *path = "/tmp/tc_bayerpat_rggb.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_bayerpat_rggb.fits");
     ASSERT_OK(make_fits_bayerpat(path, 4, 4, 0.5f, "RGGB"));
     BayerPattern pat = BAYER_NONE;
     ASSERT_OK(fits_get_bayer_pattern(path, &pat));
@@ -833,7 +843,8 @@ static int test_bayerpat_rggb(void)
 
 static int test_bayerpat_bggr(void)
 {
-    const char *path = "/tmp/tc_bayerpat_bggr.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_bayerpat_bggr.fits");
     ASSERT_OK(make_fits_bayerpat(path, 4, 4, 0.5f, "BGGR"));
     BayerPattern pat = BAYER_NONE;
     ASSERT_OK(fits_get_bayer_pattern(path, &pat));
@@ -843,7 +854,8 @@ static int test_bayerpat_bggr(void)
 
 static int test_bayerpat_grbg(void)
 {
-    const char *path = "/tmp/tc_bayerpat_grbg.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_bayerpat_grbg.fits");
     ASSERT_OK(make_fits_bayerpat(path, 4, 4, 0.5f, "GRBG"));
     BayerPattern pat = BAYER_NONE;
     ASSERT_OK(fits_get_bayer_pattern(path, &pat));
@@ -853,7 +865,8 @@ static int test_bayerpat_grbg(void)
 
 static int test_bayerpat_gbrg(void)
 {
-    const char *path = "/tmp/tc_bayerpat_gbrg.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_bayerpat_gbrg.fits");
     ASSERT_OK(make_fits_bayerpat(path, 4, 4, 0.5f, "GBRG"));
     BayerPattern pat = BAYER_NONE;
     ASSERT_OK(fits_get_bayer_pattern(path, &pat));
@@ -863,7 +876,8 @@ static int test_bayerpat_gbrg(void)
 
 static int test_bayerpat_absent(void)
 {
-    const char *path = "/tmp/tc_bayerpat_absent.fits";
+    char path[512];
+    TEST_TMPPATH(path, "tc_bayerpat_absent.fits");
     ASSERT_OK(make_fits_bayerpat(path, 4, 4, 0.5f, NULL /* no keyword */));
     BayerPattern pat = BAYER_RGGB; /* pre-set to non-NONE to detect no-write */
     ASSERT_OK(fits_get_bayer_pattern(path, &pat));

@@ -53,8 +53,8 @@ static void write_test_csv(const char *path)
     FILE *fp = fopen(path, "w");
     if (!fp) { perror("write_test_csv"); exit(1); }
     fprintf(fp, "filepath, is_reference, h00, h01, h02, h10, h11, h12, h20, h21, h22\n");
-    fprintf(fp, "/tmp/dso_frame1.fits, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1\n");
-    fprintf(fp, "/tmp/dso_frame2.fits, 0, 1, 0, 2.5, 0, 1, 1.3, 0, 0, 1\n");
+    fprintf(fp, "%s/dso_frame1.fits, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1\n", test_tmpdir());
+    fprintf(fp, "%s/dso_frame2.fits, 0, 1, 0, 2.5, 0, 1, 1.3, 0, 0, 1\n", test_tmpdir());
     fclose(fp);
 }
 
@@ -64,8 +64,8 @@ static void write_test_csv_2col(const char *path)
     FILE *fp = fopen(path, "w");
     if (!fp) { perror("write_test_csv_2col"); exit(1); }
     fprintf(fp, "filepath, is_reference\n");
-    fprintf(fp, "/tmp/dso_frame1.fits, 1\n");
-    fprintf(fp, "/tmp/dso_frame2.fits, 0\n");
+    fprintf(fp, "%s/dso_frame1.fits, 1\n", test_tmpdir());
+    fprintf(fp, "%s/dso_frame2.fits, 0\n", test_tmpdir());
     fclose(fp);
 }
 
@@ -76,9 +76,10 @@ static void write_test_csv_2col(const char *path)
 /* Parsing a valid 2-row 11-col CSV must return exactly 2 frames. */
 static int test_csv_count(void)
 {
-    write_test_csv("/tmp/dso_test.csv");
+    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
+    write_test_csv(csv_path);
     FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
+    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
     ASSERT_EQ(n, 2);
     ASSERT_NOT_NULL(f);
     free(f);
@@ -88,11 +89,15 @@ static int test_csv_count(void)
 /* The first row (header) must be skipped; filepaths come from data rows. */
 static int test_csv_filepath(void)
 {
-    write_test_csv("/tmp/dso_test.csv");
+    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
+    char exp1[512], exp2[512];
+    snprintf(exp1, sizeof(exp1), "%s/dso_frame1.fits", test_tmpdir());
+    snprintf(exp2, sizeof(exp2), "%s/dso_frame2.fits", test_tmpdir());
+    write_test_csv(csv_path);
     FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
-    ASSERT_EQ(strcmp(f[0].filepath, "/tmp/dso_frame1.fits"), 0);
-    ASSERT_EQ(strcmp(f[1].filepath, "/tmp/dso_frame2.fits"), 0);
+    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
+    ASSERT_EQ(strcmp(f[0].filepath, exp1), 0);
+    ASSERT_EQ(strcmp(f[1].filepath, exp2), 0);
     free(f);
     return 0;
 }
@@ -100,9 +105,10 @@ static int test_csv_filepath(void)
 /* is_reference field must be parsed as an integer (1 or 0). */
 static int test_csv_reference_flag(void)
 {
-    write_test_csv("/tmp/dso_test.csv");
+    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
+    write_test_csv(csv_path);
     FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
+    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
     ASSERT_EQ(f[0].is_reference, 1);
     ASSERT_EQ(f[1].is_reference, 0);
     free(f);
@@ -112,9 +118,10 @@ static int test_csv_reference_flag(void)
 /* All 9 homography values must be parsed in row-major order (h00..h22). */
 static int test_csv_homography_values(void)
 {
-    write_test_csv("/tmp/dso_test.csv");
+    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
+    write_test_csv(csv_path);
     FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
+    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
 
     /* Frame 0: identity */
     ASSERT_NEAR(f[0].H.h[0], 1.0, 1e-9);  /* h00 */
@@ -133,12 +140,12 @@ static int test_csv_homography_values(void)
 /* Blank lines in the CSV body must be silently skipped. */
 static int test_csv_blank_lines_skipped(void)
 {
-    const char *path = "/tmp/dso_test_blank.csv";
+    char path[512]; TEST_TMPPATH(path, "dso_test_blank.csv");
     FILE *fp = fopen(path, "w");
     ASSERT_NOT_NULL(fp);
     fprintf(fp, "filepath, is_reference, h00, h01, h02, h10, h11, h12, h20, h21, h22\n");
     fprintf(fp, "\n");
-    fprintf(fp, "/tmp/f.fits, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1\n");
+    fprintf(fp, "%s/f.fits, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1\n", test_tmpdir());
     fprintf(fp, "\n");
     fclose(fp);
 
@@ -153,7 +160,8 @@ static int test_csv_blank_lines_skipped(void)
 static int test_csv_nonexistent_file(void)
 {
     FrameInfo *f = NULL; int n = 0; int ht = -1;
-    DsoError err = csv_parse("/tmp/does_not_exist_xyz.csv", &f, &n, &ht);
+    char nofile[512]; TEST_TMPPATH(nofile, "does_not_exist_xyz.csv");
+    DsoError err = csv_parse(nofile, &f, &n, &ht);
     ASSERT_EQ(err, DSO_ERR_IO);
     return 0;
 }
@@ -164,9 +172,10 @@ static int test_csv_nonexistent_file(void)
  */
 static int test_csv_has_transforms_11col(void)
 {
-    write_test_csv("/tmp/dso_test.csv");
+    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
+    write_test_csv(csv_path);
     FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse("/tmp/dso_test.csv", &f, &n, &ht));
+    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
     ASSERT_EQ(ht, 1);
     free(f);
     return 0;
@@ -178,13 +187,15 @@ static int test_csv_has_transforms_11col(void)
  */
 static int test_csv_2col_no_transforms(void)
 {
-    write_test_csv_2col("/tmp/dso_test_2col.csv");
+    char csv2[512]; TEST_TMPPATH(csv2, "dso_test_2col.csv");
+    char exp1[512]; snprintf(exp1, sizeof(exp1), "%s/dso_frame1.fits", test_tmpdir());
+    write_test_csv_2col(csv2);
     FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse("/tmp/dso_test_2col.csv", &f, &n, &ht));
+    ASSERT_OK(csv_parse(csv2, &f, &n, &ht));
     ASSERT_EQ(n, 2);
     ASSERT_EQ(ht, 0);
     /* Filepaths must be correct */
-    ASSERT_EQ(strcmp(f[0].filepath, "/tmp/dso_frame1.fits"), 0);
+    ASSERT_EQ(strcmp(f[0].filepath, exp1), 0);
     ASSERT_EQ(f[0].is_reference, 1);
     ASSERT_EQ(f[1].is_reference, 0);
     /* Homography must be zero-initialised when not provided */
@@ -200,11 +211,11 @@ static int test_csv_2col_no_transforms(void)
  */
 static int test_csv_bad_col_count(void)
 {
-    const char *path = "/tmp/dso_test_badcols.csv";
+    char path[512]; TEST_TMPPATH(path, "dso_test_badcols.csv");
     FILE *fp = fopen(path, "w");
     ASSERT_NOT_NULL(fp);
     fprintf(fp, "filepath, is_reference, foo, bar, baz\n");
-    fprintf(fp, "/tmp/f.fits, 1, 1.0, 2.0, 3.0\n");
+    fprintf(fp, "%s/f.fits, 1, 1.0, 2.0, 3.0\n", test_tmpdir());
     fclose(fp);
 
     FrameInfo *f = NULL; int n = 0; int ht = -1;
@@ -217,9 +228,10 @@ static int test_csv_bad_col_count(void)
  */
 static int test_csv_null_has_transforms_out(void)
 {
-    write_test_csv("/tmp/dso_test.csv");
+    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
+    write_test_csv(csv_path);
     FrameInfo *f = NULL; int n = 0;
-    ASSERT_ERR(csv_parse("/tmp/dso_test.csv", &f, &n, NULL), DSO_ERR_INVALID_ARG);
+    ASSERT_ERR(csv_parse(csv_path, &f, &n, NULL), DSO_ERR_INVALID_ARG);
     return 0;
 }
 
@@ -236,10 +248,11 @@ static int test_fits_roundtrip(void)
     const int W = 4, H = 3;
     Image src = make_image_gradient(W, H);
 
-    ASSERT_OK(fits_save("/tmp/dso_roundtrip.fits", &src));
+    char rpath[512]; TEST_TMPPATH(rpath, "dso_roundtrip.fits");
+    ASSERT_OK(fits_save(rpath, &src));
 
     Image dst = {NULL, 0, 0};
-    ASSERT_OK(fits_load("/tmp/dso_roundtrip.fits", &dst));
+    ASSERT_OK(fits_load(rpath, &dst));
 
     ASSERT_EQ(dst.width,  W);
     ASSERT_EQ(dst.height, H);
@@ -263,10 +276,11 @@ static int test_fits_pixel_ordering(void)
     /* stamp a unique value at (x=2, y=1) */
     src.data[1 * W + 2] = 42.f;
 
-    ASSERT_OK(fits_save("/tmp/dso_ordering.fits", &src));
+    char opath[512]; TEST_TMPPATH(opath, "dso_ordering.fits");
+    ASSERT_OK(fits_save(opath, &src));
 
     Image dst = {NULL, 0, 0};
-    ASSERT_OK(fits_load("/tmp/dso_ordering.fits", &dst));
+    ASSERT_OK(fits_load(opath, &dst));
 
     ASSERT_NEAR(dst.data[1 * W + 2], 42.f, 1e-5f);
     /* neighbouring pixel must be 0 (not the same value) */
@@ -281,7 +295,8 @@ static int test_fits_pixel_ordering(void)
 static int test_fits_load_missing(void)
 {
     Image img = {NULL, 0, 0};
-    ASSERT_ERR(fits_load("/tmp/no_such_file_abc.fits", &img), DSO_ERR_FITS);
+    char mpath[512]; TEST_TMPPATH(mpath, "no_such_file_abc.fits");
+    ASSERT_ERR(fits_load(mpath, &img), DSO_ERR_FITS);
     return 0;
 }
 

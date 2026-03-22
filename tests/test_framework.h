@@ -21,7 +21,32 @@
 
 #pragma once
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <math.h>
+
+/*
+ * Cross-platform temp directory: returns TEMP/TMP on Windows, TMPDIR or /tmp on Unix.
+ * Trailing separator is NOT included.
+ */
+static inline const char *test_tmpdir(void) {
+    const char *d;
+#ifdef _WIN32
+    d = getenv("TEMP");
+    if (d) return d;
+    d = getenv("TMP");
+    if (d) return d;
+    return "C:\\Temp";
+#else
+    d = getenv("TMPDIR");
+    if (d) return d;
+    return "/tmp";
+#endif
+}
+
+/* Build a temp file path: writes "<tmpdir>/<name>" into buf (must be >= 512 bytes) */
+#define TEST_TMPPATH(buf, name) \
+    snprintf(buf, sizeof(buf), "%s/%s", test_tmpdir(), name)
 
 static int _g_total   = 0;
 static int _g_passed  = 0;

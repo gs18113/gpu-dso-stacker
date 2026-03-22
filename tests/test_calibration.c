@@ -305,7 +305,7 @@ static int test_free_clears_flags(void)
 static int test_load_fits_master_dark(void)
 {
     /* Save a FITS file with constant value 50, load it as a master dark */
-    const char *tmp = "/tmp/dso_calib_test_master_dark.fits";
+    char tmp[512]; TEST_TMPPATH(tmp, "dso_calib_test_master_dark.fits");
     ASSERT_OK(make_fits_const(tmp, 4, 4, 50.f));
 
     CalibFrames c = {0};
@@ -325,7 +325,7 @@ static int test_load_fits_master_dark(void)
 
 static int test_load_fits_master_flat(void)
 {
-    const char *tmp = "/tmp/dso_calib_test_master_flat.fits";
+    char tmp[512]; TEST_TMPPATH(tmp, "dso_calib_test_master_flat.fits");
     ASSERT_OK(make_fits_const(tmp, 2, 2, 1.5f));
 
     CalibFrames c = {0};
@@ -348,10 +348,10 @@ static int test_load_fits_master_flat(void)
 static int test_generate_dark_constant_frames(void)
 {
     /* 3 dark frames all with value 30 → master dark = 30 */
-    const char *f1 = "/tmp/dso_calib_dark1.fits";
-    const char *f2 = "/tmp/dso_calib_dark2.fits";
-    const char *f3 = "/tmp/dso_calib_dark3.fits";
-    const char *lst = "/tmp/dso_calib_darklist.txt";
+    char f1[512]; TEST_TMPPATH(f1, "dso_calib_dark1.fits");
+    char f2[512]; TEST_TMPPATH(f2, "dso_calib_dark2.fits");
+    char f3[512]; TEST_TMPPATH(f3, "dso_calib_dark3.fits");
+    char lst[512]; TEST_TMPPATH(lst, "dso_calib_darklist.txt");
     ASSERT_OK(make_fits_const(f1, 2, 2, 30.f));
     ASSERT_OK(make_fits_const(f2, 2, 2, 30.f));
     ASSERT_OK(make_fits_const(f3, 2, 2, 30.f));
@@ -384,12 +384,12 @@ static int test_winsorized_mean_clips_outlier(void)
     const int N = WSOR_N;
     for (int i = 0; i < N; i++) {
         snprintf(paths[i], sizeof(paths[i]),
-                 "/tmp/dso_wsor_dark_%d.fits", i);
+                 "%s/dso_wsor_dark_%d.fits", test_tmpdir(), i);
         float val = (i == N - 1) ? 500.f : 5.f;
         ASSERT_OK(make_fits_const(paths[i], 1, 1, val));
         pptrs[i] = paths[i];
     }
-    const char *lst = "/tmp/dso_wsor_dark_list.txt";
+    char lst[512]; TEST_TMPPATH(lst, "dso_wsor_dark_list.txt");
     ASSERT_OK(write_framelist(lst, pptrs, N));
 
     CalibFrames c = {0};
@@ -419,11 +419,11 @@ static int test_median_method(void)
     const int N = MED_N;
     for (int i = 0; i < N; i++) {
         snprintf(paths[i], sizeof(paths[i]),
-                 "/tmp/dso_med_dark_%d.fits", i);
+                 "%s/dso_med_dark_%d.fits", test_tmpdir(), i);
         ASSERT_OK(make_fits_const(paths[i], 1, 1, vals[i]));
         pptrs[i] = paths[i];
     }
-    const char *lst = "/tmp/dso_med_dark_list.txt";
+    char lst[512]; TEST_TMPPATH(lst, "dso_med_dark_list.txt");
     ASSERT_OK(write_framelist(lst, pptrs, N));
 
     CalibFrames c = {0};
@@ -449,9 +449,9 @@ static int test_bias_subtracted_from_dark(void)
     /* bias master = 10, raw dark = 30 → dark_master = 20.
      * Wrong (no bias sub): dark_master = 30.
      * When applied to light=100: correct → 80, wrong → 70. */
-    const char *bias_fits  = "/tmp/dso_calib_bias.fits";
-    const char *dark_fits  = "/tmp/dso_calib_darkraw.fits";
-    const char *dark_list  = "/tmp/dso_calib_darklist2.txt";
+    char bias_fits[512]; TEST_TMPPATH(bias_fits, "dso_calib_bias.fits");
+    char dark_fits[512]; TEST_TMPPATH(dark_fits, "dso_calib_darkraw.fits");
+    char dark_list[512]; TEST_TMPPATH(dark_list, "dso_calib_darklist2.txt");
     ASSERT_OK(make_fits_const(bias_fits, 2, 2, 10.f));
     ASSERT_OK(make_fits_const(dark_fits, 2, 2, 30.f));
     const char *dpaths[] = {dark_fits};
@@ -491,9 +491,9 @@ static int test_flat_per_frame_normalization(void)
      *
      * Wrong (no normalization): stack([2000, 4000]) = 3000.
      * In that case applying to a light frame changes the result drastically. */
-    const char *f1   = "/tmp/dso_flat_norm1.fits";
-    const char *f2   = "/tmp/dso_flat_norm2.fits";
-    const char *flst = "/tmp/dso_flat_norm_list.txt";
+    char f1[512]; TEST_TMPPATH(f1, "dso_flat_norm1.fits");
+    char f2[512]; TEST_TMPPATH(f2, "dso_flat_norm2.fits");
+    char flst[512]; TEST_TMPPATH(flst, "dso_flat_norm_list.txt");
     ASSERT_OK(make_fits_const(f1, 3, 3, 2000.f));
     ASSERT_OK(make_fits_const(f2, 3, 3, 4000.f));
     const char *fpaths[] = {f1, f2};
@@ -534,9 +534,9 @@ static int test_bias_subtracted_from_flat(void)
      * normalized: flat[0] = 2100/1600 ≈ 1.3125, flat[1] = 1100/1600 ≈ 0.6875.
      *
      * Not identical → can distinguish. */
-    const char *bias_fits = "/tmp/dso_flat_bias.fits";
-    const char *flat_raw  = "/tmp/dso_flat_raw.fits";
-    const char *flat_lst  = "/tmp/dso_flat_raw_list.txt";
+    char bias_fits[512]; TEST_TMPPATH(bias_fits, "dso_flat_bias.fits");
+    char flat_raw[512]; TEST_TMPPATH(flat_raw, "dso_flat_raw.fits");
+    char flat_lst[512]; TEST_TMPPATH(flat_lst, "dso_flat_raw_list.txt");
 
     /* 2-pixel image (width=2, height=1) */
     float bias_pix[2] = {100.f, 100.f};
@@ -570,9 +570,9 @@ static int test_darkflat_subtracted_from_flat(void)
     /* darkflat = 50, flat_raw = 1050 → flat_cal = 1000; normalized = 1.0.
      * Wrong (no darkflat sub): flat_raw = 1050, normalized also ≈ 1.0.
      * Same issue as above; use asymmetric pixels to distinguish. */
-    const char *df_fits  = "/tmp/dso_darkflat.fits";
-    const char *flat_raw = "/tmp/dso_flat_raw2.fits";
-    const char *flat_lst = "/tmp/dso_flat_raw2_list.txt";
+    char df_fits[512]; TEST_TMPPATH(df_fits, "dso_darkflat.fits");
+    char flat_raw[512]; TEST_TMPPATH(flat_raw, "dso_flat_raw2.fits");
+    char flat_lst[512]; TEST_TMPPATH(flat_lst, "dso_flat_raw2_list.txt");
 
     /* 2-pixel: darkflat = [50, 50], flat_raw = [2050, 1050] */
     float df_pix[2]   = {50.f, 50.f};
@@ -605,8 +605,8 @@ static int test_end_to_end_dark_and_flat(void)
     /* light = 2100, dark_raw = 100 (bias already applied externally for
      * simplicity here), flat_raw = 2.0 (pre-normalized, loaded as master).
      * Calibrated = (2100 - 100) / 2.0 = 1000. */
-    const char *dark_fits = "/tmp/dso_e2e_dark.fits";
-    const char *flat_fits = "/tmp/dso_e2e_flat.fits";
+    char dark_fits[512]; TEST_TMPPATH(dark_fits, "dso_e2e_dark.fits");
+    char flat_fits[512]; TEST_TMPPATH(flat_fits, "dso_e2e_flat.fits");
     ASSERT_OK(make_fits_const(dark_fits, 2, 2, 100.f));
     ASSERT_OK(make_fits_const(flat_fits, 2, 2, 2.f));
 
@@ -631,7 +631,7 @@ static int test_end_to_end_dead_pixels_zeroed(void)
 {
     /* Flat has one dead pixel (value 0.0) → that pixel must become 0 in output.
      * All other pixels pass normally. */
-    const char *flat_fits = "/tmp/dso_e2e_deadflat.fits";
+    char flat_fits[512]; TEST_TMPPATH(flat_fits, "dso_e2e_deadflat.fits");
     float flat_pix[4] = {0.f, 2.f, 2.f, 2.f};
     ASSERT_OK(make_fits_row(flat_fits, flat_pix, 4));
     /* Use width=4, height=1 for simplicity */
