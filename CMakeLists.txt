@@ -119,6 +119,7 @@ endif()
 set_target_properties(dso_stacker_lib PROPERTIES
     CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
     CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
 
 add_executable(dso_stacker main.cpp)

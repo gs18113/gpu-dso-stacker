@@ -378,9 +378,10 @@ static int test_winsorized_mean_clips_outlier(void)
      * After clamping top 1: [5,5,5,5,5,5,5,5,5,5] → mean = 5.0
      * Plain mean (wrong): (9*5+500)/10 = 54.5
      * This test fails if winsorized mean is replaced by plain mean. */
-    const int N = 10;
-    char paths[N][64];
-    const char *pptrs[N];
+    #define WSOR_N 10
+    char paths[WSOR_N][64];
+    const char *pptrs[WSOR_N];
+    const int N = WSOR_N;
     for (int i = 0; i < N; i++) {
         snprintf(paths[i], sizeof(paths[i]),
                  "/tmp/dso_wsor_dark_%d.fits", i);
@@ -412,9 +413,10 @@ static int test_median_method(void)
      * Median = 3.0.
      * Wrong (winsorized mean, g=0 for n=5): mean = 61.2 */
     float vals[] = {1.f, 2.f, 3.f, 100.f, 200.f};
-    const int N = 5;
-    char paths[N][64];
-    const char *pptrs[N];
+    #define MED_N 5
+    char paths[MED_N][64];
+    const char *pptrs[MED_N];
+    const int N = MED_N;
     for (int i = 0; i < N; i++) {
         snprintf(paths[i], sizeof(paths[i]),
                  "/tmp/dso_med_dark_%d.fits", i);
