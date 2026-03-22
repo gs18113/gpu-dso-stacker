@@ -33,7 +33,7 @@ if(WIN32)
     find_package(PNG REQUIRED)
 
     # Imported target names from vcpkg
-    set(CFITSIO_TARGET cfitsio::cfitsio)
+    set(CFITSIO_TARGET CFITSIO::cfitsio)
     set(TIFF_TARGET    TIFF::TIFF)
     set(PNG_TARGET     PNG::PNG)
 else()
