@@ -27,10 +27,12 @@ When the input CSV already contains homographies (11-column format), stages 1–
 
 ## Technology Stack
 
-- **C11** — Core library (`fits_io.c`, `csv_parser.c`, `lanczos_cpu.c`, `integration.c`, `debayer_cpu.c`, `star_detect_cpu.c`, `ransac.c`, `pipeline_cpu.c`)
+- **C11** — Core library (`fits_io.c`, `image_io.c`, `csv_parser.c`, `lanczos_cpu.c`, `integration.c`, `debayer_cpu.c`, `star_detect_cpu.c`, `ransac.c`, `pipeline_cpu.c`)
 - **OpenMP** — CPU parallelism (debayer, Moffat convolution, Lanczos, integration all use `#pragma omp parallel for`)
 - **CUDA 12 / NPP+** — GPU acceleration (`lanczos_gpu.cu`, `debayer_gpu.cu`, `star_detect_gpu.cu`, `integration_gpu.cu`, `pipeline.cu`)
 - **CFITSIO 4.6.3** — FITS image I/O
+- **libtiff 4.5.1** — TIFF output (FP32, FP16, INT16, INT8; none/zip/lzw/rle compression)
+- **libpng 1.6.43** — PNG output (INT8, INT16)
 - **C++17** — CLI entry point (`main.cpp`)
 
 ---
@@ -46,6 +48,7 @@ gpu-dso-stacker/
 │   ├── dso_types.h              ← Shared types: Image, Homography, FrameInfo, DsoError,
 │   │                               StarPos, StarList, BayerPattern, MoffatParams
 │   ├── fits_io.h                ← FITS load/save/free + fits_save_rgb + fits_get_bayer_pattern
+│   ├── image_io.h               ← Format-agnostic save layer: ImageSaveOptions, image_save, image_save_rgb
 │   ├── csv_parser.h             ← CSV frame-list parser (2-col and 11-col formats)
 │   ├── lanczos_cpu.h            ← CPU Lanczos-3 transform API
 │   ├── lanczos_gpu.h            ← GPU Lanczos-3 transform API (h2h and d2d)
@@ -61,6 +64,7 @@ gpu-dso-stacker/
 │   └── pipeline.h               ← pipeline_run (GPU) + pipeline_run_cpu + PipelineConfig
 ├── src/
 │   ├── fits_io.c                ← CFITSIO-based I/O
+│   ├── image_io.c               ← Format dispatch (FITS/TIFF/PNG) + libtiff + libpng writers
 │   ├── csv_parser.c             ← CSV parser
 │   ├── lanczos_cpu.c            ← CPU backward-mapping Lanczos-3 (OpenMP)
 │   ├── lanczos_gpu.cu           ← CUDA coord-map kernel + nppiRemap
@@ -85,7 +89,8 @@ gpu-dso-stacker/
 │   ├── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
 │   ├── test_calibration.c       ← 26 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, bias sub, flat normalization)
 │   ├── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
-│   └── test_color.c             ← tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
+│   ├── test_color.c             ← 33 tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
+│   └── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
 └── python/
     ├── stacker.py               ← Reference stacker: OpenCV Lanczos4 + kappa-sigma
     ├── compute_transforms.py    ← Independently compute homographies via astroalign
@@ -104,6 +109,8 @@ gpu-dso-stacker/
 | CUDA Toolkit | 12.x | `/usr/local/cuda` |
 | NPP+ (`libnppig`) | bundled with CUDA | `/usr/local/cuda/lib64` |
 | OpenMP | any | system (GCC) |
+| libtiff | 4.5.1 | system (`pkg-config libtiff-4`) |
+| libpng | 1.6.43 | system (`pkg-config libpng`) |
 | CMake | >= 3.18 | system |
 | pkg-config | any | system |
 
@@ -223,6 +230,35 @@ void     image_free(Image *img);
 - `fits_save`: writes float32 image as BITPIX=-32, NAXIS=2. Overwrites existing files.
 - `fits_save_rgb`: writes three planes as NAXIS=3 (NAXIS1=W, NAXIS2=H, NAXIS3=3), planes ordered R=1/G=2/B=3. Compatible with DS9, SIRIL, PixInsight.
 - `image_free`: frees `img->data` and nulls the pointer. Safe on zero-init Images.
+
+### `image_io.h`
+
+```c
+typedef enum { FMT_FITS=0, FMT_TIFF, FMT_PNG, FMT_UNKNOWN } OutputFormat;
+typedef enum { TIFF_COMPRESS_NONE=0, TIFF_COMPRESS_ZIP, TIFF_COMPRESS_LZW, TIFF_COMPRESS_RLE } TiffCompression;
+typedef enum { OUT_BITS_FP32=0, OUT_BITS_FP16, OUT_BITS_INT16, OUT_BITS_INT8 } OutputBitDepth;
+
+typedef struct {
+    TiffCompression tiff_compress;   /* ignored for FITS/PNG */
+    OutputBitDepth  bit_depth;       /* ignored for FITS (always FP32) */
+    float           stretch_min;     /* NAN = auto; used for INT8/INT16 */
+    float           stretch_max;     /* NAN = auto; used for INT8/INT16 */
+} ImageSaveOptions;
+
+OutputFormat image_detect_format(const char *filepath);
+DsoError     image_save(const char *filepath, const Image *img, const ImageSaveOptions *opts);
+DsoError     image_save_rgb(const char *filepath,
+                              const Image *r, const Image *g, const Image *b,
+                              const ImageSaveOptions *opts);
+```
+
+- `image_detect_format`: returns format based on file extension (case-insensitive). `.fits`/`.fit`/`.fts` → FMT_FITS; `.tif`/`.tiff` → FMT_TIFF; `.png` → FMT_PNG.
+- `image_save` / `image_save_rgb`: dispatch to the appropriate writer. `opts == NULL` is equivalent to zero-init with NAN stretch (FP32, no compression, auto stretch).
+- **Integer scaling**: `quantised = round(clamp((val - lo) / (hi - lo) * MAX_INT, 0, MAX_INT))` where lo/hi default to per-image min/max when `stretch_min`/`stretch_max` are NAN. For RGB, the same lo/hi are derived globally across all three planes to preserve colour ratios.
+- **FP16 conversion**: portable IEEE 754 bit manipulation (no `__fp16`). Values outside ~[6e-8, 65504] are flushed to zero/infinity.
+- **PNG 16-bit byte order**: written big-endian per PNG spec.
+- **TIFF RGB layout**: interleaved PLANARCONFIG_CONTIG (RGBRGB…), compatible with Photoshop/Lightroom.
+- **Valid combinations**: FP16 → TIFF only; FP32 → FITS or TIFF; INT8/INT16 → TIFF or PNG; FITS always writes FP32 regardless of bit_depth.
 
 ### `csv_parser.h`
 
@@ -408,9 +444,9 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
                            int ref_idx, const PipelineConfig *config);
 ```
 
-`pipeline_run`: GPU orchestrator. First line of the function body dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0`, so the GPU path has zero overhead. Phase 2 uses double-buffered `stream_copy` + `stream_compute` overlap. For color output (`config->color_output = 1`), allocates three `IntegrationGpuCtx` instances (ctx_r, ctx_g, ctx_b) and three additional device buffers (d_debayed for R, d_ch_g, d_ch_b); calls `debayer_gpu_rgb_d2d` + 3× Lanczos on `stream_compute` per frame; `e_gpu[slot]` is recorded after the third Lanczos so H2D overlap on `stream_copy` is preserved. Finalizes via `fits_save_rgb` for color, `fits_save` for mono.
+`pipeline_run`: GPU orchestrator. First line of the function body dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0`, so the GPU path has zero overhead. Phase 2 uses double-buffered `stream_copy` + `stream_compute` overlap. For color output (`config->color_output = 1`), allocates three `IntegrationGpuCtx` instances (ctx_r, ctx_g, ctx_b) and three additional device buffers (d_debayed for R, d_ch_g, d_ch_b); calls `debayer_gpu_rgb_d2d` + 3× Lanczos on `stream_compute` per frame; `e_gpu[slot]` is recorded after the third Lanczos so H2D overlap on `stream_copy` is preserved. Finalizes via `image_save_rgb` for color, `image_save` for mono (both dispatch by extension via `image_io.c`).
 
-`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Phase 1: debayer_cpu → star_detect_cpu_detect → ccl_com → ransac per frame (always luminance). Phase 2: mini-batched (PIPELINE_CPU_BATCH_SIZE=32). For mono: debayer_cpu → lanczos_transform_cpu, accumulating into `global_sum_r`/`global_count_r`. For color: debayer_cpu_rgb → 3× lanczos_transform_cpu, accumulating into three pairs of sum/count buffers; finalizes via `fits_save_rgb`.
+`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Phase 1: debayer_cpu → star_detect_cpu_detect → ccl_com → ransac per frame (always luminance). Phase 2: mini-batched (PIPELINE_CPU_BATCH_SIZE=32). For mono: debayer_cpu → lanczos_transform_cpu, accumulating into `global_sum_r`/`global_count_r`. For color: debayer_cpu_rgb → 3× lanczos_transform_cpu, accumulating into three pairs of sum/count buffers; finalizes via `image_save_rgb`.
 
 ---
 
@@ -454,6 +490,10 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 - **Color output** (`PipelineConfig::color_output`): auto-set to 1 in `main.cpp` when the Bayer pattern is not `BAYER_NONE` (either from `--bayer` flag or auto-detected from the reference frame FITS BAYERPAT keyword). Phase 1 (star detection, RANSAC) always uses luminance; only Phase 2 (warp + integrate) and output change. `Image` struct remains single-channel — R, G, B are three independent `Image` instances throughout.
 - **Color GPU stream overlap**: for color mode, `phase2_transform_integrate` allocates `d_debayed` (R), `d_ch_g`, `d_ch_b` plus three `IntegrationGpuCtx`. Per frame on `stream_compute`: calibrate → `debayer_gpu_rgb_d2d` → memset+Lanczos(R) → memset+Lanczos(G) → memset+Lanczos(B) → `cudaEventRecord(e_gpu[slot])`. The event fires after the third Lanczos, so `stream_copy` H2D of the next frame overlaps all three warps — the overlap is at least as efficient as mono mode since the compute phase is ~3× longer.
 - **Color CPU batch**: three xformed_r/g/b arrays allocated for the batch; integration called once per channel per batch; ptrs arrays for G and B built as temporaries inside the batch loop (freed after integration).
+- **Output format dispatch** (`PipelineConfig::save_opts`): `image_save` / `image_save_rgb` (in `image_io.c`) detect the format from the output file extension at call time. `pipeline.cu` and `pipeline_cpu.c` no longer call `fits_save` directly. `opts == NULL` or a zero-init struct with NAN stretch defaults to FP32, no compression, auto stretch.
+- **Integer stretch semantics**: for INT8/INT16 output, `stretch_min`/`stretch_max` are NAN by default (auto min/max of the image). For RGB, the stretch bounds are derived globally across all three planes so that colour ratios are preserved. Setting both to the same value (hi == lo) produces a black image.
+- **FP16 TIFF precision**: values outside the IEEE 754 half-precision representable range (~[6e-8, 65504]) are flushed to ±0 / ±infinity. For astronomical data with wide dynamic range, prefer FP32 or INT16.
+- **TIFF RGB interleaving**: `PLANARCONFIG_CONTIG` (RGBRGB…) — the three `Image` planes are interleaved into a per-row buffer at write time, no full-image allocation.
 
 ---
 

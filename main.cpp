@@ -54,12 +54,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <getopt.h>
 
 #include "dso_types.h"
 #include "csv_parser.h"
 #include "calibration.h"
 #include "fits_io.h"           /* fits_get_bayer_pattern */
+#include "image_io.h"          /* ImageSaveOptions, image_detect_format */
 #include "integration_gpu.h"   /* INTEGRATION_GPU_MAX_BATCH */
 #include "pipeline.h"
 
@@ -92,6 +94,11 @@ enum {
     OPT_FLAT_METHOD,
     OPT_DARKFLAT_METHOD,
     OPT_WSOR_CLIP,
+    /* Output format options */
+    OPT_BIT_DEPTH,
+    OPT_TIFF_COMPRESSION,
+    OPT_STRETCH_MIN,
+    OPT_STRETCH_MAX,
 };
 
 static void usage(const char *prog)
@@ -141,6 +148,15 @@ static void usage(const char *prog)
         "Sensor:\n"
         "      --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg\n"
         "                                 (default: auto-detect from FITS BAYERPAT keyword)\n"
+        "\n"
+        "Output format (format inferred from --output extension):\n"
+        "      --bit-depth <depth>        8 | 16 | f16 | f32  (default: f32)\n"
+        "                                 f16 is TIFF only; 8/16 require TIFF or PNG;\n"
+        "                                 FITS always uses f32 regardless of this flag\n"
+        "      --tiff-compression <c>     none | zip | lzw | rle  (default: none; TIFF only)\n"
+        "      --stretch-min <float>      Lower bound for integer scaling (default: auto)\n"
+        "      --stretch-max <float>      Upper bound for integer scaling (default: auto)\n"
+        "                                 stretch-min/max are ignored for f16/f32 output\n"
         "\n",
         prog);
 }
@@ -188,6 +204,11 @@ int main(int argc, char **argv)
     cfg.bayer_override  = BAYER_NONE;   /* auto-detect */
     cfg.use_gpu_lanczos = 1;
     cfg.calib           = nullptr;
+    /* save_opts defaults: FP32, no compression, auto stretch (NAN) */
+    cfg.save_opts.tiff_compress = TIFF_COMPRESS_NONE;
+    cfg.save_opts.bit_depth     = OUT_BITS_FP32;
+    cfg.save_opts.stretch_min   = (float)NAN;
+    cfg.save_opts.stretch_max   = (float)NAN;
 
     /* Calibration defaults */
     const char *dark_path        = nullptr;
@@ -229,6 +250,11 @@ int main(int argc, char **argv)
         {"flat-method",       required_argument, nullptr, OPT_FLAT_METHOD},
         {"darkflat-method",   required_argument, nullptr, OPT_DARKFLAT_METHOD},
         {"wsor-clip",         required_argument, nullptr, OPT_WSOR_CLIP},
+        /* Output format */
+        {"bit-depth",         required_argument, nullptr, OPT_BIT_DEPTH},
+        {"tiff-compression",  required_argument, nullptr, OPT_TIFF_COMPRESSION},
+        {"stretch-min",       required_argument, nullptr, OPT_STRETCH_MIN},
+        {"stretch-max",       required_argument, nullptr, OPT_STRETCH_MAX},
         {nullptr, 0, nullptr, 0}
     };
 
@@ -309,6 +335,34 @@ int main(int argc, char **argv)
             }
             break;
 
+        case OPT_BIT_DEPTH:
+            if      (strcmp(optarg, "8")   == 0) cfg.save_opts.bit_depth = OUT_BITS_INT8;
+            else if (strcmp(optarg, "16")  == 0) cfg.save_opts.bit_depth = OUT_BITS_INT16;
+            else if (strcmp(optarg, "f16") == 0) cfg.save_opts.bit_depth = OUT_BITS_FP16;
+            else if (strcmp(optarg, "f32") == 0) cfg.save_opts.bit_depth = OUT_BITS_FP32;
+            else {
+                fprintf(stderr, "Error: unknown --bit-depth '%s'; use 8, 16, f16, or f32\n",
+                        optarg);
+                return 1;
+            }
+            break;
+
+        case OPT_TIFF_COMPRESSION:
+            if      (strcmp(optarg, "none") == 0) cfg.save_opts.tiff_compress = TIFF_COMPRESS_NONE;
+            else if (strcmp(optarg, "zip")  == 0) cfg.save_opts.tiff_compress = TIFF_COMPRESS_ZIP;
+            else if (strcmp(optarg, "lzw")  == 0) cfg.save_opts.tiff_compress = TIFF_COMPRESS_LZW;
+            else if (strcmp(optarg, "rle")  == 0) cfg.save_opts.tiff_compress = TIFF_COMPRESS_RLE;
+            else {
+                fprintf(stderr,
+                        "Error: unknown --tiff-compression '%s'; use none, zip, lzw, or rle\n",
+                        optarg);
+                return 1;
+            }
+            break;
+
+        case OPT_STRETCH_MIN: cfg.save_opts.stretch_min = strtof(optarg, nullptr); break;
+        case OPT_STRETCH_MAX: cfg.save_opts.stretch_max = strtof(optarg, nullptr); break;
+
         default: usage(argv[0]); return 1;
         }
     }
@@ -352,6 +406,46 @@ int main(int argc, char **argv)
                 "  The stacked output may contain dark current, hot pixels, "
                 "and optical vignetting.\n"
                 "  Consider providing --dark, --flat, and --bias/--darkflat.\n");
+    }
+
+    /* Validate output format vs. bit-depth and compression options */
+    {
+        OutputFormat ofmt = image_detect_format(output_file);
+        if (ofmt == FMT_UNKNOWN) {
+            fprintf(stderr,
+                    "Error: unrecognized output file extension for '%s'.\n"
+                    "  Supported: .fits, .fit, .fts, .tif, .tiff, .png\n",
+                    output_file);
+            return 1;
+        }
+        if (ofmt == FMT_FITS && cfg.save_opts.bit_depth != OUT_BITS_FP32) {
+            fprintf(stderr,
+                    "Error: FITS output only supports f32 bit depth.\n"
+                    "  Remove --bit-depth or use a .tif / .png output path.\n");
+            return 1;
+        }
+        if (ofmt == FMT_PNG &&
+            (cfg.save_opts.bit_depth == OUT_BITS_FP32 ||
+             cfg.save_opts.bit_depth == OUT_BITS_FP16)) {
+            fprintf(stderr,
+                    "Error: PNG output does not support f32 or f16 bit depth.\n"
+                    "  Use --bit-depth 8 or --bit-depth 16.\n");
+            return 1;
+        }
+        if (ofmt == FMT_PNG && cfg.save_opts.bit_depth == OUT_BITS_FP32) {
+            /* default f32 with PNG — upgrade to INT16 silently? No: error above covers it. */
+        }
+        if (cfg.save_opts.bit_depth == OUT_BITS_FP16 && ofmt != FMT_TIFF) {
+            fprintf(stderr,
+                    "Error: f16 bit depth is only supported for TIFF output.\n"
+                    "  Use a .tif / .tiff output path, or choose a different --bit-depth.\n");
+            return 1;
+        }
+        if (cfg.save_opts.tiff_compress != TIFF_COMPRESS_NONE && ofmt != FMT_TIFF) {
+            fprintf(stderr,
+                    "Warning: --tiff-compression is ignored for non-TIFF output (%s).\n",
+                    output_file);
+        }
     }
 
     /* Wire output path and GPU flag into config */
@@ -421,10 +515,12 @@ int main(int argc, char **argv)
     printf("Parsed %d frame(s), reference = %d, %s\n",
            n_frames, ref_idx,
            has_transforms ? "pre-computed transforms" : "star detection mode");
-    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s | Output: %s\n",
+    static const char *bit_depth_names[] = {"f32", "f16", "16-bit", "8-bit"};
+    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s | Output: %s %s\n",
            integ_str, (double)cfg.kappa, cfg.iterations, cfg.batch_size,
            use_cpu ? "CPU" : "GPU",
-           cfg.color_output ? "color RGB" : "mono luminance");
+           cfg.color_output ? "color RGB" : "mono luminance",
+           bit_depth_names[cfg.save_opts.bit_depth]);
     if (has_calib) {
         printf("Calibration: dark=%s flat=%s\n",
                calib.has_dark ? "yes" : "no",

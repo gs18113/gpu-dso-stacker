@@ -38,6 +38,7 @@
 #include "pipeline.h"
 #include "calibration.h"
 #include "calibration_gpu.h"
+#include "image_io.h"
 #include "fits_io.h"
 #include "debayer_gpu.h"
 #include "star_detect_gpu.h"
@@ -526,14 +527,14 @@ DsoError pipeline_run(FrameInfo            *frames,
         err = integration_gpu_finalize(ctx_r, n_frames, &img_r, 0);
         if (err == DSO_OK) err = integration_gpu_finalize(ctx_g, n_frames, &img_g, 0);
         if (err == DSO_OK) err = integration_gpu_finalize(ctx_b, n_frames, &img_b, 0);
-        if (err == DSO_OK) err = fits_save_rgb(config->output_file, &img_r, &img_g, &img_b);
+        if (err == DSO_OK) err = image_save_rgb(config->output_file, &img_r, &img_g, &img_b, &config->save_opts);
         image_free(&img_r); image_free(&img_g); image_free(&img_b);
     } else {
         Image out = {NULL, W, H};
         out.data = (float *)calloc((size_t)W * H, sizeof(float));
         if (!out.data) { err = DSO_ERR_ALLOC; goto done; }
         if (integration_gpu_finalize(ctx_r, n_frames, &out, 0) == DSO_OK)
-            err = fits_save(config->output_file, &out);
+            err = image_save(config->output_file, &out, &config->save_opts);
         else
             err = DSO_ERR_CUDA;
         image_free(&out);

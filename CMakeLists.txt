@@ -12,9 +12,12 @@ find_package(OpenMP REQUIRED)
 find_package(PkgConfig REQUIRED)
 set(ENV{PKG_CONFIG_PATH} "/home/donut/.local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
 pkg_check_modules(CFITSIO REQUIRED cfitsio)
+pkg_check_modules(LIBTIFF REQUIRED libtiff-4)
+pkg_check_modules(LIBPNG  REQUIRED libpng)
 
 set(LIB_SOURCES
     src/fits_io.c
+    src/image_io.c
     src/csv_parser.c
     src/lanczos_cpu.c
     src/integration.c
@@ -35,11 +38,19 @@ add_library(dso_stacker_lib STATIC ${LIB_SOURCES})
 target_include_directories(dso_stacker_lib PUBLIC
     include
     ${CFITSIO_INCLUDE_DIRS}
+    ${LIBTIFF_INCLUDE_DIRS}
+    ${LIBPNG_INCLUDE_DIRS}
     ${CUDAToolkit_INCLUDE_DIRS}
 )
-target_link_directories(dso_stacker_lib PUBLIC ${CFITSIO_LIBRARY_DIRS})
+target_link_directories(dso_stacker_lib PUBLIC
+    ${CFITSIO_LIBRARY_DIRS}
+    ${LIBTIFF_LIBRARY_DIRS}
+    ${LIBPNG_LIBRARY_DIRS}
+)
 target_link_libraries(dso_stacker_lib PUBLIC
     ${CFITSIO_LIBRARIES}
+    ${LIBTIFF_LIBRARIES}
+    ${LIBPNG_LIBRARIES}
     CUDA::cudart
     CUDA::nppc
     CUDA::nppig
@@ -117,3 +128,9 @@ target_include_directories(test_integration_gpu PRIVATE tests)
 target_link_libraries(test_integration_gpu PRIVATE dso_stacker_lib)
 add_test(NAME test_integration_gpu COMMAND test_integration_gpu)
 set_property(TEST test_integration_gpu PROPERTY SKIP_RETURN_CODE 77)
+
+# image_io tests: TIFF and PNG save/load round-trips for all bit depths and compressions
+add_executable(test_image_io tests/test_image_io.c)
+target_include_directories(test_image_io PRIVATE tests)
+target_link_libraries(test_image_io PRIVATE dso_stacker_lib m)
+add_test(NAME test_image_io COMMAND test_image_io)

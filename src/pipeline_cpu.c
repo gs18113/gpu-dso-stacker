@@ -31,6 +31,7 @@
 
 #include "pipeline.h"
 #include "calibration.h"
+#include "image_io.h"
 #include "fits_io.h"
 #include "debayer_cpu.h"
 #include "star_detect_cpu.h"
@@ -400,10 +401,10 @@ static DsoError phase2_cpu(FrameInfo            *frames,
             img_g.data[p] = (global_count_g[p] > 0) ? (global_sum_g[p] / global_count_g[p]) : 0.0f;
             img_b.data[p] = (global_count_b[p] > 0) ? (global_sum_b[p] / global_count_b[p]) : 0.0f;
         }
-        err = fits_save_rgb(config->output_file, &img_r, &img_g, &img_b);
+        err = image_save_rgb(config->output_file, &img_r, &img_g, &img_b, &config->save_opts);
         image_free(&img_r); image_free(&img_g); image_free(&img_b);
         if (err != DSO_OK)
-            fprintf(stderr, "pipeline_cpu phase2: fits_save_rgb failed for %s\n", config->output_file);
+            fprintf(stderr, "pipeline_cpu phase2: image_save_rgb failed for %s\n", config->output_file);
     } else {
         Image out = {NULL, W, H};
         out.data = (float *)malloc((size_t)npix * sizeof(float));
@@ -412,7 +413,7 @@ static DsoError phase2_cpu(FrameInfo            *frames,
         for (long p = 0; p < npix; p++) {
             out.data[p] = (global_count_r[p] > 0) ? (global_sum_r[p] / global_count_r[p]) : 0.0f;
         }
-        PIPE_CHECK(fits_save(config->output_file, &out), cleanup, config->output_file);
+        PIPE_CHECK(image_save(config->output_file, &out, &config->save_opts), cleanup, config->output_file);
         image_free(&out);
     }
 

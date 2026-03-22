@@ -6,10 +6,12 @@
 
 ## Technology Stack
 
-- **C11** — Core library (FITS I/O, CSV parser, Lanczos CPU, integration, debayer CPU, star detection, RANSAC, CPU pipeline)
+- **C11** — Core library (FITS I/O, image I/O dispatch, CSV parser, Lanczos CPU, integration, debayer CPU, star detection, RANSAC, CPU pipeline)
 - **OpenMP** — CPU parallelism for debayer, Moffat convolution, Lanczos warp, and integration
 - **CUDA 12** — GPU acceleration (VNG debayer, Moffat convolution, Lanczos warp, kappa-sigma integration, GPU pipeline)
 - **CFITSIO 4.6.3** — FITS image I/O
+- **libtiff 4.5.1** — TIFF output (FP32, FP16, INT16, INT8; none/zip/lzw/rle compression)
+- **libpng 1.6.43** — PNG output (INT8 and INT16)
 - **C++17** — CLI entry point
 
 ---
@@ -46,6 +48,8 @@ When the input CSV already contains pre-computed homographies (11-column format)
 |---|---|
 | CUDA Toolkit | 12.x |
 | CFITSIO | 4.6.3 |
+| libtiff | 4.x |
+| libpng | 1.6.x |
 | OpenMP | any (GCC) |
 | CMake | >= 3.18 |
 
@@ -132,7 +136,30 @@ Calibration (applied before debayering; bias and darkflat are mutually exclusive
 Sensor:
       --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg
                                  (default: auto-detect from FITS BAYERPAT keyword)
+
+Output format (format inferred from --output extension):
+      --bit-depth <depth>        8 | 16 | f16 | f32  (default: f32)
+                                 f16 is TIFF only; 8/16 require TIFF or PNG
+                                 FITS always uses f32 regardless of this flag
+      --tiff-compression <c>     none | zip | lzw | rle  (default: none; TIFF only)
+      --stretch-min <float>      Lower bound for integer [0,MAX_INT] scaling (default: auto)
+      --stretch-max <float>      Upper bound for integer [0,MAX_INT] scaling (default: auto)
+                                 stretch-min/max are ignored for f16/f32 output
 ```
+
+### Output Formats
+
+The output format is determined by the extension of `--output`:
+
+| Extension | Format | Supported bit depths | Compression |
+|---|---|---|---|
+| `.fits` `.fit` `.fts` | FITS | f32 (always) | none |
+| `.tif` `.tiff` | TIFF | f32, f16, 16, 8 | none, zip, lzw, rle |
+| `.png` | PNG | 16, 8 | always lossless DEFLATE |
+
+**Integer scaling** (bit depths `8` and `16`): pixel values are linearly mapped to `[0, 255]` or `[0, 65535]`. By default the image min and max are used as bounds; use `--stretch-min` / `--stretch-max` to override. For RGB output the same bounds apply to all three channels to preserve colour ratios.
+
+**FP16 precision**: values outside ~[6×10⁻⁸, 65504] are flushed to zero/infinity. For wide-dynamic-range astronomical data prefer `f32` (lossless) or `16` (quantised but full range).
 
 ### Examples
 
@@ -170,6 +197,30 @@ dso_stacker -f frames.csv -o stacked.fits \
     --save-master-frames ./masters
 ```
 
+Save as lossless FP32 TIFF (identical precision to FITS):
+
+```bash
+dso_stacker -f frames.csv -o stacked.tiff
+```
+
+Save as 16-bit TIFF with ZIP compression (good for sharing):
+
+```bash
+dso_stacker -f frames.csv -o stacked.tiff --bit-depth 16 --tiff-compression zip
+```
+
+Save as 16-bit PNG (web-compatible, lossless):
+
+```bash
+dso_stacker -f frames.csv -o stacked.png --bit-depth 16
+```
+
+Save as 8-bit PNG with explicit stretch bounds:
+
+```bash
+dso_stacker -f frames.csv -o preview.png --bit-depth 8 --stretch-min 0 --stretch-max 65535
+```
+
 Stack with pre-computed master FITS files and darkflat instead of bias:
 
 ```bash
@@ -197,6 +248,7 @@ cd build && ctest --output-on-failure -V
 | `test_integration_gpu` | 9 | GPU mini-batch kappa-sigma |
 | `test_calibration` | 26 | CPU calibration: dark/flat apply, dead-pixel guard, dimension validation, FITS master loading, frame-list stacking, winsorized mean, median, bias/darkflat subtraction, flat normalization |
 | `test_color` | 33 | OSC color output: `debayer_cpu_rgb` (validation, BAYER_NONE passthrough, uniform all 4 patterns, per-channel dominance RGGB/BGGR/GRBG/GBRG, luminance consistency, channel distinctness, non-negative); `fits_save_rgb` (validation, NAXIS=3, per-plane round-trip, gradient planes); `fits_get_bayer_pattern` (all 4 patterns + absent keyword) |
+| `test_image_io` | 21 | Format detection; FITS passthrough; TIFF FP32/FP16/INT16/INT8 mono+RGB; TIFF zip/lzw/rle round-trips; PNG 8-bit/16-bit mono+RGB; error cases (FP32→PNG, unknown ext); auto stretch |
 
 GPU test suites return exit code 77 (CTest SKIP) when no CUDA device is found.
 

@@ -42,6 +42,7 @@
 
 #include "dso_types.h"         /* MoffatParams lives here */
 #include "ransac.h"            /* RansacParams */
+#include "image_io.h"          /* ImageSaveOptions */
 
 /* Forward declaration — include calibration.h where the full type is needed */
 typedef struct CalibFrames CalibFrames;
@@ -81,7 +82,10 @@ typedef struct {
     const CalibFrames  *calib;           /* NULL = no calibration; applied before debayer   */
 
     /* --- Color output --- */
-    int color_output;  /* 1 = produce 3-plane RGB FITS; 0 = luminance (default) */
+    int color_output;  /* 1 = produce 3-plane RGB output; 0 = luminance (default) */
+
+    /* --- Output format --- */
+    ImageSaveOptions save_opts; /* bit depth, compression, stretch; see image_io.h */
 } PipelineConfig;
 
 /*
