@@ -27,7 +27,8 @@ endif()
 # ---- External libraries (platform-dependent discovery) ----
 if(WIN32)
     # On Windows, use find_package (vcpkg provides Config-mode packages).
-    find_package(CFITSIO CONFIG REQUIRED)
+    # vcpkg's cfitsio config uses lowercase package name.
+    find_package(cfitsio CONFIG REQUIRED)
     find_package(TIFF REQUIRED)
     find_package(PNG REQUIRED)
 
