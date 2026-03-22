@@ -140,3 +140,103 @@ DsoError debayer_cpu(const float *src, float *dst,
 
     return DSO_OK;
 }
+
+DsoError debayer_cpu_rgb(const float *src,
+                          float *r, float *g, float *b,
+                          int W, int H, BayerPattern pattern)
+{
+    if (!src || !r || !g || !b || W <= 0 || H <= 0) return DSO_ERR_INVALID_ARG;
+
+    if (pattern == BAYER_NONE) {
+        size_t nbytes = (size_t)W * H * sizeof(float);
+        memcpy(r, src, nbytes);
+        memcpy(g, src, nbytes);
+        memcpy(b, src, nbytes);
+        return DSO_OK;
+    }
+
+    int pat = (int)pattern;
+
+#pragma omp parallel for collapse(2) schedule(static)
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            float g8[8];
+            float self = src_at(src, x, y, W, H);
+
+            g8[0] = fabsf(src_at(src,x,y-2,W,H) - src_at(src,x,y,W,H)) +
+                    fabsf(src_at(src,x,y-1,W,H) - src_at(src,x,y+1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x-1,y-1,W,H) - src_at(src,x-1,y+1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x+1,y-1,W,H) - src_at(src,x+1,y+1,W,H)) * 0.5f;
+
+            g8[1] = fabsf(src_at(src,x,y+2,W,H) - src_at(src,x,y,W,H)) +
+                    fabsf(src_at(src,x,y+1,W,H) - src_at(src,x,y-1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x-1,y+1,W,H) - src_at(src,x-1,y-1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x+1,y+1,W,H) - src_at(src,x+1,y-1,W,H)) * 0.5f;
+
+            g8[2] = fabsf(src_at(src,x+2,y,W,H) - src_at(src,x,y,W,H)) +
+                    fabsf(src_at(src,x+1,y,W,H) - src_at(src,x-1,y,W,H)) * 0.5f +
+                    fabsf(src_at(src,x+1,y-1,W,H) - src_at(src,x-1,y-1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x+1,y+1,W,H) - src_at(src,x-1,y+1,W,H)) * 0.5f;
+
+            g8[3] = fabsf(src_at(src,x-2,y,W,H) - src_at(src,x,y,W,H)) +
+                    fabsf(src_at(src,x-1,y,W,H) - src_at(src,x+1,y,W,H)) * 0.5f +
+                    fabsf(src_at(src,x-1,y-1,W,H) - src_at(src,x+1,y-1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x-1,y+1,W,H) - src_at(src,x+1,y+1,W,H)) * 0.5f;
+
+            g8[4] = fabsf(src_at(src,x+2,y-2,W,H) - src_at(src,x,y,W,H)) +
+                    fabsf(src_at(src,x+1,y-1,W,H) - src_at(src,x-1,y+1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x,y-1,W,H) - src_at(src,x-1,y,W,H)) * 0.5f +
+                    fabsf(src_at(src,x+1,y,W,H) - src_at(src,x,y+1,W,H)) * 0.5f;
+
+            g8[5] = fabsf(src_at(src,x-2,y-2,W,H) - src_at(src,x,y,W,H)) +
+                    fabsf(src_at(src,x-1,y-1,W,H) - src_at(src,x+1,y+1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x,y-1,W,H) - src_at(src,x+1,y,W,H)) * 0.5f +
+                    fabsf(src_at(src,x-1,y,W,H) - src_at(src,x,y+1,W,H)) * 0.5f;
+
+            g8[6] = fabsf(src_at(src,x+2,y+2,W,H) - src_at(src,x,y,W,H)) +
+                    fabsf(src_at(src,x+1,y+1,W,H) - src_at(src,x-1,y-1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x,y+1,W,H) - src_at(src,x+1,y,W,H)) * 0.5f +
+                    fabsf(src_at(src,x-1,y,W,H) - src_at(src,x,y-1,W,H)) * 0.5f;
+
+            g8[7] = fabsf(src_at(src,x-2,y+2,W,H) - src_at(src,x,y,W,H)) +
+                    fabsf(src_at(src,x-1,y+1,W,H) - src_at(src,x+1,y-1,W,H)) * 0.5f +
+                    fabsf(src_at(src,x,y+1,W,H) - src_at(src,x-1,y,W,H)) * 0.5f +
+                    fabsf(src_at(src,x+1,y,W,H) - src_at(src,x,y-1,W,H)) * 0.5f;
+
+            float gmin = g8[0], gmax = g8[0];
+            for (int i = 1; i < 8; i++) {
+                if (g8[i] < gmin) gmin = g8[i];
+                if (g8[i] > gmax) gmax = g8[i];
+            }
+            float tau = 1.5f * gmin + 0.5f * (gmax - gmin);
+
+            float R_sum = 0.f, G_sum = 0.f, B_sum = 0.f;
+            int R_count = 0, G_count = 0, B_count = 0;
+            int chan = bayer_channel(x, y, pat);
+
+            const int dx[8] = {0, 0, 1, -1, 1, -1, 1, -1};
+            const int dy[8] = {-1, 1, 0, 0, -1, -1, 1, 1};
+
+            for (int i = 0; i < 8; i++) {
+                if (g8[i] <= tau) {
+                    int nx = x + dx[i], ny = y + dy[i];
+                    int nchan = bayer_channel(nx, ny, pat);
+                    float nv = src_at(src, nx, ny, W, H);
+                    if (nchan == 0)      { R_sum += nv; R_count++; }
+                    else if (nchan == 1) { G_sum += nv; G_count++; }
+                    else                 { B_sum += nv; B_count++; }
+                }
+            }
+
+            if (chan == 0)      { R_sum += self; R_count++; }
+            else if (chan == 1) { G_sum += self; G_count++; }
+            else                { B_sum += self; B_count++; }
+
+            r[y * W + x] = (R_count > 0) ? (R_sum / R_count) : self;
+            g[y * W + x] = (G_count > 0) ? (G_sum / G_count) : self;
+            b[y * W + x] = (B_count > 0) ? (B_sum / B_count) : self;
+        }
+    }
+
+    return DSO_OK;
+}

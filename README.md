@@ -18,13 +18,16 @@
 
 | Stage | GPU (default) | CPU (`--cpu`) |
 |---|---|---|
-| 1. Debayering | VNG demosaic → luminance (CUDA kernel) | VNG demosaic → luminance (OpenMP) |
+| 1. Debayering (star detection) | VNG demosaic → luminance (CUDA kernel) | VNG demosaic → luminance (OpenMP) |
 | 2. Star Detection | Moffat PSF conv + threshold (CUDA) | Moffat PSF conv + threshold (OpenMP) |
 | 3. RANSAC Alignment | DLT homography + RANSAC (CPU always) | DLT homography + RANSAC (CPU always) |
-| 4. Lanczos Warp | nppiRemap + coord-map kernel (CUDA) | 6-tap backward-map warp (OpenMP) |
-| 5. Integration | Mini-batch kappa-sigma (CUDA) | Full kappa-sigma (OpenMP) |
+| 4. Debayering (warp) | VNG demosaic → luminance **or R/G/B** | VNG demosaic → luminance **or R/G/B** |
+| 5. Lanczos Warp | nppiRemap + coord-map kernel (CUDA) | 6-tap backward-map warp (OpenMP) |
+| 6. Integration | Mini-batch kappa-sigma (CUDA) | Full kappa-sigma (OpenMP) |
 
 When the input CSV already contains pre-computed homographies (11-column format), stages 1–3 are skipped for both paths.
+
+**Color output**: when a Bayer pattern is active (from `--bayer` or the FITS `BAYERPAT` keyword), stage 4 debayers to separate R, G, B planes; stages 5–6 run once per channel; the output FITS has `NAXIS=3` with planes R=1/G=2/B=3. Star detection (stages 1–2) always uses luminance regardless of color mode.
 
 **Calibration pre-processing** (applied to every raw frame before debayering when `--dark`/`--flat` are provided):
 
@@ -193,6 +196,7 @@ cd build && ctest --output-on-failure -V
 | `test_debayer_cpu` | 10 | VNG debayer CPU: all patterns, uniform, non-uniform, edge cases |
 | `test_integration_gpu` | 9 | GPU mini-batch kappa-sigma |
 | `test_calibration` | 26 | CPU calibration: dark/flat apply, dead-pixel guard, dimension validation, FITS master loading, frame-list stacking, winsorized mean, median, bias/darkflat subtraction, flat normalization |
+| `test_color` | 33 | OSC color output: `debayer_cpu_rgb` (validation, BAYER_NONE passthrough, uniform all 4 patterns, per-channel dominance RGGB/BGGR/GRBG/GBRG, luminance consistency, channel distinctness, non-negative); `fits_save_rgb` (validation, NAXIS=3, per-plane round-trip, gradient planes); `fits_get_bayer_pattern` (all 4 patterns + absent keyword) |
 
 GPU test suites return exit code 77 (CTest SKIP) when no CUDA device is found.
 

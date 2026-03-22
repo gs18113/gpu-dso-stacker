@@ -167,6 +167,90 @@ __global__ static void vng_debayer_kernel(
 #undef P
 }
 
+/*
+ * vng_debayer_rgb_kernel — same VNG algorithm as vng_debayer_kernel but
+ * writes reconstructed R, G, B to three separate output arrays instead of
+ * collapsing to luminance.
+ */
+__global__ static void vng_debayer_rgb_kernel(
+    const float *d_src,
+    float *d_dst_r, float *d_dst_g, float *d_dst_b,
+    int W, int H, int pattern)
+{
+    __shared__ float sm[VNG_SMEM_H][VNG_SMEM_W];
+
+    int tx = threadIdx.x, ty = threadIdx.y;
+    int gx = blockIdx.x * VNG_TILE_W + tx;
+    int gy = blockIdx.y * VNG_TILE_H + ty;
+
+    for (int dy = ty; dy < VNG_SMEM_H; dy += VNG_TILE_H) {
+        for (int dx = tx; dx < VNG_SMEM_W; dx += VNG_TILE_W) {
+            int sx = blockIdx.x * VNG_TILE_W + dx - VNG_APRON;
+            int sy = blockIdx.y * VNG_TILE_H + dy - VNG_APRON;
+            float v = 0.f;
+            if (sx >= 0 && sx < W && sy >= 0 && sy < H)
+                v = d_src[sy * W + sx];
+            sm[dy][dx] = v;
+        }
+    }
+    __syncthreads();
+
+    if (gx >= W || gy >= H) return;
+
+    int sx = tx + VNG_APRON;
+    int sy = ty + VNG_APRON;
+
+#define P(dx, dy) sm[(sy)+(dy)][(sx)+(dx)]
+
+    float g[8];
+    float self = P(0, 0);
+
+    g[0] = fabsf(P(0,-2) - P(0,0)) + fabsf(P(0,-1) - P(0,1))*0.5f + fabsf(P(-1,-1) - P(-1,1))*0.5f + fabsf(P(1,-1) - P(1,1))*0.5f;
+    g[1] = fabsf(P(0, 2) - P(0,0)) + fabsf(P(0, 1) - P(0,-1))*0.5f + fabsf(P(-1, 1) - P(-1,-1))*0.5f + fabsf(P(1, 1) - P(1,-1))*0.5f;
+    g[2] = fabsf(P( 2,0) - P(0,0)) + fabsf(P( 1,0) - P(-1,0))*0.5f + fabsf(P( 1,-1) - P(-1,-1))*0.5f + fabsf(P( 1,1) - P(-1,1))*0.5f;
+    g[3] = fabsf(P(-2,0) - P(0,0)) + fabsf(P(-1,0) - P( 1,0))*0.5f + fabsf(P(-1,-1) - P( 1,-1))*0.5f + fabsf(P(-1,1) - P( 1,1))*0.5f;
+    g[4] = fabsf(P( 2,-2) - P(0,0)) + fabsf(P( 1,-1) - P(-1, 1))*0.5f + fabsf(P(0,-1) - P(-1,0))*0.5f + fabsf(P( 1,0) - P(0, 1))*0.5f;
+    g[5] = fabsf(P(-2,-2) - P(0,0)) + fabsf(P(-1,-1) - P( 1, 1))*0.5f + fabsf(P(0,-1) - P( 1,0))*0.5f + fabsf(P(-1,0) - P(0, 1))*0.5f;
+    g[6] = fabsf(P( 2, 2) - P(0,0)) + fabsf(P( 1, 1) - P(-1,-1))*0.5f + fabsf(P(0, 1) - P( 1,0))*0.5f + fabsf(P(-1,0) - P(0,-1))*0.5f;
+    g[7] = fabsf(P(-2, 2) - P(0,0)) + fabsf(P(-1, 1) - P( 1,-1))*0.5f + fabsf(P(0, 1) - P(-1,0))*0.5f + fabsf(P( 1,0) - P(0,-1))*0.5f;
+
+    float gmin = g[0], gmax = g[0];
+    for (int i = 1; i < 8; i++) {
+        if (g[i] < gmin) gmin = g[i];
+        if (g[i] > gmax) gmax = g[i];
+    }
+    float tau = 1.5f * gmin + 0.5f * (gmax - gmin);
+
+    float R_sum = 0.f, G_sum = 0.f, B_sum = 0.f;
+    int R_count = 0, G_count = 0, B_count = 0;
+    int chan = bayer_channel(gx, gy, pattern);
+
+    const int ddx[8] = {0, 0, 1, -1, 1, -1, 1, -1};
+    const int ddy[8] = {-1, 1, 0, 0, -1, -1, 1, 1};
+
+    for (int i = 0; i < 8; i++) {
+        if (g[i] <= tau) {
+            int n_gx = gx + ddx[i], n_gy = gy + ddy[i];
+            int nchan = bayer_channel(n_gx, n_gy, pattern);
+            float nv = P(ddx[i], ddy[i]);
+            if (nchan == 0)      { R_sum += nv; R_count++; }
+            else if (nchan == 1) { G_sum += nv; G_count++; }
+            else                 { B_sum += nv; B_count++; }
+        }
+    }
+
+    if (chan == 0)      { R_sum += self; R_count++; }
+    else if (chan == 1) { G_sum += self; G_count++; }
+    else                { B_sum += self; B_count++; }
+
+    int px = gy * W + gx;
+    d_dst_r[px] = (R_count > 0) ? (R_sum / R_count) : self;
+    d_dst_g[px] = (G_count > 0) ? (G_sum / G_count) : self;
+    d_dst_b[px] = (B_count > 0) ? (B_sum / B_count) : self;
+
+#undef P
+}
+
 /* -------------------------------------------------------------------------
  * Public API
  * ------------------------------------------------------------------------- */
@@ -202,6 +286,49 @@ DsoError debayer_gpu_d2d(const float  *d_src,
     cudaError_t cerr = cudaGetLastError();
     if (cerr != cudaSuccess) {
         fprintf(stderr, "debayer_gpu_d2d kernel launch: %s\n",
+                cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+    return DSO_OK;
+}
+
+DsoError debayer_gpu_rgb_d2d(const float  *d_src,
+                              float        *d_r,
+                              float        *d_g,
+                              float        *d_b,
+                              int           W, int H,
+                              BayerPattern  pattern,
+                              cudaStream_t  stream)
+{
+    if (!d_src || !d_r || !d_g || !d_b || W <= 0 || H <= 0)
+        return DSO_ERR_INVALID_ARG;
+
+    if (pattern == BAYER_NONE) {
+        size_t nbytes = (size_t)W * H * sizeof(float);
+        cudaError_t ce;
+        ce = cudaMemcpyAsync(d_r, d_src, nbytes, cudaMemcpyDeviceToDevice, stream);
+        if (ce != cudaSuccess) goto cuda_err;
+        ce = cudaMemcpyAsync(d_g, d_src, nbytes, cudaMemcpyDeviceToDevice, stream);
+        if (ce != cudaSuccess) goto cuda_err;
+        ce = cudaMemcpyAsync(d_b, d_src, nbytes, cudaMemcpyDeviceToDevice, stream);
+        if (ce != cudaSuccess) goto cuda_err;
+        return DSO_OK;
+    cuda_err:
+        fprintf(stderr, "debayer_gpu_rgb_d2d (monochrome copy): %s\n",
+                cudaGetErrorString(ce));
+        return DSO_ERR_CUDA;
+    }
+
+    dim3 block(VNG_TILE_W, VNG_TILE_H);
+    dim3 grid((W + VNG_TILE_W - 1) / VNG_TILE_W,
+              (H + VNG_TILE_H - 1) / VNG_TILE_H);
+
+    vng_debayer_rgb_kernel<<<grid, block, 0, stream>>>(
+        d_src, d_r, d_g, d_b, W, H, (int)pattern);
+
+    cudaError_t cerr = cudaGetLastError();
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "debayer_gpu_rgb_d2d kernel launch: %s\n",
                 cudaGetErrorString(cerr));
         return DSO_ERR_CUDA;
     }

@@ -71,6 +71,26 @@ DsoError debayer_gpu_d2d(const float  *d_src,
                           BayerPattern  pattern,
                           cudaStream_t  stream);
 
+/*
+ * debayer_gpu_rgb_d2d — device-to-device VNG debayering into three planes.
+ *
+ * Same VNG algorithm as debayer_gpu_d2d but writes reconstructed R, G, B
+ * values to three separate device buffers instead of collapsing to luminance.
+ * All output buffers must be pre-allocated by the caller (each W × H floats).
+ * Executes on `stream` asynchronously.
+ *
+ * BAYER_NONE fast path: d_src is copied to all three output buffers.
+ *
+ * Returns DSO_OK or DSO_ERR_CUDA / DSO_ERR_INVALID_ARG.
+ */
+DsoError debayer_gpu_rgb_d2d(const float  *d_src,
+                               float        *d_r,
+                               float        *d_g,
+                               float        *d_b,
+                               int           W, int H,
+                               BayerPattern  pattern,
+                               cudaStream_t  stream);
+
 #ifdef __cplusplus
 }
 #endif

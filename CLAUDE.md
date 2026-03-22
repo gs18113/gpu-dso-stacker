@@ -45,13 +45,13 @@ gpu-dso-stacker/
 ├── include/
 │   ├── dso_types.h              ← Shared types: Image, Homography, FrameInfo, DsoError,
 │   │                               StarPos, StarList, BayerPattern, MoffatParams
-│   ├── fits_io.h                ← FITS load/save/free + fits_get_bayer_pattern
+│   ├── fits_io.h                ← FITS load/save/free + fits_save_rgb + fits_get_bayer_pattern
 │   ├── csv_parser.h             ← CSV frame-list parser (2-col and 11-col formats)
 │   ├── lanczos_cpu.h            ← CPU Lanczos-3 transform API
 │   ├── lanczos_gpu.h            ← GPU Lanczos-3 transform API (h2h and d2d)
 │   ├── integration.h            ← CPU mean / kappa-sigma integration API
-│   ├── debayer_cpu.h            ← VNG debayer → luminance (CPU, OpenMP)
-│   ├── debayer_gpu.h            ← VNG debayer → luminance (GPU, h2h and d2d)
+│   ├── debayer_cpu.h            ← VNG debayer → luminance or RGB planes (CPU, OpenMP)
+│   ├── debayer_gpu.h            ← VNG debayer → luminance or RGB planes (GPU, h2h and d2d)
 │   ├── star_detect_gpu.h        ← Moffat convolution + sigma threshold (GPU, h2h and d2d)
 │   ├── star_detect_cpu.h        ← Moffat conv + threshold + CCL + CoM (CPU)
 │   ├── ransac.h                 ← DLT homography + RANSAC alignment
@@ -212,11 +212,14 @@ typedef enum { DSO_OK=0, DSO_ERR_IO=-1, DSO_ERR_ALLOC=-2, DSO_ERR_FITS=-3,
 ```c
 DsoError fits_load(const char *filepath, Image *out);
 DsoError fits_save(const char *filepath, const Image *img);
+DsoError fits_save_rgb(const char *filepath,
+                        const Image *r, const Image *g, const Image *b);
 void     image_free(Image *img);
 ```
 
 - `fits_load`: opens FITS, reads any BITPIX as float32. Caller owns `out->data`.
-- `fits_save`: writes float32 image as BITPIX=-32. Overwrites existing files.
+- `fits_save`: writes float32 image as BITPIX=-32, NAXIS=2. Overwrites existing files.
+- `fits_save_rgb`: writes three planes as NAXIS=3 (NAXIS1=W, NAXIS2=H, NAXIS3=3), planes ordered R=1/G=2/B=3. Compatible with DS9, SIRIL, PixInsight.
 - `image_free`: frees `img->data` and nulls the pointer. Safe on zero-init Images.
 
 ### `csv_parser.h`
@@ -264,18 +267,29 @@ Kappa-sigma uses two-pass Bessel-corrected stddev per iteration; degenerate pixe
 ```c
 DsoError debayer_gpu_d2d(const float *d_src, float *d_dst,
                           int W, int H, BayerPattern pattern, cudaStream_t stream);
+DsoError debayer_gpu_rgb_d2d(const float *d_src,
+                               float *d_r, float *d_g, float *d_b,
+                               int W, int H, BayerPattern pattern, cudaStream_t stream);
 DsoError debayer_gpu(const Image *src, Image *dst, BayerPattern pattern, cudaStream_t stream);
 ```
 
-VNG debayer: 16×16 tiles with 2-pixel apron in shared memory; 8 directional gradients; luminance output via ITU-R BT.709 (L = 0.2126·R + 0.7152·G + 0.0722·B). `BAYER_NONE` = device-to-device copy (fast path).
+VNG debayer: 16×16 tiles with 2-pixel apron in shared memory; 8 directional gradients.
+- `debayer_gpu_d2d`: luminance output via ITU-R BT.709 (L = 0.2126·R + 0.7152·G + 0.0722·B). Used by Phase 1 (star detection) and mono Phase 2.
+- `debayer_gpu_rgb_d2d`: writes reconstructed R, G, B values to three separate device buffers (each W×H). Used by color Phase 2. Separate kernel `vng_debayer_rgb_kernel`; same shared-memory tile strategy.
+- `BAYER_NONE` fast path: `cudaMemcpyAsync` (d2d variants) or D2D copy.
 
 ### `debayer_cpu.h`
 
 ```c
 DsoError debayer_cpu(const float *src, float *dst, int W, int H, BayerPattern pattern);
+DsoError debayer_cpu_rgb(const float *src,
+                          float *r, float *g, float *b,
+                          int W, int H, BayerPattern pattern);
 ```
 
-Same VNG algorithm as the GPU kernel. `BAYER_NONE` = `memcpy`. Boundary reads clamp to 0. Parallelized with `#pragma omp parallel for collapse(2) schedule(static)`.
+Same VNG algorithm as the GPU kernels. `BAYER_NONE` = `memcpy` (all three output planes for the RGB variant). Boundary reads clamp to 0. Both parallelized with `#pragma omp parallel for collapse(2) schedule(static)`.
+- `debayer_cpu`: luminance output (mono mode and Phase 1).
+- `debayer_cpu_rgb`: writes R, G, B into three pre-allocated arrays (color Phase 2).
 
 ### `star_detect_gpu.h`
 
@@ -392,9 +406,9 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
                            int ref_idx, const PipelineConfig *config);
 ```
 
-`pipeline_run`: GPU orchestrator. First line of the function body dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0`, so the GPU path has zero overhead. Phase 2 uses double-buffered `stream_copy` + `stream_compute` overlap.
+`pipeline_run`: GPU orchestrator. First line of the function body dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0`, so the GPU path has zero overhead. Phase 2 uses double-buffered `stream_copy` + `stream_compute` overlap. For color output (`config->color_output = 1`), allocates three `IntegrationGpuCtx` instances (ctx_r, ctx_g, ctx_b) and three additional device buffers (d_debayed for R, d_ch_g, d_ch_b); calls `debayer_gpu_rgb_d2d` + 3× Lanczos on `stream_compute` per frame; `e_gpu[slot]` is recorded after the third Lanczos so H2D overlap on `stream_copy` is preserved. Finalizes via `fits_save_rgb` for color, `fits_save` for mono.
 
-`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Phase 1: debayer_cpu → star_detect_cpu_detect → ccl_com → ransac per frame. Phase 2: mini-batched (PIPELINE_CPU_BATCH_SIZE=32) — debayer_cpu → lanczos_transform_cpu per frame, accumulating survivors into `global_sum`/`global_count` buffers rather than holding all N frames in RAM simultaneously.
+`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Phase 1: debayer_cpu → star_detect_cpu_detect → ccl_com → ransac per frame (always luminance). Phase 2: mini-batched (PIPELINE_CPU_BATCH_SIZE=32). For mono: debayer_cpu → lanczos_transform_cpu, accumulating into `global_sum_r`/`global_count_r`. For color: debayer_cpu_rgb → 3× lanczos_transform_cpu, accumulating into three pairs of sum/count buffers; finalizes via `fits_save_rgb`.
 
 ---
 
@@ -414,7 +428,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
   - `star_detect_cpu_ccl_com` (CCL pass): **not parallelized** — union-find raster scan has cross-pixel data dependencies.
 - **C goto rule (C11 and C++17)**: variables that appear between a `goto` source and its label must be declared before the first `goto`. In `pipeline_cpu.c`, all variables are declared at the top of each function; error paths use explicit `image_free()` before `goto cleanup` rather than a PIPE_CHECK macro, to avoid jumping over initializers.
 - **Row steps for NPP**: all row steps are `width * sizeof(float)` (row-major float32).
-- **FITS pixel index**: `ffgpxv` / `ffppx` take `long *firstpix` (1-based per axis); pass `{1, 1}`.
+- **FITS pixel index**: `ffgpxv` / `ffppx` take `long *firstpix` (1-based per axis); pass `{1, 1}` for 2D, `{1, 1, plane}` for 3D (NAXIS=3 RGB output).
 - **Out-of-bounds pixels**: both CPU and GPU paths write 0 for destination pixels that map outside the source bounds.
 - **`IntegrationGpuCtx` is public**: the struct definition lives in `integration_gpu.h` (not just the `.cu`) so `pipeline.cu` can access `d_frames[]`, `d_xmap`, `d_ymap` directly. Opaque handle pattern was abandoned in favour of direct field access.
 - **DLT produces backward H directly**: row setup uses `(ref_x, ref_y)` as H input and `(src_x, src_y)` as output → null vector = backward map (ref → src). No post-inversion needed.
@@ -435,6 +449,9 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 - **CalibFrames forward declaration**: `pipeline.h` uses `typedef struct CalibFrames CalibFrames` (forward decl with tag) so that it can hold a pointer without pulling in `calibration.h` and its CFITSIO dependency into all translation units. `calibration.h` defines `typedef struct CalibFrames { ... } CalibFrames` with the same tag — both declarations must agree on the tag name.
 - **GPU calibration timing**: `calib_gpu_init` uploads masters once at the start of `pipeline_run`. `calib_gpu_apply_d2d` is inserted on `stream_compute` after `cudaStreamWaitEvent(e_h2d[slot])` and before `debayer_gpu_d2d`, in both Phase 1 and Phase 2.
 - **VNG debayer gradients are one-sided**: each of the 8 directional gradients samples only the pixel in its named direction — `g[i] = |P(neighbor_i) − P(0,0)|`. The previous two-sided formula `|A−center| + |center−B|` made opposite pairs equal (g[4]≡g[0] etc.), reducing effective direction selection from 8-way to 4-way. Fixed in both `debayer_gpu.cu` and `debayer_cpu.c`.
+- **Color output** (`PipelineConfig::color_output`): auto-set to 1 in `main.cpp` when the Bayer pattern is not `BAYER_NONE` (either from `--bayer` flag or auto-detected from the reference frame FITS BAYERPAT keyword). Phase 1 (star detection, RANSAC) always uses luminance; only Phase 2 (warp + integrate) and output change. `Image` struct remains single-channel — R, G, B are three independent `Image` instances throughout.
+- **Color GPU stream overlap**: for color mode, `phase2_transform_integrate` allocates `d_debayed` (R), `d_ch_g`, `d_ch_b` plus three `IntegrationGpuCtx`. Per frame on `stream_compute`: calibrate → `debayer_gpu_rgb_d2d` → memset+Lanczos(R) → memset+Lanczos(G) → memset+Lanczos(B) → `cudaEventRecord(e_gpu[slot])`. The event fires after the third Lanczos, so `stream_copy` H2D of the next frame overlaps all three warps — the overlap is at least as efficient as mono mode since the compute phase is ~3× longer.
+- **Color CPU batch**: three xformed_r/g/b arrays allocated for the batch; integration called once per channel per batch; ptrs arrays for G and B built as temporaries inside the batch loop (freed after integration).
 
 ---
 

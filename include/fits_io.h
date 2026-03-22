@@ -53,6 +53,19 @@ DsoError fits_save(const char *filepath, const Image *img);
 void image_free(Image *img);
 
 /*
+ * fits_save_rgb — write three float32 planes as a 3-plane FITS image.
+ *
+ * Creates a NAXIS=3 FITS file with NAXIS1=width, NAXIS2=height, NAXIS3=3.
+ * Planes are ordered: 1=R, 2=G, 3=B (standard astronomical convention).
+ * All three Image structs must have the same width and height.
+ * Overwrites any existing file at filepath.
+ *
+ * Returns DSO_OK or DSO_ERR_FITS / DSO_ERR_INVALID_ARG.
+ */
+DsoError fits_save_rgb(const char *filepath,
+                        const Image *r, const Image *g, const Image *b);
+
+/*
  * fits_get_bayer_pattern — read the BAYERPAT keyword from a FITS header.
  *
  * Recognised values (case-insensitive): "RGGB", "BGGR", "GRBG", "GBRG".

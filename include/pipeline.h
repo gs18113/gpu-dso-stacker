@@ -79,6 +79,9 @@ typedef struct {
 
     /* --- Calibration --- */
     const CalibFrames  *calib;           /* NULL = no calibration; applied before debayer   */
+
+    /* --- Color output --- */
+    int color_output;  /* 1 = produce 3-plane RGB FITS; 0 = luminance (default) */
 } PipelineConfig;
 
 /*

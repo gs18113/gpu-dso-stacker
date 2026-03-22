@@ -59,6 +59,7 @@
 #include "dso_types.h"
 #include "csv_parser.h"
 #include "calibration.h"
+#include "fits_io.h"           /* fits_get_bayer_pattern */
 #include "integration_gpu.h"   /* INTEGRATION_GPU_MAX_BATCH */
 #include "pipeline.h"
 
@@ -356,6 +357,7 @@ int main(int argc, char **argv)
     /* Wire output path and GPU flag into config */
     cfg.output_file     = output_file;
     cfg.use_gpu_lanczos = !use_cpu;
+    /* color_output is set after CSV parsing and ref_idx resolution below */
 
     /* ---- Generate / load calibration master frames ---- */
     CalibFrames calib   = {};
@@ -406,12 +408,23 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    /* Auto-detect color mode: use bayer_override if set; otherwise peek at
+     * the reference frame FITS header. Color output requires a known Bayer
+     * pattern — BAYER_NONE (monochrome sensor) always produces mono output. */
+    {
+        BayerPattern detected = cfg.bayer_override;
+        if (detected == BAYER_NONE)
+            fits_get_bayer_pattern(frames[ref_idx].filepath, &detected);
+        cfg.color_output = (detected != BAYER_NONE) ? 1 : 0;
+    }
+
     printf("Parsed %d frame(s), reference = %d, %s\n",
            n_frames, ref_idx,
            has_transforms ? "pre-computed transforms" : "star detection mode");
-    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s\n",
+    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s | Output: %s\n",
            integ_str, (double)cfg.kappa, cfg.iterations, cfg.batch_size,
-           use_cpu ? "CPU" : "GPU");
+           use_cpu ? "CPU" : "GPU",
+           cfg.color_output ? "color RGB" : "mono luminance");
     if (has_calib) {
         printf("Calibration: dark=%s flat=%s\n",
                calib.has_dark ? "yes" : "no",

@@ -102,6 +102,12 @@ target_include_directories(test_audit PRIVATE tests)
 target_link_libraries(test_audit PRIVATE dso_stacker_lib m)
 add_test(NAME test_audit COMMAND test_audit)
 
+# OSC (color output) tests: debayer_cpu_rgb, fits_save_rgb, fits_get_bayer_pattern
+add_executable(test_color tests/test_color.c)
+target_include_directories(test_color PRIVATE tests)
+target_link_libraries(test_color PRIVATE dso_stacker_lib m)
+add_test(NAME test_color COMMAND test_color)
+
 # GPU tests for mini-batch kappa-sigma integration
 add_executable(test_integration_gpu tests/test_integration_gpu.cu)
 set_target_properties(test_integration_gpu PROPERTIES

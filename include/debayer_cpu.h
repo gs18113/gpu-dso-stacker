@@ -43,6 +43,21 @@ extern "C" {
 DsoError debayer_cpu(const float *src, float *dst,
                      int W, int H, BayerPattern pattern);
 
+/*
+ * debayer_cpu_rgb — VNG demosaic src → three separate R, G, B planes.
+ *
+ * Same VNG algorithm as debayer_cpu but stores the reconstructed channel
+ * values directly instead of collapsing to luminance.  Each output plane
+ * is W × H float32, pre-allocated by the caller.
+ *
+ * BAYER_NONE fast path: src is copied into all three output planes.
+ *
+ * Returns DSO_OK or DSO_ERR_INVALID_ARG.
+ */
+DsoError debayer_cpu_rgb(const float *src,
+                          float *r, float *g, float *b,
+                          int W, int H, BayerPattern pattern);
+
 #ifdef __cplusplus
 }
 #endif

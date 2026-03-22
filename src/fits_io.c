@@ -151,6 +151,52 @@ void image_free(Image *img)
     }
 }
 
+DsoError fits_save_rgb(const char *filepath,
+                        const Image *r, const Image *g, const Image *b)
+{
+    if (!filepath || !r || !g || !b) return DSO_ERR_INVALID_ARG;
+    if (!r->data || !g->data || !b->data) return DSO_ERR_INVALID_ARG;
+    if (r->width != g->width || r->width != b->width ||
+        r->height != g->height || r->height != b->height)
+        return DSO_ERR_INVALID_ARG;
+
+    char overwrite_path[4097];
+    overwrite_path[0] = '!';
+    strncpy(overwrite_path + 1, filepath, sizeof(overwrite_path) - 2);
+    overwrite_path[sizeof(overwrite_path) - 1] = '\0';
+
+    fitsfile *fptr = NULL;
+    int status = 0;
+    long naxes[3] = { r->width, r->height, 3 };
+
+    ffinit(&fptr, overwrite_path, &status);
+    ffcrim(fptr, FLOAT_IMG, 3, naxes, &status);
+    if (status) {
+        fits_report_error(stderr, status);
+        if (fptr) { int s2 = 0; ffclos(fptr, &s2); }
+        return DSO_ERR_FITS;
+    }
+
+    LONGLONG nelem = (LONGLONG)r->width * r->height;
+    long firstpix[3] = {1, 1, 1};
+
+    firstpix[2] = 1;
+    ffppx(fptr, TFLOAT, firstpix, nelem, r->data, &status);
+    firstpix[2] = 2;
+    ffppx(fptr, TFLOAT, firstpix, nelem, g->data, &status);
+    firstpix[2] = 3;
+    ffppx(fptr, TFLOAT, firstpix, nelem, b->data, &status);
+
+    if (status) {
+        fits_report_error(stderr, status);
+        ffclos(fptr, &status);
+        return DSO_ERR_FITS;
+    }
+
+    ffclos(fptr, &status);
+    return DSO_OK;
+}
+
 DsoError fits_get_bayer_pattern(const char *filepath, BayerPattern *pattern_out)
 {
     if (!filepath || !pattern_out) return DSO_ERR_INVALID_ARG;
