@@ -412,8 +412,9 @@ DsoError star_detect_gpu_threshold(const Image  *convolved,
 
     {
         int n_partials = (N + REDUCE_BLOCK - 1) / REDUCE_BLOCK;
-        double *d_scratch;
-        cudaMalloc(&d_scratch, (size_t)n_partials * sizeof(double) + 2 * sizeof(double));
+        double *d_scratch = NULL;
+        cerr = cudaMalloc(&d_scratch, (size_t)n_partials * sizeof(double) + 2 * sizeof(double));
+        if (cerr != cudaSuccess) goto cleanup;
         double *d_mean = d_scratch + n_partials;
         double *d_sq_sum = d_mean + 1;
 

@@ -83,7 +83,8 @@ gpu-dso-stacker/
 │   ├── test_ransac.c            ← 13 tests: DLT + RANSAC
 │   ├── test_debayer_cpu.c       ← 10 tests: VNG debayer CPU (all patterns + edge cases)
 │   ├── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
-│   └── test_calibration.c       ← 26 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, bias sub, flat normalization)
+│   ├── test_calibration.c       ← 26 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, bias sub, flat normalization)
+│   └── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
 └── python/
     ├── stacker.py               ← Reference stacker: OpenCV Lanczos4 + kappa-sigma
     └── compute_transforms.py    ← Independently compute homographies via astroalign
@@ -284,7 +285,7 @@ DsoError star_detect_gpu_d2d(const float *d_src, float *d_conv, uint8_t *d_mask,
                               float sigma_k, cudaStream_t stream);
 ```
 
-Moffat kernel `K(i,j) = [1 + (i²+j²)/alpha²]^(-beta)` stored in 64 KB constant memory (max radius 15). Convolution via 16×16 shared-memory tiles. Two-pass GPU reduction for mean+stddev; element-wise threshold `mask[i] = (conv[i] > mean + sigma_k·σ)`.
+Moffat kernel `K(i,j) = [1 + (i²+j²)/alpha²]^(-beta)` stored in 64 KB constant memory (max radius 15). Convolution via 16×16 shared-memory tiles. Fully on-device reduction pipeline: `reduce_sum_kernel` → `reduce_final_kernel` → `reduce_div_n_kernel` (mean) → `reduce_sumsq_kernel` → `reduce_final_kernel` (variance) → `threshold_auto_kernel` reads device-resident mean/σ and writes `mask[i]`. One `cudaStreamSynchronize` at end for `cudaFree`; no host-side partial-sum copies.
 
 ### `star_detect_cpu.h`
 
@@ -305,7 +306,7 @@ DsoError star_detect_cpu_ccl_com(const uint8_t *mask, const float *original,
 
 `moffat_convolve`: pre-computed kernel (R = min(⌈3α⌉, 15)), zero-boundary padding, `collapse(2) omp parallel for`.
 `threshold`: double-precision Bessel-corrected σ via `reduction(+:)`, then parallel mask write.
-`ccl_com`: two-pass 8-connectivity union-find; not parallelized (raster scan has data dependencies).
+`ccl_com`: two-pass 8-connectivity union-find; not parallelized (raster scan has data dependencies). After Pass 2, a label re-mapping pass compacts sparse root labels to contiguous `[1, n_unique]`, so `CompStats` is allocated as `calloc(n_unique+1)` (O(n_stars)) rather than `calloc(npix+1)` (O(pixels)).
 
 ### `ransac.h`
 
@@ -319,7 +320,7 @@ DsoError ransac_compute_homography(const StarList *ref_list, const StarList *frm
                                     Homography *H_out, int *n_inliers_out);
 ```
 
-DLT via Jacobi eigendecomposition of A^T·A (9×9); point normalization for numerical stability. Nearest-neighbour star matching with Lowe ratio test (d1/d2 < 0.8). Adaptive RANSAC termination. Produces **backward homography (ref → src)** directly — no inversion needed.
+DLT via Jacobi eigendecomposition of A^T·A (9×9); point normalization for numerical stability. Nearest-neighbour star matching with Lowe ratio test (d1/d2 < 0.8). Adaptive RANSAC termination. Produces **backward homography (ref → src)** directly — no inversion needed. Uses `rand_r(&seed)` with a per-call seed `time(NULL) ^ clock() ^ call_counter++` (static counter) for thread-safe, per-call independent random sequences.
 
 ### `integration_gpu.h`
 
@@ -393,7 +394,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 
 `pipeline_run`: GPU orchestrator. First line of the function body dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0`, so the GPU path has zero overhead. Phase 2 uses double-buffered `stream_copy` + `stream_compute` overlap.
 
-`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Phase 1: debayer_cpu → star_detect_cpu_detect → ccl_com → ransac per frame. Phase 2: debayer_cpu → lanczos_transform_cpu per frame (all frames kept in RAM), then integrate_kappa_sigma or integrate_mean, then fits_save.
+`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Phase 1: debayer_cpu → star_detect_cpu_detect → ccl_com → ransac per frame. Phase 2: mini-batched (PIPELINE_CPU_BATCH_SIZE=32) — debayer_cpu → lanczos_transform_cpu per frame, accumulating survivors into `global_sum`/`global_count` buffers rather than holding all N frames in RAM simultaneously.
 
 ---
 
@@ -409,7 +410,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
   - `star_detect_cpu_threshold`: three passes — `reduction(+:sum)`, `reduction(+:sq)`, then parallel mask write.
   - `lanczos_cpu`: `schedule(static)` on outer `dy` row loop.
   - `integrate_mean`: pixel-outer loop (restructured from frame-outer) — `schedule(static)`.
-  - `integrate_kappa_sigma`: `schedule(dynamic, 64)` — VLA `float vals[n]` / `int actv[n]` declared inside loop body for per-thread stack allocation.
+  - `integrate_kappa_sigma`: `schedule(dynamic, 64)` — per-thread heap slabs `all_vals` / `all_actv` (size `max_threads × n`, allocated once before the parallel region, indexed by `omp_get_thread_num() * n`). No VLAs.
   - `star_detect_cpu_ccl_com` (CCL pass): **not parallelized** — union-find raster scan has cross-pixel data dependencies.
 - **C goto rule (C11 and C++17)**: variables that appear between a `goto` source and its label must be declared before the first `goto`. In `pipeline_cpu.c`, all variables are declared at the top of each function; error paths use explicit `image_free()` before `goto cleanup` rather than a PIPE_CHECK macro, to avoid jumping over initializers.
 - **Row steps for NPP**: all row steps are `width * sizeof(float)` (row-major float32).
@@ -420,8 +421,10 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 - **Moffat constant memory cap**: max kernel radius is 15 (alpha ≤ 5 → R = ceil(3·alpha) ≤ 15, diameter 31, 961 floats × 4 = ~3.8 KB within 64 KB constant limit).
 - **Phase 1 reads each file twice**: once for star detection, once for Phase 2 transform+integration. Acceptable trade-off versus caching all frames in RAM.
 - **CPU vs GPU output agreement**: not bit-identical due to different Moffat conv precision (→ slightly different homographies), different Lanczos implementations (nppi vs hand-coded), and different integration paths. Empirical PSNR ≈ 44.6 dB; mean relative error ≈ 0.25% in the interior on 10 × 4656×3520 frames.
+- **`lanczos_transform_cpu` identity fast path**: if H is identity and src/dst dimensions match, falls back to `memcpy` before entering the warp loop.
+- **`lanczos_transform_cpu` weight precomputation**: `wx_arr[6]` and `wy_arr[6]` are computed once before the 6×6 tap loop, reducing `lanczos_weight` calls from 42 to 12 per destination pixel.
 - **`lanczos_transform_cpu` weight_sum guard**: uses `fabsf(weight_sum) < 1e-6f`, not `== 0.f`. When the Lanczos kernel center tap lands exactly on an integer OOB coordinate, `sinf(k·π)` floating-point error leaves `weight_sum` near but not exactly zero; an exact equality test would divide by ≈−1e-9 and amplify noise to ≈1560. The threshold correctly returns 0 for the OOB case.
-- **`lanczos_transform_gpu` singular-H guard**: checks `det(H) < 1e-12` before any CUDA allocation and returns `DSO_ERR_INVALID_ARG`. The `invert_homography_h` helper in the same file is dead code (kept for reference).
+- **`lanczos_transform_gpu` singular-H guard**: checks `det(H) < 1e-12` before any CUDA allocation and returns `DSO_ERR_INVALID_ARG`.
 - **GPU kappa-sigma variance uses `double`**: `kappa_sigma_batch_kernel` accumulates squared deviations into `double sq` (not `float`). For pixel values up to 65535 and batch size 64, max sq ≈ 2.75×10¹¹ exceeds float precision; using double matches the CPU `integrate_kappa_sigma` implementation.
 - **Calibration formula**: `light_cal = (light - dark_master) / flat_master`. Applied before debayering. With bias: `dark_master = stack(dark_raw - bias)`, `flat_master = stack(normalize(flat_raw - bias))`. With darkflat: `dark_master = stack(dark_raw)`, `flat_master = stack(normalize(flat_raw - darkflat))`. Bias and darkflat are mutually exclusive.
 - **Winsorized mean (γ=0.1)**: Sort N pixel values per pixel; replace bottom `g = floor(0.1·N)` values with `vals[g]` and top g with `vals[N-1-g]`; compute mean using `double` accumulator to prevent overflow for N·(65535)² accumulations. Insertion sort used for per-pixel sort (N typically < 100).
