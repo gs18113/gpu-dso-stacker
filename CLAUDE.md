@@ -537,3 +537,70 @@ Key flags: `-n` (frames), `-s` (stars), `-o` (output dir), `--bayer`, `--gen-cal
 ```
 astropy, numpy, opencv-python (cv2), astroalign
 ```
+
+---
+
+## GUI Frontend (`src/GUI/`)
+
+A PyQt6 desktop frontend for the `dso_stacker` CLI.
+
+### Launch
+
+```bash
+pip install PyQt6 pyyaml astropy   # one-time
+python src/GUI/main.py
+```
+
+### File structure
+
+```
+src/GUI/
+├── main.py                      # Entry point: QApplication + dark palette + MainWindow
+├── main_window.py               # MainWindow: QTabWidget, menu bar, Run/Abort, log panel
+├── project.py                   # ProjectState dataclass + YAML save/load (pyyaml)
+├── runner.py                    # SubprocessRunner(QThread): Popen + line-by-line emit
+├── fits_meta.py                 # FitsMetaWorker(QRunnable): reads NAXIS1/2, BAYERPAT
+├── utils.py                     # build_command(), write_csv(), write_calib_list(),
+│                                #   format_size(), detect_output_format()
+└── widgets/
+    ├── __init__.py
+    ├── frame_table.py           # FrameTableWidget: DnD QTableWidget base for all tabs
+    ├── light_tab.py             # LightTab: frame list + QRadioButton reference column
+    ├── calib_tab.py             # CalibTab: frame list + stacking-method combo
+    └── stacking_options_tab.py  # All CLI params; single _update_visibility() controls
+                                 #   conditional widget show/hide per output format
+```
+
+### Key design decisions
+
+- **2-column CSV only**: the GUI always writes a 2-col CSV (star-detection mode). Pre-computed homography workflows remain a CLI concern.
+- **Temp directory per run**: `tempfile.TemporaryDirectory` created on Run, deleted after subprocess join. Holds `frames.csv` and per-calibration `*_list.txt` files.
+- **Async FITS metadata**: `FitsMetaWorker(QRunnable)` submitted to `QThreadPool.globalInstance()` so reading FITS headers never blocks the UI thread. Uses a minimal pure-Python FITS header parser (`_read_fits_keywords` in `fits_meta.py`) — reads 2880-byte blocks, 80-byte cards, stops at END — no external library needed.
+- **Bias / Darkflat mutual exclusion**: `QTabWidget.setTabEnabled(False)` grays out and disables the opposing tab; `setTabToolTip` explains why. Checked again at run time.
+- **Conditional visibility**: single `_update_visibility()` slot in `StackingOptionsTab` connected to all relevant widget change signals (integration combo, CPU checkbox, output path, bit depth).
+- **Bit depth combo item disabling**: uses `QStandardItemModel` — items are disabled (not removed) based on output format. Snaps to nearest valid selection automatically.
+- **Binary path resolution**: `utils._binary_path()` resolves `<repo>/build/dso_stacker` relative to `utils.py`. Raises `FileNotFoundError` with a helpful build instruction if absent.
+- **Dark theme**: Fusion style + custom `QPalette` applied in `main.py`. No external theme library required.
+
+### YAML project schema
+
+```yaml
+version: 1
+light_frames:
+  reference_index: 0
+  files: [/abs/path/frame.fit, ...]
+dark_frames:    { method: winsorized-mean, files: [] }
+flat_frames:    { method: winsorized-mean, files: [] }
+bias_frames:    { method: winsorized-mean, files: [] }
+darkflat_frames: { method: winsorized-mean, files: [] }
+options:
+  output_path: output.fits     use_cpu: false
+  integration: kappa-sigma     kappa: 3.0     iterations: 3     batch_size: 16
+  star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
+  top_stars: 50     min_stars: 6
+  ransac_iters: 1000     ransac_thresh: 2.0     match_radius: 30.0
+  bayer: auto     bit_depth: f32     tiff_compression: none
+  stretch_min: null     stretch_max: null
+  save_master_dir: ./master     wsor_clip: 0.1
+  dark_method: winsorized-mean     ...
+```

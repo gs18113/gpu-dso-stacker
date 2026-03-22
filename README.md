@@ -278,6 +278,53 @@ GPU mini-batch vs single-pass CPU kappa-sigma, slight homography differences fro
 
 ---
 
+## GUI Frontend
+
+A PyQt6 desktop application wrapping the CLI. Provides drag-and-drop frame management, all stacking options with conditional visibility, and YAML project save/load.
+
+### Install
+
+```bash
+pip install PyQt6 pyyaml
+```
+
+### Launch
+
+```bash
+python src/GUI/main.py
+```
+
+### Features
+
+- **Tabs**: Light, Dark, Flat, Bias, Darkflat, Stacking Options
+- **Drag-and-drop** FITS frames (`.fit` / `.fits` / `.fts`) onto any tab
+- **Reference frame** selection in the Light tab (radio button column; default: first frame)
+- **File info**: filename, path, size, and dimensions (W×H) loaded asynchronously from FITS headers
+- **Conditional options**: kappa/iterations hidden for mean integration; batch size hidden in CPU mode; TIFF compression hidden for non-TIFF output; stretch bounds hidden for floating-point output; bit depth options restricted per output format
+- **Bias / Darkflat mutual exclusion**: loading frames in one disables the other tab
+- **Project files** (`.yaml`): save and reload complete project state (frame lists + all options)
+- **Live log**: subprocess stdout/stderr streamed to a collapsible log panel
+- **Abort**: terminate a running stack without leaving zombie processes
+
+### Source layout
+
+```
+src/GUI/
+├── main.py                      # Entry point
+├── main_window.py               # MainWindow: tabs, menu, Run/Abort, log panel
+├── project.py                   # ProjectState dataclass + YAML save/load
+├── runner.py                    # SubprocessRunner (QThread)
+├── fits_meta.py                 # Async FITS header reader (astropy, QThreadPool)
+├── utils.py                     # build_command, format_size, detect_output_format
+└── widgets/
+    ├── frame_table.py           # FrameTableWidget: DnD file list base
+    ├── light_tab.py             # Light tab + reference radio column
+    ├── calib_tab.py             # Dark/Flat/Bias/Darkflat tabs
+    └── stacking_options_tab.py  # All CLI parameters with conditional visibility
+```
+
+---
+
 ## Python Tools
 
 | Script | Purpose |

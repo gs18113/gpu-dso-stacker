@@ -72,6 +72,8 @@ _deps/
 
 # Generated FITS output (stacker results, test artefacts)
 *.fits
+*.tiff
+*.png
 
 # Editor / IDE
 .vscode/
@@ -82,3 +84,8 @@ _deps/
 
 data/
 samples/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
