@@ -84,10 +84,12 @@ gpu-dso-stacker/
 │   ├── test_debayer_cpu.c       ← 10 tests: VNG debayer CPU (all patterns + edge cases)
 │   ├── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
 │   ├── test_calibration.c       ← 26 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, bias sub, flat normalization)
-│   └── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
+│   ├── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
+│   └── test_color.c             ← tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
 └── python/
     ├── stacker.py               ← Reference stacker: OpenCV Lanczos4 + kappa-sigma
-    └── compute_transforms.py    ← Independently compute homographies via astroalign
+    ├── compute_transforms.py    ← Independently compute homographies via astroalign
+    └── generate_test_frames.py  ← Synthetic FITS frame generator (Bayer + noise + guiding errors + calibration frames)
 ```
 
 ---
@@ -442,7 +444,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 - **GPU kappa-sigma variance uses `double`**: `kappa_sigma_batch_kernel` accumulates squared deviations into `double sq` (not `float`). For pixel values up to 65535 and batch size 64, max sq ≈ 2.75×10¹¹ exceeds float precision; using double matches the CPU `integrate_kappa_sigma` implementation.
 - **Calibration formula**: `light_cal = (light - dark_master) / flat_master`. Applied before debayering. With bias: `dark_master = stack(dark_raw - bias)`, `flat_master = stack(normalize(flat_raw - bias))`. With darkflat: `dark_master = stack(dark_raw)`, `flat_master = stack(normalize(flat_raw - darkflat))`. Bias and darkflat are mutually exclusive.
 - **Winsorized mean (γ=0.1)**: Sort N pixel values per pixel; replace bottom `g = floor(0.1·N)` values with `vals[g]` and top g with `vals[N-1-g]`; compute mean using `double` accumulator to prevent overflow for N·(65535)² accumulations. Insertion sort used for per-pixel sort (N typically < 100).
-- **Flat normalization**: Each flat frame is divided by its own (double-precision) mean before stacking. The stacked master flat has mean ≈ 1.0 and is used directly as a divisor.
+- **Flat normalization**: Each flat frame is divided by its own (double-precision) mean before stacking. The stacked master flat has mean ≈ 1.0 and is used directly as a divisor. Flat inputs must be **raw ADU** — `calibration.c` subtracts bias first, then normalises. Pre-normalised flat frames (mean≈1.0) produce `flat_raw − bias ≈ −249`, triggering "near-zero mean, skipping normalisation" and an inverted/invalid master flat.
 - **Dead-pixel guard**: Flat pixels below `1e-6f` → output 0 (not divide). Both CPU and GPU paths apply this guard.
 - **Calibration dimension validation**: `calib_apply_cpu` and `calib_gpu_apply_d2d` return `DSO_ERR_INVALID_ARG` if the frame dimensions do not match the master frame dimensions.
 - **FITS vs. text-list detection**: `is_fits_file()` probes with CFITSIO `fits_open_file`; if it succeeds the path is a pre-computed master, otherwise it is treated as a newline-separated text frame list.
@@ -473,6 +475,15 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 |---|---|
 | `python/stacker.py` | Reference stacker: OpenCV Lanczos4 warp + kappa-sigma integration |
 | `python/compute_transforms.py` | Independently compute homographies via astroalign and compare to CSV |
+| `python/generate_test_frames.py` | Synthetic FITS frame generator for pipeline testing |
+
+### `generate_test_frames.py`
+
+Generates synthetic FITS test frames that exercise all pipeline stages: Bayer mosaics (`--bayer rggb|bggr|grbg|gbrg`), Moffat-PSF stars (alpha/beta match pipeline defaults), per-frame homographic guiding offsets written to an 11-column CSV, and optional calibration sets (bias/dark/flat, `--gen-calibration`). Star colours are modelled via a B-V colour index distribution (Beta(2.5, 1.5) biased toward G/K-type), with per-channel rendering in Bayer mode and ITU-R BT.709 luminance weighting in mono mode.
+
+Key flags: `-n` (frames), `-s` (stars), `-o` (output dir), `--bayer`, `--gen-calibration`, `--num-calib-frames`, `--no-homography` (2-col CSV for star-detect+RANSAC path), `--no-star-colors`.
+
+**Flat frame generation note**: `make_flat_frame` returns **raw ADU values** (not normalised). `calibration.c` subtracts bias from each flat *before* normalising — passing pre-normalised flats (mean≈1.0) gives `flat_raw − bias ≈ −249`, triggering the "near-zero mean, skipping normalisation" warning and producing an inverted master flat.
 
 ### astroalign convention note
 `astroalign.find_transform(source, target)` returns an `AffineTransform` whose `.params` maps **source → target** (the forward direction: frame → ref). Since the CSV stores the **backward** map (ref → src), always call `np.linalg.inv(transform.params)` before comparing to CSV homographies.
