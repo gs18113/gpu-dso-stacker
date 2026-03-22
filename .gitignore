@@ -80,4 +80,5 @@ _deps/
 *.swo
 *~
 
-data/*
+data/
+samples/
