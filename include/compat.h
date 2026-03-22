@@ -78,6 +78,12 @@ static __inline void compat_usleep(unsigned int us)
 #define usleep(us) compat_usleep(us)
 
 /*
+ * strcasecmp → _stricmp (case-insensitive string comparison).
+ */
+#include <string.h>
+#define strcasecmp(a, b) _stricmp(a, b)
+
+/*
  * isatty / fileno — POSIX terminal detection vs MSVC _isatty / _fileno.
  */
 #include <io.h>

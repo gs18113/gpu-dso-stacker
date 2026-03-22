@@ -10,6 +10,7 @@
  */
 
 #include "fits_io.h"
+#include "compat.h"
 #include <fitsio.h>
 #include <stdlib.h>
 #include <string.h>
