@@ -356,20 +356,23 @@ static DsoError phase2_cpu(FrameInfo            *frames,
         }
 
         /* 3. Accumulate batch into global */
+        { long pp;
 #pragma omp parallel for schedule(static)
-        for (long p = 0; p < npix; p++) {
-            global_sum_r[p]   += b_out_r.data[p] * n_batch;
-            global_count_r[p] += n_batch;
+        for (pp = 0; pp < npix; pp++) {
+            global_sum_r[pp]   += b_out_r.data[pp] * n_batch;
+            global_count_r[pp] += n_batch;
+        }
         }
         image_free(&b_out_r);
 
         if (color) {
+            long pp;
 #pragma omp parallel for schedule(static)
-            for (long p = 0; p < npix; p++) {
-                global_sum_g[p]   += b_out_g.data[p] * n_batch;
-                global_count_g[p] += n_batch;
-                global_sum_b[p]   += b_out_b.data[p] * n_batch;
-                global_count_b[p] += n_batch;
+            for (pp = 0; pp < npix; pp++) {
+                global_sum_g[pp]   += b_out_g.data[pp] * n_batch;
+                global_count_g[pp] += n_batch;
+                global_sum_b[pp]   += b_out_b.data[pp] * n_batch;
+                global_count_b[pp] += n_batch;
             }
             image_free(&b_out_g);
             image_free(&b_out_b);
@@ -395,11 +398,13 @@ static DsoError phase2_cpu(FrameInfo            *frames,
             image_free(&img_r); image_free(&img_g); image_free(&img_b);
             err = DSO_ERR_ALLOC; goto cleanup;
         }
+        { long pp;
 #pragma omp parallel for schedule(static)
-        for (long p = 0; p < npix; p++) {
-            img_r.data[p] = (global_count_r[p] > 0) ? (global_sum_r[p] / global_count_r[p]) : 0.0f;
-            img_g.data[p] = (global_count_g[p] > 0) ? (global_sum_g[p] / global_count_g[p]) : 0.0f;
-            img_b.data[p] = (global_count_b[p] > 0) ? (global_sum_b[p] / global_count_b[p]) : 0.0f;
+        for (pp = 0; pp < npix; pp++) {
+            img_r.data[pp] = (global_count_r[pp] > 0) ? (global_sum_r[pp] / global_count_r[pp]) : 0.0f;
+            img_g.data[pp] = (global_count_g[pp] > 0) ? (global_sum_g[pp] / global_count_g[pp]) : 0.0f;
+            img_b.data[pp] = (global_count_b[pp] > 0) ? (global_sum_b[pp] / global_count_b[pp]) : 0.0f;
+        }
         }
         err = image_save_rgb(config->output_file, &img_r, &img_g, &img_b, &config->save_opts);
         image_free(&img_r); image_free(&img_g); image_free(&img_b);
@@ -409,9 +414,11 @@ static DsoError phase2_cpu(FrameInfo            *frames,
         Image out = {NULL, W, H};
         out.data = (float *)malloc((size_t)npix * sizeof(float));
         if (!out.data) { err = DSO_ERR_ALLOC; goto cleanup; }
+        { long pp;
 #pragma omp parallel for schedule(static)
-        for (long p = 0; p < npix; p++) {
-            out.data[p] = (global_count_r[p] > 0) ? (global_sum_r[p] / global_count_r[p]) : 0.0f;
+        for (pp = 0; pp < npix; pp++) {
+            out.data[pp] = (global_count_r[pp] > 0) ? (global_sum_r[pp] / global_count_r[pp]) : 0.0f;
+        }
         }
         PIPE_CHECK(image_save(config->output_file, &out, &config->save_opts), cleanup, config->output_file);
         image_free(&out);

@@ -98,9 +98,10 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
         return DSO_OK;
     }
 
-#pragma omp parallel for schedule(static)
-    for (int dy = 0; dy < DH; dy++) {
-        for (int dx = 0; dx < DW; dx++) {
+    int dy, dx;
+#pragma omp parallel for schedule(static) private(dx)
+    for (dy = 0; dy < DH; dy++) {
+        for (dx = 0; dx < DW; dx++) {
 
             /* Map destination pixel (dx, dy) to source coordinates (sx, sy)
              * using H (the backward map) directly in homogeneous coordinates. */

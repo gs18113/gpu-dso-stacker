@@ -224,8 +224,9 @@ static DsoError stack_frames(const char **paths, int n,
     if (!all_vals) { err = DSO_ERR_ALLOC; goto cleanup; }
 
     /* Per-pixel stacking (parallelised across pixels) */
+    int p;
 #pragma omp parallel for schedule(dynamic, 64)
-    for (int p = 0; p < npix; p++) {
+    for (p = 0; p < npix; p++) {
         int tid = 0;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
@@ -507,8 +508,9 @@ DsoError calib_apply_cpu(Image *img, const CalibFrames *calib)
     const float *dark = calib->has_dark ? calib->dark.data : NULL;
     const float *flat = calib->has_flat ? calib->flat.data : NULL;
 
+    int p;
 #pragma omp parallel for schedule(static)
-    for (int p = 0; p < npix; p++) {
+    for (p = 0; p < npix; p++) {
         float v = data[p];
         if (dark) v -= dark[p];
         if (flat) {
