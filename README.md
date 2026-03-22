@@ -388,3 +388,21 @@ Release artifacts:
 ```bash
 python3 python/stacker.py -f data/transform_mat.csv -o ref.fits
 ```
+
+---
+
+## License
+
+This software is **proprietary**. See [LICENSE](LICENSE) for terms.
+
+This software statically links the NVIDIA CUDA Toolkit and NVIDIA
+Performance Primitives (NPP), both covered under the single
+[NVIDIA CUDA EULA](https://docs.nvidia.com/cuda/eula/). NPP does not
+require any additional license beyond the CUDA EULA. On first run, the
+CLI will prompt you to accept the license terms (or pass
+`--accept-license` for non-interactive use).
+
+Third-party open-source components (CFITSIO, libtiff, libpng, PySide6,
+PyYAML, getopt\_port) are used under their respective permissive or
+LGPL licenses. See [THIRD\_PARTY\_LICENSES](THIRD_PARTY_LICENSES) for
+full attribution and license texts.

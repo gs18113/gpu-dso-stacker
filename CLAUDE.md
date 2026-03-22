@@ -598,6 +598,15 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 
 ---
 
+## Licensing
+
+- **Project license**: Proprietary — see `LICENSE`.
+- **NVIDIA CUDA Toolkit + NPP**: Both covered under the single [NVIDIA CUDA EULA](https://docs.nvidia.com/cuda/eula/). NPP does not require any additional license beyond the CUDA EULA. Statically linked — the CLI includes a first-run license acceptance gate (`--license` to view, `--accept-license` for non-interactive acceptance, marker file at `~/.config/dso_stacker/.license_accepted`). The GUI has its own acceptance dialog via `QSettings`.
+- **Third-party components**: CFITSIO (U.S. Government permissive), libtiff (BSD-style), libpng (libpng-2.0), PySide6 (LGPL v3), PyYAML (MIT), getopt\_port (BSD-2-Clause). Full texts in `THIRD_PARTY_LICENSES`.
+- **GUI subprocess**: `utils.py:build_command()` always passes `--accept-license` to the CLI so the subprocess never blocks on stdin.
+
+---
+
 ## Environment
 
 | Resource | Path |
