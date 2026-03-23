@@ -141,6 +141,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
 
     DsoError  err        = DSO_OK;
     long      npix       = (long)W * H;
+    long      pp;
     int       color      = config->color_output;
     int       batch_size = PIPELINE_CPU_BATCH_SIZE;
     int       batch_n    = 0;
@@ -416,7 +417,6 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     /* ---- Finalize: divide accumulators and save ---- */
     printf("pipeline_cpu: saving to %s\n", config->output_file);
     {
-        long pp;
         if (color) {
             Image img_r = {NULL, W, H};
             Image img_g = {NULL, W, H};

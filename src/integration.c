@@ -49,9 +49,9 @@ DsoError integrate_mean(const Image **frames, int n, Image *out)
 
     long  npix  = (long)W * H;
     float inv_n = 1.f / (float)n;
+    long  p;
 
     /* Pixel-outer loop: each pixel is independent → safe to parallelise. */
-    long p;
 #pragma omp parallel for schedule(static)
     for (p = 0; p < npix; p++) {
         float sum = 0.f;
