@@ -151,8 +151,9 @@ static DsoError stack_frames(const char **paths, int n,
 {
     if (n <= 0) return DSO_ERR_INVALID_ARG;
 
-    DsoError  err   = DSO_OK;
-    float   **bufs  = NULL;
+    DsoError  err      = DSO_OK;
+    float   **bufs     = NULL;
+    float    *all_vals = NULL;
     int       W = 0, H = 0, npix = 0;
 
     bufs = (float **)calloc((size_t)n, sizeof(float *));
@@ -220,13 +221,12 @@ static DsoError stack_frames(const char **paths, int n,
 #ifdef _OPENMP
     max_threads = omp_get_max_threads();
 #endif
-    float *all_vals = (float *)malloc((size_t)max_threads * n * sizeof(float));
+    all_vals = (float *)malloc((size_t)max_threads * n * sizeof(float));
     if (!all_vals) { err = DSO_ERR_ALLOC; goto cleanup; }
 
     /* Per-pixel stacking (parallelised across pixels) */
-    int p;
 #pragma omp parallel for schedule(dynamic, 64)
-    for (p = 0; p < npix; p++) {
+    for (int p = 0; p < npix; p++) {
         int tid = 0;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
@@ -508,9 +508,8 @@ DsoError calib_apply_cpu(Image *img, const CalibFrames *calib)
     const float *dark = calib->has_dark ? calib->dark.data : NULL;
     const float *flat = calib->has_flat ? calib->flat.data : NULL;
 
-    int p;
 #pragma omp parallel for schedule(static)
-    for (p = 0; p < npix; p++) {
+    for (int p = 0; p < npix; p++) {
         float v = data[p];
         if (dark) v -= dark[p];
         if (flat) {
