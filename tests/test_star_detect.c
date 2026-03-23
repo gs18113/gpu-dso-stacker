@@ -547,6 +547,112 @@ static int test_detect_finds_spike_star(void)
     return 0;
 }
 
+/*
+ * For an interior spike of value V convolved with a normalised kernel,
+ * the sum of all output pixels must equal V (kernel sums to 1 and the
+ * spike is far enough from all edges that no kernel taps are clipped).
+ * A race condition that skips, duplicates, or misplaces writes will
+ * perturb the sum by at least one PSF-peak-sized error (~40 counts),
+ * dwarfing the sub-count floating-point accumulation error.
+ */
+static int test_moffat_convolve_spike_sum(void)
+{
+    const int W = 64, H = 64;
+    const int cx = 32, cy = 32;
+    const float V = 1000.f;
+    int npix = W * H;
+
+    float *src = (float *)calloc((size_t)npix, sizeof(float));
+    float *dst = (float *)malloc((size_t)npix * sizeof(float));
+    ASSERT_NOT_NULL(src); ASSERT_NOT_NULL(dst);
+
+    src[cy * W + cx] = V;
+
+    MoffatParams p = {2.5f, 2.0f};
+    ASSERT_OK(star_detect_cpu_moffat_convolve(src, dst, W, H, &p));
+
+    double total = 0.0;
+    for (int i = 0; i < npix; i++) total += dst[i];
+
+    /* With R=8 the kernel fits entirely inside the 64×64 image, so the
+     * normalised kernel sums to exactly 1 and total must equal V.
+     * Tolerance: 1.0 covers FP accumulation error (<<0.25) while still
+     * detecting any race-induced misplaced write (error ≥ PSF peak ≈ 40). */
+    ASSERT_NEAR((float)total, V, 1.0f);
+
+    free(src); free(dst);
+    return 0;
+}
+
+/*
+ * The Moffat profile is monotonically decreasing with distance from the
+ * kernel centre, so the output pixel at the spike location must be
+ * strictly larger than all its neighbours.  A race that corrupts any
+ * pixel in the convolved image can falsely elevate a non-centre pixel
+ * above the true peak.
+ */
+static int test_moffat_convolve_spike_peak_location(void)
+{
+    const int W = 64, H = 64;
+    const int cx = 32, cy = 32;
+    const float V = 1000.f;
+    int npix = W * H;
+
+    float *src = (float *)calloc((size_t)npix, sizeof(float));
+    float *dst = (float *)malloc((size_t)npix * sizeof(float));
+    ASSERT_NOT_NULL(src); ASSERT_NOT_NULL(dst);
+
+    src[cy * W + cx] = V;
+
+    MoffatParams p = {2.5f, 2.0f};
+    ASSERT_OK(star_detect_cpu_moffat_convolve(src, dst, W, H, &p));
+
+    float peak = dst[cy * W + cx];
+    for (int i = 0; i < npix; i++)
+        ASSERT(dst[i] <= peak);
+
+    free(src); free(dst);
+    return 0;
+}
+
+/*
+ * The Moffat kernel is radially symmetric, so a spike at (cx, cy) must
+ * produce a symmetric convolved image.  Check horizontal, vertical, and
+ * diagonal symmetry at several offsets.  A race that swaps row-indices
+ * produces an asymmetric blob that breaks these equalities.
+ */
+static int test_moffat_convolve_spike_symmetry(void)
+{
+    const int W = 64, H = 64;
+    const int cx = 32, cy = 32;
+    const float V = 1000.f;
+    int npix = W * H;
+
+    float *src = (float *)calloc((size_t)npix, sizeof(float));
+    float *dst = (float *)malloc((size_t)npix * sizeof(float));
+    ASSERT_NOT_NULL(src); ASSERT_NOT_NULL(dst);
+
+    src[cy * W + cx] = V;
+
+    MoffatParams p = {2.5f, 2.0f};
+    ASSERT_OK(star_detect_cpu_moffat_convolve(src, dst, W, H, &p));
+
+    int R = (int)ceilf(3.f * p.alpha);   /* = 8 */
+    for (int d = 1; d <= R; d++) {
+        /* Horizontal symmetry: row cy, left vs right */
+        ASSERT_NEAR(dst[cy * W + (cx + d)], dst[cy * W + (cx - d)], 1e-5f);
+        /* Vertical symmetry: column cx, above vs below */
+        ASSERT_NEAR(dst[(cy + d) * W + cx], dst[(cy - d) * W + cx], 1e-5f);
+        /* Diagonal symmetry: NE vs SW */
+        ASSERT_NEAR(dst[(cy - d) * W + (cx + d)], dst[(cy + d) * W + (cx - d)], 1e-5f);
+        /* Anti-diagonal symmetry: NW vs SE */
+        ASSERT_NEAR(dst[(cy - d) * W + (cx - d)], dst[(cy + d) * W + (cx + d)], 1e-5f);
+    }
+
+    free(src); free(dst);
+    return 0;
+}
+
 /* NULL argument checks for new functions */
 static int test_moffat_null_args(void)
 {
@@ -609,6 +715,9 @@ int main(void)
 
     SUITE("star_detect_cpu — Moffat convolution + threshold");
     RUN(test_moffat_convolve_uniform);
+    RUN(test_moffat_convolve_spike_sum);
+    RUN(test_moffat_convolve_spike_peak_location);
+    RUN(test_moffat_convolve_spike_symmetry);
     RUN(test_threshold_no_stars);
     RUN(test_threshold_bright_star);
     RUN(test_detect_uniform_no_stars);
