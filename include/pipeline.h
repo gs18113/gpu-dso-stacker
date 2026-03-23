@@ -1,41 +1,21 @@
 /*
- * pipeline.h — Full DSO-stacking pipeline orchestrator with CUDA stream
- * overlap.
+ * pipeline.h — Full DSO-stacking pipeline orchestrator.
  *
- * This module wires together all processing stages into a single call that
- * reads FITS frames, optionally computes alignment transforms, and produces
- * a stacked output image.
+ * Single-pass execution: each frame is read from disk exactly once.
+ * Reference frame is processed first (to build ref_stars), then all
+ * non-reference frames follow.  Per-frame sequence:
  *
- * Data-flow (2-column CSV, full pipeline):
- *   Phase 1 — Star detection and transform computation
- *     for each frame:
- *       CPU : read FITS → pinned host buffer
- *       streamB (copy): H2D to device src slot
- *       streamA (compute): debayer (VNG) → Moffat convolve → threshold
- *       streamA → D2H threshold mask to host
- *       CPU : CCL + weighted CoM → StarList
- *       CPU : RANSAC → Homography H[i]  (against reference star list)
- *     (CPU reads frame i+1 while GPU processes frame i — I/O overlap)
+ *   fits_load_to_buffer → H2D (stream_copy)
+ *   → calib → debayer_lum → Moffat+threshold  (stream_compute)
+ *   → D2H → CCL+CoM → RANSAC                  (CPU)
+ *   → Lanczos warp → integration batch slot    (stream_compute)
  *
- *   Phase 2 — Lanczos alignment + integration
- *     for each mini-batch of M frames:
- *       for each frame in batch:
- *         CPU : read FITS → pinned host buffer
- *         streamB: H2D src frame
- *         streamA: debayer → cudaMemset(d_dst, 0) → lanczos_transform_gpu_d2d
- *       streamA: integration_gpu_process_batch (kappa-sigma)
- *     streamA: integration_gpu_finalize
- *     CPU: fits_save output
+ * I/O overlap: after RANSAC the GPU warp for frame m runs concurrently
+ * with CPU loading frame m+1 from disk + async H2D on stream_copy.
+ * At batch boundaries the H2D of frame m+1 also overlaps batch integration.
  *
- * Data-flow (11-column CSV, pre-computed transforms):
- *   Phase 1 is skipped entirely.
- *   Phase 2 proceeds as above, using the H values from the CSV.
- *
- * CUDA stream architecture:
- *   stream_copy  : only cudaMemcpyAsync H2D transfers (no kernels)
- *   stream_compute: all GPU kernels
- *   Pinned host memory double-buffer: pinned[i % 2] avoids stall between
- *   disk I/O and DMA.  Events e_h2d[2] and e_gpu[2] enforce ordering.
+ * Mini-batch kappa-sigma integration caps peak GPU memory to batch_size
+ * warped frames (default 16).
  */
 
 #pragma once
@@ -56,13 +36,13 @@ extern "C" {
  * PipelineConfig — complete configuration for one pipeline run.
  * ------------------------------------------------------------------------- */
 typedef struct {
-    /* --- Star detection (ignored when has_transforms = 1) --- */
+    /* --- Star detection --- */
     float        star_sigma;      /* detection threshold: mean + star_sigma*σ (3.0) */
     MoffatParams moffat;          /* Moffat kernel shape {alpha=2.5, beta=2.0}       */
     int          top_stars;       /* top-K stars to use for matching (50)            */
     int          min_stars;       /* minimum stars required for RANSAC (6)           */
 
-    /* --- RANSAC (ignored when has_transforms = 1) --- */
+    /* --- RANSAC --- */
     RansacParams ransac;          /* {max_iters=1000, inlier_thresh=2.0,
                                       match_radius=30.0, confidence=0.99,
                                       min_inliers=4}                                */
@@ -91,21 +71,17 @@ typedef struct {
 /*
  * pipeline_run — execute the full DSO stacking pipeline.
  *
- * frames         : parsed FrameInfo array (from csv_parse); the H field of
- *                  non-reference frames is populated in-place when
- *                  has_transforms == 0.
- * n_frames       : number of frames (must be ≥ 1)
- * has_transforms : 1 → skip star detection + RANSAC (use CSV homographies)
- *                  0 → run full detection + alignment
- * ref_idx        : index of the reference frame in frames[] (0 ≤ ref_idx < n)
- * config         : pipeline configuration; must not be NULL
+ * frames   : parsed FrameInfo array (from csv_parse); H fields of
+ *            non-reference frames are populated in-place by RANSAC.
+ * n_frames : number of frames (must be ≥ 1)
+ * ref_idx  : index of the reference frame in frames[] (0 ≤ ref_idx < n)
+ * config   : pipeline configuration; must not be NULL
  *
  * Returns DSO_OK or the first non-OK error encountered.  All allocated GPU
  * and host resources are freed before returning, even on error.
  */
 DsoError pipeline_run(FrameInfo            *frames,
                        int                   n_frames,
-                       int                   has_transforms,
                        int                   ref_idx,
                        const PipelineConfig *config);
 
@@ -118,7 +94,6 @@ DsoError pipeline_run(FrameInfo            *frames,
  */
 DsoError pipeline_run_cpu(FrameInfo            *frames,
                            int                   n_frames,
-                           int                   has_transforms,
                            int                   ref_idx,
                            const PipelineConfig *config);
 

@@ -47,22 +47,11 @@ static Image make_image_gradient(int w, int h)
     return img;
 }
 
-/* Write a minimal 11-column frame-list CSV (pre-computed homographies) to `path`. */
+/* Write a minimal 2-column frame-list CSV to `path`. */
 static void write_test_csv(const char *path)
 {
     FILE *fp = fopen(path, "w");
     if (!fp) { perror("write_test_csv"); exit(1); }
-    fprintf(fp, "filepath, is_reference, h00, h01, h02, h10, h11, h12, h20, h21, h22\n");
-    fprintf(fp, "%s/dso_frame1.fits, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1\n", test_tmpdir());
-    fprintf(fp, "%s/dso_frame2.fits, 0, 1, 0, 2.5, 0, 1, 1.3, 0, 0, 1\n", test_tmpdir());
-    fclose(fp);
-}
-
-/* Write a minimal 2-column frame-list CSV (no pre-computed homographies) to `path`. */
-static void write_test_csv_2col(const char *path)
-{
-    FILE *fp = fopen(path, "w");
-    if (!fp) { perror("write_test_csv_2col"); exit(1); }
     fprintf(fp, "filepath, is_reference\n");
     fprintf(fp, "%s/dso_frame1.fits, 1\n", test_tmpdir());
     fprintf(fp, "%s/dso_frame2.fits, 0\n", test_tmpdir());
@@ -73,13 +62,13 @@ static void write_test_csv_2col(const char *path)
  * CSV PARSER TESTS
  * ====================================================================== */
 
-/* Parsing a valid 2-row 11-col CSV must return exactly 2 frames. */
+/* Parsing a valid 2-row 2-col CSV must return exactly 2 frames. */
 static int test_csv_count(void)
 {
     char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
     write_test_csv(csv_path);
-    FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
+    FrameInfo *f = NULL; int n = 0;
+    ASSERT_OK(csv_parse(csv_path, &f, &n));
     ASSERT_EQ(n, 2);
     ASSERT_NOT_NULL(f);
     free(f);
@@ -94,8 +83,8 @@ static int test_csv_filepath(void)
     snprintf(exp1, sizeof(exp1), "%s/dso_frame1.fits", test_tmpdir());
     snprintf(exp2, sizeof(exp2), "%s/dso_frame2.fits", test_tmpdir());
     write_test_csv(csv_path);
-    FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
+    FrameInfo *f = NULL; int n = 0;
+    ASSERT_OK(csv_parse(csv_path, &f, &n));
     ASSERT_EQ(strcmp(f[0].filepath, exp1), 0);
     ASSERT_EQ(strcmp(f[1].filepath, exp2), 0);
     free(f);
@@ -107,32 +96,10 @@ static int test_csv_reference_flag(void)
 {
     char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
     write_test_csv(csv_path);
-    FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
+    FrameInfo *f = NULL; int n = 0;
+    ASSERT_OK(csv_parse(csv_path, &f, &n));
     ASSERT_EQ(f[0].is_reference, 1);
     ASSERT_EQ(f[1].is_reference, 0);
-    free(f);
-    return 0;
-}
-
-/* All 9 homography values must be parsed in row-major order (h00..h22). */
-static int test_csv_homography_values(void)
-{
-    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
-    write_test_csv(csv_path);
-    FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
-
-    /* Frame 0: identity */
-    ASSERT_NEAR(f[0].H.h[0], 1.0, 1e-9);  /* h00 */
-    ASSERT_NEAR(f[0].H.h[1], 0.0, 1e-9);  /* h01 */
-    ASSERT_NEAR(f[0].H.h[2], 0.0, 1e-9);  /* h02 */
-    ASSERT_NEAR(f[0].H.h[8], 1.0, 1e-9);  /* h22 */
-
-    /* Frame 1: translation with non-zero off-diagonals */
-    ASSERT_NEAR(f[1].H.h[2], 2.5, 1e-9);  /* h02 = x-translation */
-    ASSERT_NEAR(f[1].H.h[5], 1.3, 1e-9);  /* h12 = y-translation */
-
     free(f);
     return 0;
 }
@@ -143,14 +110,14 @@ static int test_csv_blank_lines_skipped(void)
     char path[512]; TEST_TMPPATH(path, "dso_test_blank.csv");
     FILE *fp = fopen(path, "w");
     ASSERT_NOT_NULL(fp);
-    fprintf(fp, "filepath, is_reference, h00, h01, h02, h10, h11, h12, h20, h21, h22\n");
+    fprintf(fp, "filepath, is_reference\n");
     fprintf(fp, "\n");
-    fprintf(fp, "%s/f.fits, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1\n", test_tmpdir());
+    fprintf(fp, "%s/f.fits, 1\n", test_tmpdir());
     fprintf(fp, "\n");
     fclose(fp);
 
-    FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse(path, &f, &n, &ht));
+    FrameInfo *f = NULL; int n = 0;
+    ASSERT_OK(csv_parse(path, &f, &n));
     ASSERT_EQ(n, 1);   /* only the data row, not the blank lines */
     free(f);
     return 0;
@@ -159,46 +126,30 @@ static int test_csv_blank_lines_skipped(void)
 /* Opening a nonexistent file must return an I/O error. */
 static int test_csv_nonexistent_file(void)
 {
-    FrameInfo *f = NULL; int n = 0; int ht = -1;
+    FrameInfo *f = NULL; int n = 0;
     char nofile[512]; TEST_TMPPATH(nofile, "does_not_exist_xyz.csv");
-    DsoError err = csv_parse(nofile, &f, &n, &ht);
+    DsoError err = csv_parse(nofile, &f, &n);
     ASSERT_EQ(err, DSO_ERR_IO);
     return 0;
 }
 
 /*
- * 11-column CSV must set has_transforms=1.
- * Verifies the flag accurately reflects that homography values were parsed.
+ * 2-column CSV: filepaths and is_reference flags must be correct; homography
+ * fields must be zero-initialised (they are populated later by RANSAC).
  */
-static int test_csv_has_transforms_11col(void)
-{
-    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
-    write_test_csv(csv_path);
-    FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse(csv_path, &f, &n, &ht));
-    ASSERT_EQ(ht, 1);
-    free(f);
-    return 0;
-}
-
-/*
- * 2-column CSV must set has_transforms=0 and zero-init all homographies.
- * Verifies that filepaths and is_reference are still correctly parsed.
- */
-static int test_csv_2col_no_transforms(void)
+static int test_csv_2col_basic(void)
 {
     char csv2[512]; TEST_TMPPATH(csv2, "dso_test_2col.csv");
     char exp1[512]; snprintf(exp1, sizeof(exp1), "%s/dso_frame1.fits", test_tmpdir());
-    write_test_csv_2col(csv2);
-    FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_OK(csv_parse(csv2, &f, &n, &ht));
+    write_test_csv(csv2);
+    FrameInfo *f = NULL; int n = 0;
+    ASSERT_OK(csv_parse(csv2, &f, &n));
     ASSERT_EQ(n, 2);
-    ASSERT_EQ(ht, 0);
     /* Filepaths must be correct */
     ASSERT_EQ(strcmp(f[0].filepath, exp1), 0);
     ASSERT_EQ(f[0].is_reference, 1);
     ASSERT_EQ(f[1].is_reference, 0);
-    /* Homography must be zero-initialised when not provided */
+    /* Homography must be zero-initialised */
     for (int i = 0; i < 9; i++) ASSERT_NEAR(f[0].H.h[i], 0.0, 1e-12);
     for (int i = 0; i < 9; i++) ASSERT_NEAR(f[1].H.h[i], 0.0, 1e-12);
     free(f);
@@ -206,8 +157,8 @@ static int test_csv_2col_no_transforms(void)
 }
 
 /*
- * A CSV with an unexpected column count (e.g. 5) must return DSO_ERR_CSV.
- * Prevents silent misparse of files in wrong format.
+ * A CSV with a column count other than 2 must return DSO_ERR_CSV.
+ * Prevents silent misparse of files in the wrong format.
  */
 static int test_csv_bad_col_count(void)
 {
@@ -218,20 +169,8 @@ static int test_csv_bad_col_count(void)
     fprintf(fp, "%s/f.fits, 1, 1.0, 2.0, 3.0\n", test_tmpdir());
     fclose(fp);
 
-    FrameInfo *f = NULL; int n = 0; int ht = -1;
-    ASSERT_ERR(csv_parse(path, &f, &n, &ht), DSO_ERR_CSV);
-    return 0;
-}
-
-/*
- * NULL has_transforms_out pointer must return DSO_ERR_INVALID_ARG.
- */
-static int test_csv_null_has_transforms_out(void)
-{
-    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_test.csv");
-    write_test_csv(csv_path);
     FrameInfo *f = NULL; int n = 0;
-    ASSERT_ERR(csv_parse(csv_path, &f, &n, NULL), DSO_ERR_INVALID_ARG);
+    ASSERT_ERR(csv_parse(path, &f, &n), DSO_ERR_CSV);
     return 0;
 }
 
@@ -684,13 +623,10 @@ int main(void)
     RUN(test_csv_count);
     RUN(test_csv_filepath);
     RUN(test_csv_reference_flag);
-    RUN(test_csv_homography_values);
     RUN(test_csv_blank_lines_skipped);
     RUN(test_csv_nonexistent_file);
-    RUN(test_csv_has_transforms_11col);
-    RUN(test_csv_2col_no_transforms);
+    RUN(test_csv_2col_basic);
     RUN(test_csv_bad_col_count);
-    RUN(test_csv_null_has_transforms_out);
 
     SUITE("FITS I/O");
     RUN(test_fits_roundtrip);

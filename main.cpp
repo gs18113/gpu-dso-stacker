@@ -475,10 +475,9 @@ int main(int argc, char **argv)
     }
 
     /* ---- Parse CSV ---- */
-    FrameInfo *frames        = nullptr;
-    int        n_frames      = 0;
-    int        has_transforms = 0;
-    check(csv_parse(csv_file, &frames, &n_frames, &has_transforms), "csv_parse");
+    FrameInfo *frames   = nullptr;
+    int        n_frames = 0;
+    check(csv_parse(csv_file, &frames, &n_frames), "csv_parse");
 
     if (n_frames == 0) {
         fprintf(stderr, "Error: CSV contains no frames\n");
@@ -516,9 +515,7 @@ int main(int argc, char **argv)
         cfg.color_output = (detected != BAYER_NONE) ? 1 : 0;
     }
 
-    printf("Parsed %d frame(s), reference = %d, %s\n",
-           n_frames, ref_idx,
-           has_transforms ? "pre-computed transforms" : "star detection mode");
+    printf("Parsed %d frame(s), reference = %d\n", n_frames, ref_idx);
     static const char *bit_depth_names[] = {"f32", "f16", "16-bit", "8-bit"};
     printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s | Output: %s %s\n",
            integ_str, (double)cfg.kappa, cfg.iterations, cfg.batch_size,
@@ -532,8 +529,7 @@ int main(int argc, char **argv)
     }
 
     /* ---- Run pipeline ---- */
-    check(pipeline_run(frames, n_frames, has_transforms, ref_idx, &cfg),
-          "pipeline_run");
+    check(pipeline_run(frames, n_frames, ref_idx, &cfg), "pipeline_run");
 
     free(frames);
     calib_free(&calib);

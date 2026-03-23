@@ -23,7 +23,7 @@ All stages are implemented for both GPU and CPU execution paths. The pipeline ru
 | Pipeline orchestrator | `pipeline.cu` | `pipeline_cpu.c` |
 
 Pass `--cpu` to run the complete CPU path; omit it for the GPU path (default).
-When the input CSV already contains homographies (11-column format), stages 1–3 are skipped in both paths.
+The CSV input is always 2-column (`filepath, is_reference`). Star detection + RANSAC always run.
 
 ## Technology Stack
 
@@ -53,7 +53,7 @@ gpu-dso-stacker/
 │   ├── getopt_port.h            ← Portable getopt_long for MSVC (BSD-licensed)
 │   ├── fits_io.h                ← FITS load/save/free + fits_save_rgb + fits_get_bayer_pattern
 │   ├── image_io.h               ← Format-agnostic save layer: ImageSaveOptions, image_save, image_save_rgb
-│   ├── csv_parser.h             ← CSV frame-list parser (2-col and 11-col formats)
+│   ├── csv_parser.h             ← CSV frame-list parser (2-col only: filepath, is_reference)
 │   ├── lanczos_cpu.h            ← CPU Lanczos-3 transform API
 │   ├── lanczos_gpu.h            ← GPU Lanczos-3 transform API (h2h and d2d)
 │   ├── integration.h            ← CPU mean / kappa-sigma integration API
@@ -222,14 +222,15 @@ Calibration (applied before debayering; bias and darkflat are mutually exclusive
 ### Input CSV Format
 
 ```
-filepath, is_reference, h00, h01, h02, h10, h11, h12, h20, h21, h22
-/data/frame1.fits, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1
-/data/frame2.fits, 0, 1, 0, 2.5, 0, 1, 1.3, 0, 0, 1
+filepath, is_reference
+/data/frame1.fits, 1
+/data/frame2.fits, 0
 ```
 
 - First row is a header and is always skipped.
 - Exactly **one** row must have `is_reference = 1`.
-- The nine `h` values form a **row-major 3x3 backward homography** mapping reference pixel coordinates to source pixel coordinates (ref → src). Despite being labelled "forward" in some upstream docs, empirical testing confirms this is the backward/inverse map — use it directly for pixel sampling without inverting.
+- Only 2-column format is accepted. Any other column count returns `DSO_ERR_CSV`.
+- Homographies are computed at runtime via star detection + RANSAC.
 
 ---
 
@@ -475,15 +476,15 @@ Single CUDA kernel (256 threads/block): subtract dark, divide by flat, dead-pixe
 ### `pipeline.h`
 
 ```c
-DsoError pipeline_run(FrameInfo *frames, int n_frames, int has_transforms,
+DsoError pipeline_run(FrameInfo *frames, int n_frames,
                        int ref_idx, const PipelineConfig *config);
-DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
+DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames,
                            int ref_idx, const PipelineConfig *config);
 ```
 
-`pipeline_run`: GPU orchestrator. First line of the function body dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0`, so the GPU path has zero overhead. Phase 2 uses double-buffered `stream_copy` + `stream_compute` overlap. For color output (`config->color_output = 1`), allocates three `IntegrationGpuCtx` instances (ctx_r, ctx_g, ctx_b) and three additional device buffers (d_debayed for R, d_ch_g, d_ch_b); calls `debayer_gpu_rgb_d2d` + 3× Lanczos on `stream_compute` per frame; `e_gpu[slot]` is recorded after the third Lanczos so H2D overlap on `stream_copy` is preserved. Finalizes via `image_save_rgb` for color, `image_save` for mono (both dispatch by extension via `image_io.c`).
+`pipeline_run`: GPU orchestrator. First line dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0` — zero GPU overhead. Processes frames in order `[ref_idx, non_ref_0, ...]` via `phase_detect_warp_integrate`: double-buffered `pinned[2]`/`d_raw[2]` + `stream_copy`/`stream_compute`. Per frame: `stream_compute` waits for `e_h2d[slot]` → calib → debayer_lum → star_detect → `cudaStreamSynchronize` → D2H → CCL+CoM → RANSAC → Lanczos warp on `stream_compute`; then CPU pre-loads next frame + async H2D on `stream_copy` (overlaps with the warp). At batch boundaries, H2D of the next frame also overlaps mini-batch integration. The `cudaStreamSynchronize` for D2H also implicitly frees `d_raw[next_slot]` (clears the prior warp), so no `e_gpu` event is needed. For color output allocates ctx_r/g/b + d_ch_g/d_ch_b; `phase_warp` calls `debayer_gpu_rgb_d2d` + 3× Lanczos per frame. Finalizes via `image_save_rgb`/`image_save`.
 
-`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Phase 1: debayer_cpu → star_detect_cpu_detect → ccl_com → ransac per frame (always luminance). Phase 2: mini-batched (PIPELINE_CPU_BATCH_SIZE=32). For mono: debayer_cpu → lanczos_transform_cpu, accumulating into `global_sum_r`/`global_count_r`. For color: debayer_cpu_rgb → 3× lanczos_transform_cpu, accumulating into three pairs of sum/count buffers; finalizes via `image_save_rgb`.
+`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Processes frames in order `[ref_idx, non_ref_0, ...]` (single pass, each file loaded once). Per frame: debayer_cpu (lum) → star_detect_cpu_detect → ccl_com → ransac → batch warp+integrate. Mini-batched (PIPELINE_CPU_BATCH_SIZE=32). For color: debayer_cpu_rgb → 3× lanczos_transform_cpu; finalizes via `image_save_rgb`.
 
 ---
 
@@ -508,7 +509,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 - **`IntegrationGpuCtx` is public**: the struct definition lives in `integration_gpu.h` (not just the `.cu`) so `pipeline.cu` can access `d_frames[]`, `d_xmap`, `d_ymap` directly. Opaque handle pattern was abandoned in favour of direct field access.
 - **DLT produces backward H directly**: row setup uses `(ref_x, ref_y)` as H input and `(src_x, src_y)` as output → null vector = backward map (ref → src). No post-inversion needed.
 - **Moffat constant memory cap**: max kernel radius is 15 (alpha ≤ 5 → R = ceil(3·alpha) ≤ 15, diameter 31, 961 floats × 4 = ~3.8 KB within 64 KB constant limit).
-- **Phase 1 reads each file twice**: once for star detection, once for Phase 2 transform+integration. Acceptable trade-off versus caching all frames in RAM.
+- **Single-pass pipeline**: each frame is loaded from disk exactly once. Star detection, RANSAC, and warp all run in the same pass before the next frame is loaded. No separate Phase 1 / Phase 2; no 11-column pre-computed transform path. The only CSV format is 2-column (`filepath, is_reference`).
 - **CPU vs GPU output agreement**: not bit-identical due to different Moffat conv precision (→ slightly different homographies), different Lanczos implementations (nppi vs hand-coded), and different integration paths. Empirical PSNR ≈ 44.6 dB; mean relative error ≈ 0.25% in the interior on 10 × 4656×3520 frames.
 - **`lanczos_transform_cpu` identity fast path**: if H is identity and src/dst dimensions match, falls back to `memcpy` before entering the warp loop.
 - **`lanczos_transform_cpu` weight precomputation**: `wx_arr[6]` and `wy_arr[6]` are computed once before the 6×6 tap loop, reducing `lanczos_weight` calls from 42 to 12 per destination pixel.
@@ -628,9 +629,9 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames, int has_transforms,
 
 ### `generate_test_frames.py`
 
-Generates synthetic FITS test frames that exercise all pipeline stages: Bayer mosaics (`--bayer rggb|bggr|grbg|gbrg`), Moffat-PSF stars (alpha/beta match pipeline defaults), per-frame homographic guiding offsets written to an 11-column CSV, and optional calibration sets (bias/dark/flat, `--gen-calibration`). Star colours are modelled via a B-V colour index distribution (Beta(2.5, 1.5) biased toward G/K-type), with per-channel rendering in Bayer mode and ITU-R BT.709 luminance weighting in mono mode.
+Generates synthetic FITS test frames that exercise all pipeline stages: Bayer mosaics (`--bayer rggb|bggr|grbg|gbrg`), Moffat-PSF stars (alpha/beta match pipeline defaults), per-frame homographic guiding offsets, and optional calibration sets (bias/dark/flat, `--gen-calibration`). Star colours are modelled via a B-V colour index distribution (Beta(2.5, 1.5) biased toward G/K-type), with per-channel rendering in Bayer mode and ITU-R BT.709 luminance weighting in mono mode. Always writes a 2-column CSV (`filepath, is_reference`).
 
-Key flags: `-n` (frames), `-s` (stars), `-o` (output dir), `--bayer`, `--gen-calibration`, `--num-calib-frames`, `--no-homography` (2-col CSV for star-detect+RANSAC path), `--no-star-colors`.
+Key flags: `-n` (frames), `-s` (stars), `-o` (output dir), `--bayer`, `--gen-calibration`, `--num-calib-frames`, `--no-star-colors`.
 
 **Flat frame generation note**: `make_flat_frame` returns **raw ADU values** (not normalised). `calibration.c` subtracts bias from each flat *before* normalising — passing pre-normalised flats (mean≈1.0) gives `flat_raw − bias ≈ −249`, triggering the "near-zero mean, skipping normalisation" warning and producing an inverted master flat.
 
