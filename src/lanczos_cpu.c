@@ -98,9 +98,9 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
         return DSO_OK;
     }
 
-    int dy;
+    /* Outer loop parallelised across rows */
 #pragma omp parallel for schedule(static)
-    for (dy = 0; dy < DH; dy++) {
+    for (int dy = 0; dy < DH; dy++) {
         for (int dx = 0; dx < DW; dx++) {
 
             /* Map destination pixel (dx, dy) to source coordinates (sx, sy)

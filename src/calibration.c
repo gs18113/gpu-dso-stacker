@@ -154,7 +154,8 @@ static DsoError stack_frames(const char **paths, int n,
     DsoError  err      = DSO_OK;
     float   **bufs     = NULL;
     float    *all_vals = NULL;
-    int       W = 0, H = 0, npix = 0;
+    int       W = 0, H = 0;
+    long npix = 0;
 
     bufs = (float **)calloc((size_t)n, sizeof(float *));
     if (!bufs) return DSO_ERR_ALLOC;
@@ -171,7 +172,7 @@ static DsoError stack_frames(const char **paths, int n,
         if (i == 0) {
             W    = img.width;
             H    = img.height;
-            npix = W * H;
+            npix = (long)W * H;
         } else if (img.width != W || img.height != H) {
             fprintf(stderr,
                     "calib: frame '%s' size %d×%d does not match first frame %d×%d\n",
@@ -187,19 +188,19 @@ static DsoError stack_frames(const char **paths, int n,
 
         /* Optional bias/darkflat subtraction (in-place) */
         if (subtract_buf) {
-            for (int p = 0; p < npix; p++)
+            for (long p = 0; p < npix; p++)
                 bufs[i][p] -= subtract_buf[p];
         }
 
         /* Optional per-frame mean normalization (flat mode) */
         if (normalize) {
             double sum = 0.0;
-            for (int p = 0; p < npix; p++)
+            for (long p = 0; p < npix; p++)
                 sum += (double)bufs[i][p];
-            double mean = sum / npix;
+            double mean = sum / (double)npix;
             if (mean > 1e-9) {
                 float inv_mean = (float)(1.0 / mean);
-                for (int p = 0; p < npix; p++)
+                for (long p = 0; p < npix; p++)
                     bufs[i][p] *= inv_mean;
             } else {
                 fprintf(stderr,
@@ -225,9 +226,8 @@ static DsoError stack_frames(const char **paths, int n,
     if (!all_vals) { err = DSO_ERR_ALLOC; goto cleanup; }
 
     /* Per-pixel stacking (parallelised across pixels) */
-    int p;
 #pragma omp parallel for schedule(dynamic, 64)
-    for (p = 0; p < npix; p++) {
+    for (long p = 0; p < npix; p++) {
         int tid = 0;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
@@ -504,14 +504,12 @@ DsoError calib_apply_cpu(Image *img, const CalibFrames *calib)
         return DSO_ERR_INVALID_ARG;
     }
 
-    int          npix = img->width * img->height;
+    long npix = (long)img->width * img->height;
     float       *data = img->data;
     const float *dark = calib->has_dark ? calib->dark.data : NULL;
     const float *flat = calib->has_flat ? calib->flat.data : NULL;
-
-    int p;
 #pragma omp parallel for schedule(static)
-    for (p = 0; p < npix; p++) {
+    for (long p = 0; p < npix; p++) {
         float v = data[p];
         if (dark) v -= dark[p];
         if (flat) {
