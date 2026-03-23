@@ -57,6 +57,7 @@ static DsoError flush_batch(
     int   *global_count_r, int   *global_count_g, int   *global_count_b)
 {
     int      i;
+    long     pp;
     DsoError err = DSO_OK;
 
     Image b_out_r = {NULL, W, H};
@@ -87,7 +88,7 @@ static DsoError flush_batch(
     }
 
 #pragma omp parallel for schedule(static)
-    for (long pp = 0; pp < npix; pp++) {
+    for (pp = 0; pp < npix; pp++) {
         global_sum_r[pp]   += b_out_r.data[pp] * n_batch;
         global_count_r[pp] += n_batch;
     }
@@ -95,7 +96,7 @@ static DsoError flush_batch(
 
     if (color) {
 #pragma omp parallel for schedule(static)
-        for (long pp = 0; pp < npix; pp++) {
+        for (pp = 0; pp < npix; pp++) {
             global_sum_g[pp]   += b_out_g.data[pp] * n_batch;
             global_count_g[pp] += n_batch;
             global_sum_b[pp]   += b_out_b.data[pp] * n_batch;
@@ -140,6 +141,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
 
     DsoError  err        = DSO_OK;
     long      npix       = (long)W * H;
+    long      pp;
     int       color      = config->color_output;
     int       batch_size = PIPELINE_CPU_BATCH_SIZE;
     int       batch_n    = 0;
@@ -427,7 +429,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                 err = DSO_ERR_ALLOC; goto cleanup;
             }
 #pragma omp parallel for schedule(static)
-            for (long pp = 0; pp < npix; pp++) {
+            for (pp = 0; pp < npix; pp++) {
                 img_r.data[pp] = (global_count_r[pp] > 0) ?
                                  (global_sum_r[pp] / global_count_r[pp]) : 0.0f;
                 img_g.data[pp] = (global_count_g[pp] > 0) ?
@@ -446,7 +448,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
             out.data = (float *)malloc((size_t)npix * sizeof(float));
             if (!out.data) { err = DSO_ERR_ALLOC; goto cleanup; }
 #pragma omp parallel for schedule(static)
-            for (long pp = 0; pp < npix; pp++) {
+            for (pp = 0; pp < npix; pp++) {
                 out.data[pp] = (global_count_r[pp] > 0) ?
                                (global_sum_r[pp] / global_count_r[pp]) : 0.0f;
             }

@@ -49,10 +49,11 @@ DsoError integrate_mean(const Image **frames, int n, Image *out)
 
     long  npix  = (long)W * H;
     float inv_n = 1.f / (float)n;
+    long  p;
 
     /* Pixel-outer loop: each pixel is independent → safe to parallelise. */
 #pragma omp parallel for schedule(static)
-    for (long p = 0; p < npix; p++) {
+    for (p = 0; p < npix; p++) {
         float sum = 0.f;
         for (int i = 0; i < n; i++)
             sum += frames[i]->data[p];
@@ -106,8 +107,9 @@ DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
      * Each pixel is fully independent. Each OpenMP thread uses its own
      * dedicated slice of the all_vals/all_actv workspace.
      */
+    long p;
 #pragma omp parallel for schedule(dynamic, 64)
-    for (long p = 0; p < npix; p++) {
+    for (p = 0; p < npix; p++) {
         int tid = 0;
 #ifdef _OPENMP
         tid = omp_get_thread_num();
