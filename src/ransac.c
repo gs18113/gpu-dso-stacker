@@ -316,7 +316,8 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
         return DSO_ERR_STAR_DETECT;
 
     /* ---- Build match list via nearest-neighbour with ratio test ---- */
-    int max_matches = ref_list->n < frm_list->n ? ref_list->n : frm_list->n;
+    /* At most one match per reference star (loop iterates ref_list->n times). */
+    int max_matches = ref_list->n;
     Match *matches = (Match *)malloc((size_t)max_matches * sizeof(Match));
     if (!matches) return DSO_ERR_ALLOC;
 
@@ -343,6 +344,10 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
     }
 
     if (n_matches < (p->min_inliers > 4 ? p->min_inliers : 4)) {
+        fprintf(stderr, "ransac: only %d match(es) found "
+                "(ref=%d stars, frame=%d stars, radius=%.1f px) — need ≥ %d\n",
+                n_matches, ref_list->n, frm_list->n, (double)p->match_radius,
+                (p->min_inliers > 4 ? p->min_inliers : 4));
         free(matches);
         return DSO_ERR_RANSAC;
     }
@@ -411,6 +416,10 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
     }
 
     if (best_inliers < p->min_inliers) {
+        fprintf(stderr, "ransac: best consensus has only %d inlier(s) "
+                "(need ≥ %d, from %d match(es), ref=%d stars, frame=%d stars)\n",
+                best_inliers, p->min_inliers, n_matches,
+                ref_list->n, frm_list->n);
         free(matches);
         return DSO_ERR_RANSAC;
     }
