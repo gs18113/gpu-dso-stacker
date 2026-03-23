@@ -85,8 +85,6 @@ cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n
 | 5. Lanczos Warp | nppiRemap + coord-map kernel (CUDA) | 6-tap backward-map warp (OpenMP) |
 | 6. Integration | Mini-batch kappa-sigma (CUDA) | Full kappa-sigma (OpenMP) |
 
-When the input CSV already contains pre-computed homographies (11-column format), stages 1–3 are skipped for both paths.
-
 **Color output**: when a Bayer pattern is active (from `--bayer` or the FITS `BAYERPAT` keyword), stage 4 debayers to separate R, G, B planes; stages 5–6 run once per channel; the output FITS has `NAXIS=3` with planes R=1/G=2/B=3. Star detection (stages 1–2) always uses luminance regardless of color mode.
 
 **Calibration pre-processing** (applied to every raw frame before debayering when `--dark`/`--flat` are provided):
@@ -155,9 +153,7 @@ cmake -B build -DDSO_CUDA_ARCHITECTURES="75;80;86;89;90" ...
 dso_stacker -f <frames.csv> [options]
 ```
 
-### Input CSV Formats
-
-**2-column format** (star detection and RANSAC alignment are run automatically):
+### Input CSV Format
 
 ```csv
 filepath, is_reference
@@ -166,16 +162,7 @@ filepath, is_reference
 /data/frame3.fits, 0
 ```
 
-**11-column format** (pre-computed homographies, stages 1–3 skipped):
-
-```csv
-filepath, is_reference, h00, h01, h02, h10, h11, h12, h20, h21, h22
-/data/frame1.fits, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1
-/data/frame2.fits, 0, 1, 0, 2.5, 0, 1, 1.3, 0, 0, 1
-```
-
-- Exactly **one** row must have `is_reference = 1`.
-- The nine `h` values form a row-major 3×3 **backward homography** (ref → src).
+Exactly **one** row must have `is_reference = 1`.
 
 ### Options
 
@@ -258,10 +245,10 @@ Stack entirely on CPU (no GPU required):
 dso_stacker -f frames.csv -o stacked.fits --cpu
 ```
 
-Stack with pre-computed transforms, mean integration, and a larger batch:
+Stack with mean integration and a larger batch:
 
 ```bash
-dso_stacker -f transforms.csv -o stacked.fits --integration mean --batch-size 32
+dso_stacker -f frames.csv -o stacked.fits --integration mean --batch-size 32
 ```
 
 Stack a color camera image (RGGB sensor) with tighter outlier rejection:
