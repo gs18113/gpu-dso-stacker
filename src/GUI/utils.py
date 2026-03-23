@@ -57,12 +57,14 @@ def _binary_path() -> Path:
     searched: list[Path] = []
 
     # 1. PyInstaller / frozen bundle (one-dir mode)
+    #    PyInstaller 6+ places collected binaries under _internal/.
     if getattr(sys, "frozen", False):
         bundle_dir = Path(sys.executable).parent
-        candidate = bundle_dir / "bin" / exe_name
-        searched.append(candidate)
-        if candidate.is_file():
-            return candidate
+        for subdir in ("bin", "_internal/bin"):
+            candidate = bundle_dir / subdir / exe_name
+            searched.append(candidate)
+            if candidate.is_file():
+                return candidate
 
     # 2. Standard development layout: <repo>/build/dso_stacker
     candidate = Path(__file__).parent.parent.parent / "build" / exe_name
