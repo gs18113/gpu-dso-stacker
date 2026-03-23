@@ -46,9 +46,10 @@ DsoError debayer_cpu(const float *src, float *dst,
     }
 
     int pat = (int)pattern;
+    int y;
 
 OMP_PARALLEL_FOR_COLLAPSE2
-    for (int y = 0; y < H; y++) {
+    for (y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             /* 1. Calculate 8 gradients in a 5x5 area */
             float g[8];
@@ -157,9 +158,10 @@ DsoError debayer_cpu_rgb(const float *src,
     }
 
     int pat = (int)pattern;
+    int y;
 
 OMP_PARALLEL_FOR_COLLAPSE2
-    for (int y = 0; y < H; y++) {
+    for (y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             float g8[8];
             float self = src_at(src, x, y, W, H);

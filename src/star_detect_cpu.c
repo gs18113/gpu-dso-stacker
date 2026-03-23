@@ -63,8 +63,9 @@ DsoError star_detect_cpu_moffat_convolve(const float        *src,
     for (int i = 0; i < kn; i++) kern[i] /= ksum;
 
     /* 2-D convolution with zero-boundary padding */
+    int y;
 OMP_PARALLEL_FOR_COLLAPSE2
-    for (int y = 0; y < H; y++) {
+    for (y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             float acc = 0.f;
             for (int ky = -R; ky <= R; ky++) {
@@ -95,15 +96,16 @@ DsoError star_detect_cpu_threshold(const float *convolved,
 
     /* Pass 1 — mean (double-precision accumulation for accuracy) */
     double sum = 0.0;
+    long i;
 #pragma omp parallel for reduction(+:sum) schedule(static)
-    for (long i = 0; i < npix; i++)
+    for (i = 0; i < npix; i++)
         sum += (double)convolved[i];
     double mean = sum / (double)npix;
 
     /* Pass 2 — Bessel-corrected variance */
     double sq = 0.0;
 #pragma omp parallel for reduction(+:sq) schedule(static)
-    for (long i = 0; i < npix; i++) {
+    for (i = 0; i < npix; i++) {
         double d = (double)convolved[i] - mean;
         sq += d * d;
     }
@@ -113,7 +115,7 @@ DsoError star_detect_cpu_threshold(const float *convolved,
 
     /* Pass 3 — write mask */
 #pragma omp parallel for schedule(static)
-    for (long i = 0; i < npix; i++)
+    for (i = 0; i < npix; i++)
         mask[i] = (convolved[i] > thresh) ? 1u : 0u;
 
     return DSO_OK;
