@@ -63,10 +63,10 @@ DsoError star_detect_cpu_moffat_convolve(const float        *src,
     for (int i = 0; i < kn; i++) kern[i] /= ksum;
 
     /* 2-D convolution with zero-boundary padding */
-    int y, x;
+    int y;
 OMP_PARALLEL_FOR_COLLAPSE2
     for (y = 0; y < H; y++) {
-        for (x = 0; x < W; x++) {
+        for (int x = 0; x < W; x++) {
             float acc = 0.f;
             for (int ky = -R; ky <= R; ky++) {
                 int sy = y + ky;
