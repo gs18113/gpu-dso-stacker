@@ -8,6 +8,60 @@
 
 ---
 
+## Runtime Requirements
+
+Pre-built binaries require an NVIDIA GPU and the CUDA 12.x runtime libraries installed on your system. The `--cpu` flag works without a GPU but the CUDA shared libraries must still be present.
+
+### Linux
+
+Install the CUDA 12 runtime packages from the NVIDIA repository:
+
+```bash
+# 1. Install the cuda-keyring package (sets up the NVIDIA apt repository)
+#    Replace <distro> with: ubuntu2404, ubuntu2204, debian12, etc.
+wget https://developer.download.nvidia.com/compute/cuda/repos/<distro>/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt-get update
+
+# 2. Install the runtime libraries (no compiler or dev headers needed)
+sudo apt-get install cuda-cudart-12-9 libnpp-12-9
+```
+
+This installs `libcudart.so.12`, `libnppc.so.12`, and `libnppig.so.12`.
+
+For RHEL / Fedora:
+
+```bash
+sudo dnf config-manager --add-repo \
+  https://developer.download.nvidia.com/compute/cuda/repos/<distro>/x86_64/cuda-<distro>.repo
+sudo dnf install cuda-cudart-12-9 libnpp-12-9
+```
+
+Replace `<distro>` with `rhel8`, `rhel9`, `fedora42`, etc.
+
+> Any CUDA 12.x minor version will work (e.g. `cuda-cudart-12-6 libnpp-12-6`). The packages provide the `*.so.12` symlinks that the binary needs.
+
+### Windows
+
+Download the CUDA Toolkit 12.x installer from [developer.nvidia.com/cuda-downloads](https://developer.nvidia.com/cuda-downloads) (or the [archive](https://developer.nvidia.com/cuda-toolkit-archive) for a specific version).
+
+During installation, select **Custom** and enable at minimum:
+
+- **CUDA Runtime** (`cudart`)
+- **NPP** (NVIDIA Performance Primitives)
+- **Display Driver** (if not already installed)
+
+This places `cudart64_12.dll`, `nppc64_12.dll`, and `nppig64_12.dll` in `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.x\bin`, which the installer adds to `PATH`.
+
+For unattended / silent installation:
+
+```powershell
+# Download the installer, then:
+cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n
+```
+
+---
+
 ## Technology Stack
 
 - **C11** — Core library (FITS I/O, image I/O dispatch, CSV parser, Lanczos CPU, integration, debayer CPU, star detection, RANSAC, CPU pipeline)
@@ -395,12 +449,11 @@ python3 python/stacker.py -f data/transform_mat.csv -o ref.fits
 
 This software is **proprietary**. See [LICENSE](LICENSE) for terms.
 
-This software statically links the NVIDIA CUDA Toolkit and NVIDIA
-Performance Primitives (NPP), both covered under the single
-[NVIDIA CUDA EULA](https://docs.nvidia.com/cuda/eula/). NPP does not
-require any additional license beyond the CUDA EULA. On first run, the
-CLI will prompt you to accept the license terms (or pass
-`--accept-license` for non-interactive use).
+This software dynamically links the NVIDIA CUDA Toolkit and NVIDIA
+Performance Primitives (NPP). Users must have the CUDA runtime
+installed on their system. Both libraries are covered under the single
+[NVIDIA CUDA EULA](https://docs.nvidia.com/cuda/eula/), which users
+accept when installing the CUDA Toolkit.
 
 Third-party open-source components (CFITSIO, libtiff, libpng, PySide6,
 PyYAML, getopt\_port) are used under their respective permissive or

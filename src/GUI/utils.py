@@ -100,7 +100,7 @@ def build_command(
     binary = str(_binary_path())
     opts = project.options
 
-    argv: list[str] = [binary, "--accept-license", "-f", csv_path, "-o", opts["output_path"]]
+    argv: list[str] = [binary, "-f", csv_path, "-o", opts["output_path"]]
 
     # --- execution ---
     if opts.get("use_cpu"):

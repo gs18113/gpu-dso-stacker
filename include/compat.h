@@ -83,11 +83,4 @@ static __inline void compat_usleep(unsigned int us)
 #include <string.h>
 #define strcasecmp(a, b) _stricmp(a, b)
 
-/*
- * isatty / fileno — POSIX terminal detection vs MSVC _isatty / _fileno.
- */
-#include <io.h>
-#define isatty(fd) _isatty(fd)
-#define fileno(f)  _fileno(f)
-
 #endif /* _MSC_VER */

@@ -55,13 +55,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
-#include <string>
 #ifdef _MSC_VER
 #include "compat.h"
 #else
 #include <getopt.h>
-#include <unistd.h>
-#include <sys/stat.h>
 #endif
 
 #include "dso_types.h"
@@ -106,87 +103,7 @@ enum {
     OPT_TIFF_COMPRESSION,
     OPT_STRETCH_MIN,
     OPT_STRETCH_MAX,
-    /* License options */
-    OPT_LICENSE,
-    OPT_ACCEPT_LICENSE,
 };
-
-/* -------------------------------------------------------------------------
- * License acceptance
- * ------------------------------------------------------------------------- */
-
-static const char *LICENSE_TEXT =
-    "================================================================\n"
-    "DSO Stacker — License Agreement\n"
-    "================================================================\n"
-    "\n"
-    "Copyright (c) 2026 DSO Stacker contributors. All rights reserved.\n"
-    "\n"
-    "This software is proprietary and confidential. Unauthorized\n"
-    "copying, modification, distribution, or use is strictly\n"
-    "prohibited. See the LICENSE file for full terms.\n"
-    "\n"
-    "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND.\n"
-    "\n"
-    "This software uses NVIDIA CUDA Toolkit and NVIDIA Performance\n"
-    "Primitives (NPP), subject to the NVIDIA End User License Agreement:\n"
-    "  https://docs.nvidia.com/cuda/eula/\n"
-    "\n"
-    "This software contains source code provided by NVIDIA Corporation.\n"
-    "\n"
-    "By using this software, you agree to:\n"
-    "  1. The DSO Stacker license terms (see LICENSE)\n"
-    "  2. The NVIDIA CUDA End User License Agreement\n"
-    "  3. All third-party license terms (see THIRD_PARTY_LICENSES)\n";
-
-static std::string get_license_marker_path()
-{
-#ifdef _WIN32
-    const char *appdata = getenv("APPDATA");
-    if (!appdata) return "";
-    return std::string(appdata) + "\\dso_stacker\\.license_accepted";
-#else
-    const char *xdg = getenv("XDG_CONFIG_HOME");
-    if (xdg && xdg[0])
-        return std::string(xdg) + "/dso_stacker/.license_accepted";
-    const char *home = getenv("HOME");
-    if (!home) return "";
-    return std::string(home) + "/.config/dso_stacker/.license_accepted";
-#endif
-}
-
-static bool is_license_accepted()
-{
-    std::string path = get_license_marker_path();
-    if (path.empty()) return false;
-    FILE *f = fopen(path.c_str(), "r");
-    if (f) { fclose(f); return true; }
-    return false;
-}
-
-static bool record_license_acceptance()
-{
-    std::string path = get_license_marker_path();
-    if (path.empty()) return false;
-
-    /* Create the config directory (parent is assumed to exist) */
-    std::string::size_type sep = path.rfind('/');
-#ifdef _WIN32
-    std::string::size_type bsep = path.rfind('\\');
-    if (bsep != std::string::npos && (sep == std::string::npos || bsep > sep))
-        sep = bsep;
-#endif
-    if (sep != std::string::npos) {
-        std::string dir = path.substr(0, sep);
-        mkdir(dir.c_str(), 0755);   /* EEXIST is fine */
-    }
-
-    FILE *f = fopen(path.c_str(), "w");
-    if (!f) return false;
-    fprintf(f, "accepted\n");
-    fclose(f);
-    return true;
-}
 
 static void usage(const char *prog)
 {
@@ -236,10 +153,6 @@ static void usage(const char *prog)
         "      --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg\n"
         "                                 (default: auto-detect from FITS BAYERPAT keyword)\n"
         "\n"
-        "License:\n"
-        "      --license                 Print license information and exit\n"
-        "      --accept-license          Accept the license non-interactively\n"
-        "\n"
         "Output format (format inferred from --output extension):\n"
         "      --bit-depth <depth>        8 | 16 | f16 | f32  (default: f32)\n"
         "                                 f16 is TIFF only; 8/16 require TIFF or PNG;\n"
@@ -274,10 +187,6 @@ static int parse_calib_method(const char *s, CalibMethod *out)
 
 int main(int argc, char **argv)
 {
-    /* ---- License flags ---- */
-    bool flag_license        = false;
-    bool flag_accept_license = false;
-
     /* ---- Defaults ---- */
     const char *csv_file    = nullptr;
     const char *output_file = "output.fits";
@@ -350,9 +259,6 @@ int main(int argc, char **argv)
         {"tiff-compression",  required_argument, nullptr, OPT_TIFF_COMPRESSION},
         {"stretch-min",       required_argument, nullptr, OPT_STRETCH_MIN},
         {"stretch-max",       required_argument, nullptr, OPT_STRETCH_MAX},
-        /* License */
-        {"license",           no_argument,       nullptr, OPT_LICENSE},
-        {"accept-license",    no_argument,       nullptr, OPT_ACCEPT_LICENSE},
         {nullptr, 0, nullptr, 0}
     };
 
@@ -461,41 +367,7 @@ int main(int argc, char **argv)
         case OPT_STRETCH_MIN: cfg.save_opts.stretch_min = strtof(optarg, nullptr); break;
         case OPT_STRETCH_MAX: cfg.save_opts.stretch_max = strtof(optarg, nullptr); break;
 
-        case OPT_LICENSE:        flag_license        = true; break;
-        case OPT_ACCEPT_LICENSE: flag_accept_license = true; break;
-
         default: usage(argv[0]); return 1;
-        }
-    }
-
-    /* ---- Handle --license ---- */
-    if (flag_license) {
-        printf("%s", LICENSE_TEXT);
-        return 0;
-    }
-
-    /* ---- License acceptance gate ---- */
-    if (!is_license_accepted()) {
-        if (flag_accept_license) {
-            if (!record_license_acceptance())
-                fprintf(stderr, "Warning: could not save license acceptance marker.\n");
-        } else if (isatty(fileno(stdin))) {
-            printf("%s\n", LICENSE_TEXT);
-            printf("Do you accept the license terms? [y/N] ");
-            fflush(stdout);
-            int ch = getchar();
-            if (ch != 'y' && ch != 'Y') {
-                fprintf(stderr, "License not accepted. Exiting.\n");
-                return 1;
-            }
-            if (!record_license_acceptance())
-                fprintf(stderr, "Warning: could not save license acceptance marker.\n");
-        } else {
-            fprintf(stderr,
-                "Error: license has not been accepted.\n"
-                "Run interactively or use --accept-license to accept.\n"
-                "Use --license to view the license terms.\n");
-            return 1;
         }
     }
 

@@ -13,9 +13,8 @@ import sys
 # Ensure src/GUI is on the path so sibling modules resolve correctly.
 sys.path.insert(0, os.path.dirname(__file__))
 
-from PySide6.QtCore import QSettings
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from main_window import MainWindow
 
@@ -55,58 +54,11 @@ def _apply_dark_palette(app: QApplication) -> None:
     app.setPalette(palette)
 
 
-def _check_license() -> bool:
-    """Show license dialog on first launch. Returns True if accepted."""
-    settings = QSettings()
-    if settings.value("license/accepted", False, type=bool):
-        return True
-
-    msg = QMessageBox()
-    msg.setWindowTitle("License Agreement")
-    msg.setText(
-        "Please review and accept the license agreement to continue."
-    )
-    msg.setDetailedText(
-        "DSO Stacker — License Agreement\n"
-        "\n"
-        "Copyright (c) 2026 DSO Stacker contributors. All rights reserved.\n"
-        "\n"
-        "This software is proprietary and confidential. Unauthorized\n"
-        "copying, modification, distribution, or use is strictly\n"
-        "prohibited. See the LICENSE file for full terms.\n"
-        "\n"
-        "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND.\n"
-        "\n"
-        "This software uses NVIDIA CUDA Toolkit and NVIDIA Performance\n"
-        "Primitives (NPP), subject to the NVIDIA End User License Agreement:\n"
-        "  https://docs.nvidia.com/cuda/eula/\n"
-        "\n"
-        "This software contains source code provided by NVIDIA Corporation.\n"
-        "\n"
-        "By using this software, you agree to:\n"
-        "  1. The DSO Stacker license terms (see LICENSE)\n"
-        "  2. The NVIDIA CUDA End User License Agreement\n"
-        "  3. All third-party license terms (see THIRD_PARTY_LICENSES)"
-    )
-    msg.setIcon(QMessageBox.Icon.Information)
-    accept_btn = msg.addButton("Accept", QMessageBox.ButtonRole.AcceptRole)
-    msg.addButton("Decline", QMessageBox.ButtonRole.RejectRole)
-    msg.exec()
-
-    if msg.clickedButton() == accept_btn:
-        settings.setValue("license/accepted", True)
-        return True
-    return False
-
-
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("DSO Stacker")
     app.setOrganizationName("dso-stacker")
     _apply_dark_palette(app)
-
-    if not _check_license():
-        sys.exit(0)
 
     window = MainWindow()
     window.show()
