@@ -188,9 +188,7 @@ Star detection (2-column CSV only):
 RANSAC (2-column CSV only):
       --ransac-iters <int>       Max RANSAC iterations (default: 1000)
       --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)
-      --match-radius <float>     Max ref↔frame star distance (px) for candidate
-                                 nearest-neighbour matches before RANSAC sampling
-                                 (default: 30.0)
+      --match-radius <float>     Star matching search radius px (default: 30.0)
 
 Calibration (applied before debayering; bias and darkflat are mutually exclusive):
       --dark <path>              Master dark FITS or text list of dark FITS paths

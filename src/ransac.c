@@ -315,8 +315,7 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
     if (ref_list->n < p->min_inliers || frm_list->n < p->min_inliers)
         return DSO_ERR_STAR_DETECT;
 
-    /* ---- Build candidate match list via nearest-neighbour with ratio test ---- */
-    /* RANSAC samples from these candidates; match_radius controls candidate gating. */
+    /* ---- Build match list via nearest-neighbour with ratio test ---- */
     /* At most one match per reference star (loop iterates ref_list->n times). */
     int max_matches = ref_list->n;
     Match *matches = (Match *)malloc((size_t)max_matches * sizeof(Match));
@@ -345,9 +344,8 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
     }
 
     if (n_matches < (p->min_inliers > 4 ? p->min_inliers : 4)) {
-        fprintf(stderr, "ransac: only %d candidate match(es) found "
-                "(ref=%d stars, frame=%d stars, radius=%.1f px) — need ≥ %d; "
-                "increase --match-radius for larger drift\n",
+        fprintf(stderr, "ransac: only %d match(es) found "
+                "(ref=%d stars, frame=%d stars, radius=%.1f px) — need ≥ %d\n",
                 n_matches, ref_list->n, frm_list->n, (double)p->match_radius,
                 (p->min_inliers > 4 ? p->min_inliers : 4));
         free(matches);

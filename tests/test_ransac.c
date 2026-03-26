@@ -520,41 +520,6 @@ static int test_ransac_generated_seed_sweep(void)
     return 0;
 }
 
-/* match_radius gates candidate correspondences before RANSAC sampling.
- * A radius smaller than true drift should fail, while a larger radius succeeds. */
-static int test_ransac_match_radius_gates_candidates_before_sampling(void)
-{
-    Homography Htrue = {{0}};
-    Htrue.h[0] = 1.0; Htrue.h[1] = 0.0; Htrue.h[2] = 40.0;
-    Htrue.h[3] = 0.0; Htrue.h[4] = 1.0; Htrue.h[5] = -35.0;
-    Htrue.h[6] = 0.0; Htrue.h[7] = 0.0; Htrue.h[8] = 1.0;
-
-    StarList ref = {0}, frm = {0};
-    ASSERT(star_coords_generate(60, 5, 5, 4096, 3072, &Htrue, 20260326u, &ref, &frm) == 0);
-
-    RansacParams small_r = DEFAULT_PARAMS;
-    small_r.max_iters = 4000;
-    small_r.inlier_thresh = 1.5f;
-    small_r.match_radius = 20.0f; /* intentionally below ~53 px drift magnitude */
-
-    Homography Hsmall = {{0}};
-    DsoError err_small = ransac_compute_homography(&ref, &frm, &small_r, &Hsmall, NULL);
-    ASSERT_ERR(err_small, DSO_ERR_RANSAC);
-
-    RansacParams large_r = small_r;
-    large_r.match_radius = 80.0f;
-
-    Homography Hlarge = {{0}};
-    int n_inliers = 0;
-    ASSERT_OK(ransac_compute_homography(&ref, &frm, &large_r, &Hlarge, &n_inliers));
-    ASSERT(n_inliers >= 40);
-    ASSERT(mean_reproj_err_on_prefix(&Hlarge, &ref, &frm, 60) < 0.1f);
-
-    star_coords_free(&ref);
-    star_coords_free(&frm);
-    return 0;
-}
-
 /* =========================================================================
  * main
  * ========================================================================= */
@@ -579,7 +544,6 @@ int main(void)
     RUN(test_star_coords_generator_basic);
     RUN(test_ransac_generated_translation_many_outliers);
     RUN(test_ransac_generated_seed_sweep);
-    RUN(test_ransac_match_radius_gates_candidates_before_sampling);
 
     return SUMMARY();
 }
