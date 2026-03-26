@@ -96,6 +96,8 @@ gpu-dso-stacker/
 │   ├── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
 │   ├── test_color.c             ← 33 tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
 │   └── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
+├── test/
+│   └── star_detect_overlay.cpp  ← Standalone CLI helper that runs CPU/GPU star detection and writes PNG overlays with detected-star circles
 ├── .github/workflows/
 │   ├── ci.yml                   ← CI: build + test on push/PR (Linux + Windows)
 │   └── release.yml              ← Release: build + package + GitHub Release on tag v*
