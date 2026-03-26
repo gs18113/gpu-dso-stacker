@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <math.h>
 
+#define MIN_INLIER_SEPARATION   22.0f
+#define MIN_OUTLIER_SEPARATION  45.0f
+#define INLIER_BASE_FLUX       1000.0f
+#define OUTLIER_BASE_FLUX       500.0f
+
 static float rand_uniform(unsigned int *seed, float lo, float hi)
 {
     float u = (float)rand_r(seed) / (float)RAND_MAX;
@@ -108,14 +113,14 @@ int star_coords_generate(int n_inliers,
         float sx = 0.f, sy = 0.f;
         int found = 0;
         for (int tries = 0; tries < 2000; tries++) {
-            sample_point_with_min_dist(&seed, width, height, ref, i, 22.0f, &rx, &ry);
+            sample_point_with_min_dist(&seed, width, height, ref, i, MIN_INLIER_SEPARATION, &rx, &ry);
             apply_h(H_ref_to_frame, rx, ry, &sx, &sy);
             if (!is_inside(sx, sy, width, height, 2.0f)) continue;
             int src_far = 1;
             for (int k = 0; k < i; k++) {
                 float dx = frm[k].x - sx;
                 float dy = frm[k].y - sy;
-                if (dx * dx + dy * dy < 22.0f * 22.0f) {
+                if (dx * dx + dy * dy < MIN_INLIER_SEPARATION * MIN_INLIER_SEPARATION) {
                     src_far = 0;
                     break;
                 }
@@ -133,25 +138,25 @@ int star_coords_generate(int n_inliers,
 
         ref[i].x = rx;
         ref[i].y = ry;
-        ref[i].flux = 1000.f - (float)i;
+        ref[i].flux = INLIER_BASE_FLUX - (float)i;
 
         frm[i].x = sx;
         frm[i].y = sy;
-        frm[i].flux = 1000.f - (float)i;
+        frm[i].flux = INLIER_BASE_FLUX - (float)i;
     }
 
     for (int i = 0; i < n_ref_outliers; i++) {
         int idx = n_inliers + i;
-        sample_point_with_min_dist(&seed, width, height, ref, idx, 45.0f,
+        sample_point_with_min_dist(&seed, width, height, ref, idx, MIN_OUTLIER_SEPARATION,
                                    &ref[idx].x, &ref[idx].y);
-        ref[idx].flux = 500.f - (float)i;
+        ref[idx].flux = OUTLIER_BASE_FLUX - (float)i;
     }
 
     for (int i = 0; i < n_frame_outliers; i++) {
         int idx = n_inliers + i;
-        sample_point_with_min_dist(&seed, width, height, frm, idx, 45.0f,
+        sample_point_with_min_dist(&seed, width, height, frm, idx, MIN_OUTLIER_SEPARATION,
                                    &frm[idx].x, &frm[idx].y);
-        frm[idx].flux = 500.f - (float)i;
+        frm[idx].flux = OUTLIER_BASE_FLUX - (float)i;
     }
 
     ref_out->stars = ref;
