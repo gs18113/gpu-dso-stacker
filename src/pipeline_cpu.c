@@ -310,13 +310,16 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                                                  &frames[i].H, &n_inliers);
                 free(stars.stars);
                 if (err != DSO_OK) {
-                    fprintf(stderr, "pipeline_cpu: RANSAC failed for frame %d\n", i);
+                    fprintf(stderr,
+                            "pipeline_cpu: RANSAC failed for frame %d/%d "
+                            "(csv index=%d, path=%s, err=%d)\n",
+                            pos + 1, n_frames, i + 1, frames[i].filepath, (int)err);
                     image_free(&lum);
                     if (color) image_free(&raw);
                     free(order); goto cleanup;
                 }
-                printf("[Pipeline CPU] Frame %d: aligned with %d inlier(s)\n",
-                       i, n_inliers);
+                printf("[Pipeline CPU] Frame %d/%d (csv index=%d): aligned with %d inlier(s)\n",
+                       pos + 1, n_frames, i + 1, n_inliers);
             }
 
             /* ---- Warp ---- */
