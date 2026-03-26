@@ -64,6 +64,12 @@ jobs:
           name: dso-stacker-linux-x86_64
           path: install/bin/dso_stacker
 
+      - name: Upload ransac_status binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ransac-status-linux-x86_64
+          path: build/ransac_status
+
   # ==================================================================
   # Windows: build CLI using vcpkg + CUDA Toolkit
   # ==================================================================
@@ -105,6 +111,7 @@ jobs:
         run: |
           mkdir -p artifact
           cp build/Release/dso_stacker.exe artifact/
+          cp build/Release/ransac_status.exe artifact/
           for dll in build/Release/*.dll; do
             [ -f "$dll" ] && cp "$dll" artifact/
           done
@@ -114,6 +121,14 @@ jobs:
         with:
           name: dso-stacker-windows-x86_64
           path: artifact/
+
+      - name: Upload ransac_status binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ransac-status-windows-x86_64
+          path: |
+            artifact/ransac_status.exe
+            artifact/*.dll
 
   # ==================================================================
   # GUI package (Linux)

@@ -330,12 +330,14 @@ static DsoError phase_detect_warp_integrate(
                                             &fi->H, &n_inliers);
             free(stars.stars);
             if (err != DSO_OK) {
-                fprintf(stderr, "pipeline: RANSAC failed for frame %d (err=%d)\n",
-                        fi_idx, (int)err);
+                fprintf(stderr,
+                        "pipeline: RANSAC failed for frame %d/%d "
+                        "(csv index=%d, path=%s, err=%d)\n",
+                        pos + 1, n_frames, fi_idx + 1, fi->filepath, (int)err);
                 goto cleanup;
             }
-            printf("[Pipeline] Frame %d: aligned with %d inlier(s)\n",
-                   fi_idx, n_inliers);
+            printf("[Pipeline] Frame %d/%d (csv index=%d): aligned with %d inlier(s)\n",
+                   pos + 1, n_frames, fi_idx + 1, n_inliers);
         }
 
         /* ----------------------------------------------------------
