@@ -67,6 +67,12 @@ jobs:
           name: dso-stacker-linux-x86_64
           path: install/bin/dso_stacker
 
+      - name: Upload star_detect_overlay binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-detect-overlay-linux-x86_64
+          path: build/star_detect_overlay
+
   # ==================================================================
   # Windows: build CLI + run tests using vcpkg + CUDA Toolkit
   # ==================================================================
@@ -110,6 +116,7 @@ jobs:
         run: |
           mkdir -p artifact
           cp build/Release/dso_stacker.exe artifact/
+          cp build/Release/star_detect_overlay.exe artifact/
           # Copy vcpkg DLLs needed at runtime
           for dll in build/Release/*.dll; do
             [ -f "$dll" ] && cp "$dll" artifact/
@@ -120,6 +127,14 @@ jobs:
         with:
           name: dso-stacker-windows-x86_64
           path: artifact/
+
+      - name: Upload star_detect_overlay binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-detect-overlay-windows-x86_64
+          path: |
+            artifact/star_detect_overlay.exe
+            artifact/*.dll
 
   # ==================================================================
   # GUI package (Linux) — PyInstaller bundle with CLI binary
