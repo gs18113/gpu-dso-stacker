@@ -23,6 +23,7 @@
 
 #include "test_framework.h"
 #include "ransac.h"
+#include "star_coords_generator.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -84,6 +85,22 @@ static StarList apply_h_to_list(const Homography *H, const float *rx,
     StarList sl = make_starlist(sx, sy, n);
     free(sx); free(sy);
     return sl;
+}
+
+static float mean_reproj_err_on_prefix(const Homography *H,
+                                       const StarList *ref,
+                                       const StarList *frm,
+                                       int n_prefix)
+{
+    float sum = 0.f;
+    for (int i = 0; i < n_prefix; i++) {
+        float sx = 0.f, sy = 0.f;
+        apply_h(H, ref->stars[i].x, ref->stars[i].y, &sx, &sy);
+        float dx = sx - frm->stars[i].x;
+        float dy = sy - frm->stars[i].y;
+        sum += sqrtf(dx * dx + dy * dy);
+    }
+    return sum / (float)n_prefix;
 }
 
 /* =========================================================================
@@ -421,6 +438,89 @@ static int test_ransac_null_args(void)
 }
 
 /* =========================================================================
+ * Synthetic generator + extensive RANSAC suites
+ * ========================================================================= */
+
+static int test_star_coords_generator_basic(void)
+{
+    Homography H = {{0}};
+    H.h[0] = 1.0; H.h[1] = 0.0; H.h[2] = 12.0;
+    H.h[3] = 0.0; H.h[4] = 1.0; H.h[5] = -7.0;
+    H.h[6] = 0.0; H.h[7] = 0.0; H.h[8] = 1.0;
+
+    StarList ref = {0}, frm = {0};
+    ASSERT(star_coords_generate(40, 5, 7, 2048, 1536, &H, 1234u, &ref, &frm) == 0);
+    ASSERT_EQ(ref.n, 45);
+    ASSERT_EQ(frm.n, 47);
+
+    for (int i = 0; i < 40; i++) {
+        float sx = 0.f, sy = 0.f;
+        apply_h(&H, ref.stars[i].x, ref.stars[i].y, &sx, &sy);
+        ASSERT_NEAR(sx, frm.stars[i].x, 1e-5f);
+        ASSERT_NEAR(sy, frm.stars[i].y, 1e-5f);
+    }
+
+    star_coords_free(&ref);
+    star_coords_free(&frm);
+    return 0;
+}
+
+static int test_ransac_generated_translation_many_outliers(void)
+{
+    Homography Htrue = {{0}};
+    Htrue.h[0] = 1.0; Htrue.h[1] = 0.0; Htrue.h[2] = 8.0;
+    Htrue.h[3] = 0.0; Htrue.h[4] = 1.0; Htrue.h[5] = -6.0;
+    Htrue.h[6] = 0.0; Htrue.h[7] = 0.0; Htrue.h[8] = 1.0;
+
+    StarList ref = {0}, frm = {0};
+    ASSERT(star_coords_generate(60, 25, 25, 4096, 3072, &Htrue, 77u, &ref, &frm) == 0);
+
+    RansacParams p = DEFAULT_PARAMS;
+    p.max_iters = 4000;
+    p.match_radius = 30.0f;
+    p.inlier_thresh = 1.0f;
+
+    Homography Hest = {{0}};
+    int n_inliers = 0;
+    ASSERT_OK(ransac_compute_homography(&ref, &frm, &p, &Hest, &n_inliers));
+    ASSERT(n_inliers >= 55);
+    ASSERT(h_max_diff(&Hest, &Htrue) < 0.05f);
+    ASSERT(mean_reproj_err_on_prefix(&Hest, &ref, &frm, 60) < 0.1f);
+
+    star_coords_free(&ref);
+    star_coords_free(&frm);
+    return 0;
+}
+
+static int test_ransac_generated_seed_sweep(void)
+{
+    Homography Htrue = {{0}};
+    Htrue.h[0] = 1.001; Htrue.h[1] = 0.003; Htrue.h[2] = 2.0;
+    Htrue.h[3] = -0.002; Htrue.h[4] = 0.999; Htrue.h[5] = -3.0;
+    Htrue.h[6] = 0.0; Htrue.h[7] = 0.0; Htrue.h[8] = 1.0;
+
+    RansacParams p = DEFAULT_PARAMS;
+    p.max_iters = 5000;
+    p.match_radius = 12.0f;
+    p.inlier_thresh = 1.5f;
+
+    for (unsigned int seed = 1; seed <= 40; seed++) {
+        StarList ref = {0}, frm = {0};
+        ASSERT(star_coords_generate(70, 20, 20, 4096, 3072, &Htrue, seed, &ref, &frm) == 0);
+
+        Homography Hest = {{0}};
+        int n_inliers = 0;
+        ASSERT_OK(ransac_compute_homography(&ref, &frm, &p, &Hest, &n_inliers));
+        ASSERT(n_inliers >= 20);
+        ASSERT(mean_reproj_err_on_prefix(&Hest, &ref, &frm, 70) < 0.1f);
+
+        star_coords_free(&ref);
+        star_coords_free(&frm);
+    }
+    return 0;
+}
+
+/* =========================================================================
  * main
  * ========================================================================= */
 int main(void)
@@ -441,6 +541,9 @@ int main(void)
     RUN(test_ransac_null_params_uses_defaults);
     RUN(test_ransac_inliers_out);
     RUN(test_ransac_null_args);
+    RUN(test_star_coords_generator_basic);
+    RUN(test_ransac_generated_translation_many_outliers);
+    RUN(test_ransac_generated_seed_sweep);
 
     return SUMMARY();
 }

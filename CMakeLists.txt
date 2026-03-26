@@ -158,8 +158,8 @@ target_include_directories(test_star_detect PRIVATE tests)
 target_link_libraries(test_star_detect PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_star_detect COMMAND test_star_detect)
 
-add_executable(test_ransac tests/test_ransac.c)
-target_include_directories(test_ransac PRIVATE tests)
+add_executable(test_ransac tests/test_ransac.c test/star_coords_generator.c)
+target_include_directories(test_ransac PRIVATE tests test)
 target_link_libraries(test_ransac PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_ransac COMMAND test_ransac)
 
