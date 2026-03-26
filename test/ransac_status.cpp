@@ -174,7 +174,7 @@ static MatchDiag diagnose_matches(const StarList *ref_list,
             continue;
         }
 
-        if (d2 < r2 + 1.0f && d1 > 0.0f &&
+        if (d2 > 0.0f && d2 < r2 + 1.0f && d1 > 0.0f &&
             std::sqrt(d1 / d2) > LOWE_RATIO_THRESHOLD) {
             ++d.rejected_ratio;
             continue;
