@@ -125,6 +125,10 @@ set_target_properties(dso_stacker_lib PROPERTIES
 add_executable(dso_stacker main.cpp)
 target_link_libraries(dso_stacker PRIVATE dso_stacker_lib)
 
+# Star detection visualization helper (CLI)
+add_executable(star_detect_overlay test/star_detect_overlay.cpp)
+target_link_libraries(star_detect_overlay PRIVATE dso_stacker_lib ${MATH_LIB})
+
 # ---- Install rules ----
 install(TARGETS dso_stacker RUNTIME DESTINATION bin)
 
