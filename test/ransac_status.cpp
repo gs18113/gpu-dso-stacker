@@ -30,6 +30,8 @@ struct MatchDiag {
     int rejected_ratio;
 };
 
+static constexpr float LOWE_RATIO_THRESHOLD = 0.8f;
+
 static void usage(const char *prog)
 {
     std::fprintf(stderr,
@@ -172,7 +174,8 @@ static MatchDiag diagnose_matches(const StarList *ref_list,
             continue;
         }
 
-        if (d2 < r2 + 1.0f && d1 > 0.0f && std::sqrt(d1 / d2) > 0.8f) {
+        if (d2 < r2 + 1.0f && d1 > 0.0f &&
+            std::sqrt(d1 / d2) > LOWE_RATIO_THRESHOLD) {
             ++d.rejected_ratio;
             continue;
         }
@@ -298,7 +301,8 @@ int main(int argc, char **argv)
     std::printf("  size: %dx%d, detected stars: %d\n", frm.width, frm.height, frm.stars.n);
 
     MatchDiag md = diagnose_matches(&ref.stars, &frm.stars, params.match_radius);
-    std::printf("Matching diagnostics (radius=%.2f, ratio=0.8):\n", (double)params.match_radius);
+    std::printf("Matching diagnostics (radius=%.2f, ratio=%.2f):\n",
+                (double)params.match_radius, (double)LOWE_RATIO_THRESHOLD);
     std::printf("  accepted: %d\n", md.accepted);
     std::printf("  rejected (no candidate within radius): %d\n", md.rejected_radius);
     std::printf("  rejected (Lowe ratio): %d\n", md.rejected_ratio);
