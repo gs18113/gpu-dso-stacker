@@ -315,6 +315,17 @@ int main(int argc, char **argv)
         Image r = {}, g = {}, b = {};
         StarList stars = {};
         std::vector<uint8_t> mask;
+        BayerPattern pat = BAYER_NONE;
+        DsoError berr = DSO_OK;
+        cudaStream_t stream = (cudaStream_t)0;
+        float min_v = 0.0f;
+        float max_v = 0.0f;
+        int npix = 0;
+        float span = 1.0f;
+        float hi = 1.0f;
+        float rv = 0.0f;
+        float gv = 0.0f;
+        float bv = 0.0f;
 
         DsoError err = fits_load(fits_path.c_str(), &raw);
         if (err != DSO_OK) {
@@ -323,10 +334,9 @@ int main(int argc, char **argv)
             goto frame_cleanup;
         }
 
-        BayerPattern pat = BAYER_NONE;
         if (bayer_override_set) pat = bayer_override;
         else {
-            const DsoError berr = fits_get_bayer_pattern(fits_path.c_str(), &pat);
+            berr = fits_get_bayer_pattern(fits_path.c_str(), &pat);
             if (berr != DSO_OK) {
                 std::fprintf(stderr,
                              "Warning: fits_get_bayer_pattern failed for '%s' (err=%d); using BAYER_NONE\n",
@@ -358,7 +368,6 @@ int main(int argc, char **argv)
         }
 
         if (use_gpu) {
-            const cudaStream_t stream = (cudaStream_t)0;
             err = star_detect_gpu_moffat_convolve(&lum, &conv, &moffat, stream);
             if (err == DSO_OK) {
                 err = star_detect_gpu_threshold(&conv, mask.data(), star_sigma, stream);
@@ -379,9 +388,9 @@ int main(int argc, char **argv)
             goto frame_cleanup;
         }
 
-        float min_v = lum.data[0];
-        float max_v = lum.data[0];
-        const int npix = raw.width * raw.height;
+        min_v = lum.data[0];
+        max_v = lum.data[0];
+        npix = raw.width * raw.height;
         for (int p = 0; p < npix; ++p) {
             const float v = lum.data[p];
             if (v < min_v) min_v = v;
@@ -391,11 +400,11 @@ int main(int argc, char **argv)
             b.data[p] = v;
         }
 
-        const float span = (max_v > min_v) ? (max_v - min_v) : 1.0f;
-        const float hi = max_v + 0.15f * span;
-        const float rv = min_v + color.r * (hi - min_v);
-        const float gv = min_v + color.g * (hi - min_v);
-        const float bv = min_v + color.b * (hi - min_v);
+        span = (max_v > min_v) ? (max_v - min_v) : 1.0f;
+        hi = max_v + 0.15f * span;
+        rv = min_v + color.r * (hi - min_v);
+        gv = min_v + color.g * (hi - min_v);
+        bv = min_v + color.b * (hi - min_v);
 
         for (int s = 0; s < stars.n; ++s) {
             draw_circle(r.data, g.data, b.data,
