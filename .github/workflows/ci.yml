@@ -73,6 +73,12 @@ jobs:
           name: star-detect-overlay-linux-x86_64
           path: build/star_detect_overlay
 
+      - name: Upload ransac_status binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ransac-status-linux-x86_64
+          path: build/ransac_status
+
   # ==================================================================
   # Windows: build CLI + run tests using vcpkg + CUDA Toolkit
   # ==================================================================
@@ -117,6 +123,7 @@ jobs:
           mkdir -p artifact
           cp build/Release/dso_stacker.exe artifact/
           cp build/Release/star_detect_overlay.exe artifact/
+          cp build/Release/ransac_status.exe artifact/
           # Copy vcpkg DLLs needed at runtime
           for dll in build/Release/*.dll; do
             [ -f "$dll" ] && cp "$dll" artifact/
@@ -134,6 +141,14 @@ jobs:
           name: star-detect-overlay-windows-x86_64
           path: |
             artifact/star_detect_overlay.exe
+            artifact/*.dll
+
+      - name: Upload ransac_status binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ransac-status-windows-x86_64
+          path: |
+            artifact/ransac_status.exe
             artifact/*.dll
 
   # ==================================================================
