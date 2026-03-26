@@ -37,6 +37,7 @@ static void usage(const char *prog)
         "  -f, --file <path>         Input file list: CSV (filepath,is_reference),\n"
         "                            plain text list (one filepath per line), or single FITS file\n"
         "  -o, --output <path>       Output PNG path (single input) or prefix (multiple inputs)\n"
+        "                            Default: stars (=> stars.png or stars_<idx>_<name>.png)\n"
         "\n"
         "Execution:\n"
         "      --cpu                 Use CPU Moffat+threshold (default)\n"
@@ -324,7 +325,15 @@ int main(int argc, char **argv)
 
         BayerPattern pat = BAYER_NONE;
         if (bayer_override_set) pat = bayer_override;
-        else fits_get_bayer_pattern(fits_path.c_str(), &pat);
+        else {
+            const DsoError berr = fits_get_bayer_pattern(fits_path.c_str(), &pat);
+            if (berr != DSO_OK) {
+                std::fprintf(stderr,
+                             "Warning: fits_get_bayer_pattern failed for '%s' (err=%d); using BAYER_NONE\n",
+                             fits_path.c_str(), (int)berr);
+                pat = BAYER_NONE;
+            }
+        }
 
         lum.width = raw.width; lum.height = raw.height;
         conv.width = raw.width; conv.height = raw.height;
@@ -349,9 +358,10 @@ int main(int argc, char **argv)
         }
 
         if (use_gpu) {
-            err = star_detect_gpu_moffat_convolve(&lum, &conv, &moffat, 0);
+            const cudaStream_t stream = (cudaStream_t)0;
+            err = star_detect_gpu_moffat_convolve(&lum, &conv, &moffat, stream);
             if (err == DSO_OK) {
-                err = star_detect_gpu_threshold(&conv, mask.data(), star_sigma, 0);
+                err = star_detect_gpu_threshold(&conv, mask.data(), star_sigma, stream);
             }
         } else {
             err = star_detect_cpu_detect(lum.data, conv.data, mask.data(),
