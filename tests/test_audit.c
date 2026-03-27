@@ -3,7 +3,7 @@
  *
  * Covers:
  *   - Integration with high frame counts (VLA stability baseline)
- *   - RANSAC reproducibility (checking for non-deterministic seed issues)
+ *   - Triangle matching reproducibility (deterministic behavior)
  *   - CCL memory/stability on large frames
  *   - Lanczos numerical baseline
  */
@@ -75,13 +75,8 @@ static int test_integrate_mean_n1000(void) {
  * ====================================================================== */
 
 /*
- * Test if RANSAC is reproducible.
- * Currently it uses srand(time(NULL)), so if we run it twice with a small
- * delay, it will likely produce different results.
- *
- * This test is EXPECTED TO FAIL (i.e. return 1) if we want to prove it's
- * non-deterministic. However, to keep the test suite green, we might just
- * check if it's currently problematic.
+ * Triangle/asterism matching is deterministic. Running the solver twice on
+ * identical inputs should produce identical H and inlier count.
  */
 static int test_ransac_determinism(void) {
     /* Create a set of 50 star correspondences with significant noise to ensure
@@ -107,7 +102,7 @@ static int test_ransac_determinism(void) {
         }
     }
 
-    /* Use very few iterations to increase sensitivity to sampling */
+    /* Parameters retained for API compatibility; matching path is deterministic. */
     RansacParams p = { .max_iters = 5, .inlier_thresh = 5.0f, .match_radius = 50.0f, .confidence = 0.99f, .min_inliers = 4 };
 
     Homography h1, h2;
@@ -117,8 +112,8 @@ static int test_ransac_determinism(void) {
     DsoError err1 = ransac_compute_homography(&ref, &src, &p, &h1, &inliers1);
     ASSERT_OK(err1);
 
-    /* Small delay */
-    usleep(100000); 
+    /* Small delay should not affect result */
+    usleep(100000);
 
     /* Second run */
     DsoError err2 = ransac_compute_homography(&ref, &src, &p, &h2, &inliers2);
@@ -138,12 +133,11 @@ static int test_ransac_determinism(void) {
     }
 
     if (!identical) {
-        printf("    Verified non-deterministic (as expected).\n");
-        return 0; 
-    } else {
-        printf("    STILL DETERMINISTIC. This is highly unexpected with low iters and noisy data.\n");
-        return 1; 
+        printf("    Unexpected non-deterministic result.\n");
+        return 1;
     }
+    printf("    Verified deterministic behavior.\n");
+    return 0;
 }
 
 /* =========================================================================

@@ -17,13 +17,14 @@ All stages are implemented for both GPU and CPU execution paths. The pipeline ru
 | Debayering (VNG) | `debayer_gpu.cu` | `debayer_cpu.c` |
 | Moffat conv + threshold | `star_detect_gpu.cu` | `star_detect_cpu.c` |
 | CCL + CoM | — (CPU always) | `star_detect_cpu.c` |
-| RANSAC + DLT | — (CPU always) | `ransac.c` |
+| Triangle matching + DLT | `ransac_gpu.cu` (selectable via `--match-device`) | `ransac.c` |
 | Lanczos warp | `lanczos_gpu.cu` | `lanczos_cpu.c` |
 | Integration | `integration_gpu.cu` | `integration.c` |
 | Pipeline orchestrator | `pipeline.cu` | `pipeline_cpu.c` |
 
 Pass `--cpu` to run the complete CPU path; omit it for the GPU path (default).
-The CSV input is always 2-column (`filepath, is_reference`). Star detection + RANSAC always run.
+Triangle matching device is controlled by `--match-device auto|cpu|gpu` (default `auto` follows stacking device).
+The CSV input is always 2-column (`filepath, is_reference`). Star detection + alignment always run.
 
 ## Technology Stack
 
@@ -203,6 +204,7 @@ RANSAC (2-column CSV only):
       --ransac-iters <int>       Max RANSAC iterations (default: 1000)
       --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)
       --match-radius <float>     Star matching search radius px (default: 30.0)
+      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)
 
 Sensor:
       --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg

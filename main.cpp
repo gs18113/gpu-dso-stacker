@@ -30,6 +30,7 @@
  *       --ransac-iters <int>         Max RANSAC iterations (default: 1000)
  *       --ransac-thresh <float>      Inlier reprojection threshold in px (default: 2.0)
  *       --match-radius <float>       Star matching search radius in px (default: 30.0)
+ *       --match-device <device>      auto | cpu | gpu (default: auto)
  *
  * Options (calibration):
  *       --dark <path>                Master dark FITS or list of dark FITS paths
@@ -85,6 +86,7 @@ enum {
     OPT_RANSAC_ITERS,
     OPT_RANSAC_THRESH,
     OPT_MATCH_RADIUS,
+    OPT_MATCH_DEVICE,
     OPT_BATCH_SIZE,
     OPT_BAYER,
     /* Calibration options */
@@ -132,6 +134,7 @@ static void usage(const char *prog)
         "      --ransac-iters <int>       Max RANSAC iterations (default: 1000)\n"
         "      --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)\n"
         "      --match-radius <float>     Star matching radius px (default: 30.0)\n"
+        "      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)\n"
         "\n"
         "Calibration:\n"
         "      --dark <path>              Master dark FITS or text list of dark FITS paths\n"
@@ -207,6 +210,7 @@ int main(int argc, char **argv)
     cfg.output_file     = "output.fits";
     cfg.bayer_override  = BAYER_NONE;   /* auto-detect */
     cfg.use_gpu_lanczos = 1;
+    cfg.use_gpu_ransac  = -1; /* auto: follow stacking device */
     cfg.calib           = nullptr;
     /* save_opts defaults: FP32, no compression, auto stretch (NAN) */
     cfg.save_opts.tiff_compress = TIFF_COMPRESS_NONE;
@@ -241,6 +245,7 @@ int main(int argc, char **argv)
         {"ransac-iters",      required_argument, nullptr, OPT_RANSAC_ITERS},
         {"ransac-thresh",     required_argument, nullptr, OPT_RANSAC_THRESH},
         {"match-radius",      required_argument, nullptr, OPT_MATCH_RADIUS},
+        {"match-device",      required_argument, nullptr, OPT_MATCH_DEVICE},
         {"batch-size",        required_argument, nullptr, OPT_BATCH_SIZE},
         {"bayer",             required_argument, nullptr, OPT_BAYER},
         /* Calibration */
@@ -282,6 +287,19 @@ int main(int argc, char **argv)
         case OPT_RANSAC_ITERS:  cfg.ransac.max_iters     = atoi(optarg);             break;
         case OPT_RANSAC_THRESH: cfg.ransac.inlier_thresh  = strtof(optarg, nullptr); break;
         case OPT_MATCH_RADIUS:  cfg.ransac.match_radius   = strtof(optarg, nullptr); break;
+        case OPT_MATCH_DEVICE:
+            if (strcmp(optarg, "auto") == 0) {
+                cfg.use_gpu_ransac = -1;
+            } else if (strcmp(optarg, "cpu") == 0) {
+                cfg.use_gpu_ransac = 0;
+            } else if (strcmp(optarg, "gpu") == 0) {
+                cfg.use_gpu_ransac = 1;
+            } else {
+                fprintf(stderr, "Error: unknown --match-device '%s'; use auto, cpu, or gpu\n",
+                        optarg);
+                return 1;
+            }
+            break;
 
         case OPT_BATCH_SIZE: cfg.batch_size = atoi(optarg); break;
 
@@ -455,6 +473,13 @@ int main(int argc, char **argv)
     /* Wire output path and GPU flag into config */
     cfg.output_file     = output_file;
     cfg.use_gpu_lanczos = !use_cpu;
+    if (cfg.use_gpu_ransac < 0) cfg.use_gpu_ransac = cfg.use_gpu_lanczos;
+    if (use_cpu && cfg.use_gpu_ransac) {
+        fprintf(stderr,
+                "Error: --match-device gpu is not supported together with --cpu.\n"
+                "  Use --match-device cpu or --match-device auto with --cpu.\n");
+        return 1;
+    }
     /* color_output is set after CSV parsing and ref_idx resolution below */
 
     /* ---- Generate / load calibration master frames ---- */
@@ -517,11 +542,12 @@ int main(int argc, char **argv)
 
     printf("Parsed %d frame(s), reference = %d\n", n_frames, ref_idx);
     static const char *bit_depth_names[] = {"f32", "f16", "16-bit", "8-bit"};
-    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s | Output: %s %s\n",
+    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s | Matching: %s | Output: %s %s\n",
            integ_str, (double)cfg.kappa, cfg.iterations, cfg.batch_size,
-           use_cpu ? "CPU" : "GPU",
-           cfg.color_output ? "color RGB" : "mono luminance",
-           bit_depth_names[cfg.save_opts.bit_depth]);
+            use_cpu ? "CPU" : "GPU",
+            cfg.use_gpu_ransac ? "GPU" : "CPU",
+            cfg.color_output ? "color RGB" : "mono luminance",
+            bit_depth_names[cfg.save_opts.bit_depth]);
     if (has_calib) {
         printf("Calibration: dark=%s flat=%s\n",
                calib.has_dark ? "yes" : "no",

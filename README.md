@@ -80,7 +80,7 @@ cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n
 |---|---|---|
 | 1. Debayering (star detection) | VNG demosaic → luminance (CUDA kernel) | VNG demosaic → luminance (OpenMP) |
 | 2. Star Detection | Moffat PSF conv + threshold (CUDA) | Moffat PSF conv + threshold (OpenMP) |
-| 3. RANSAC Alignment | DLT homography + RANSAC (CPU always) | DLT homography + RANSAC (CPU always) |
+| 3. Triangle Matching Alignment | Triangle/asterism matching + DLT (`--match-device` selects CPU/GPU; default follows stacking device) | Triangle/asterism matching + DLT (CPU by default with `--cpu`) |
 | 4. Debayering (warp) | VNG demosaic → luminance **or R/G/B** | VNG demosaic → luminance **or R/G/B** |
 | 5. Lanczos Warp | nppiRemap + coord-map kernel (CUDA) | 6-tap backward-map warp (OpenMP) |
 | 6. Integration | Mini-batch kappa-sigma (CUDA) | Full kappa-sigma (OpenMP) |
@@ -189,6 +189,7 @@ RANSAC (2-column CSV only):
       --ransac-iters <int>       Max RANSAC iterations (default: 1000)
       --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)
       --match-radius <float>     Star matching search radius px (default: 30.0)
+      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)
 
 Calibration (applied before debayering; bias and darkflat are mutually exclusive):
       --dark <path>              Master dark FITS or text list of dark FITS paths

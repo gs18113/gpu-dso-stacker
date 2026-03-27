@@ -35,6 +35,7 @@
 #include "star_detect_gpu.h"
 #include "star_detect_cpu.h"
 #include "ransac.h"
+#include "ransac_gpu.h"
 #include "integration_gpu.h"
 #include "lanczos_gpu.h"
 
@@ -326,8 +327,34 @@ static DsoError phase_detect_warp_integrate(
                 free(stars.stars); err = DSO_ERR_STAR_DETECT; goto cleanup;
             }
             int n_inliers = 0;
-            err = ransac_compute_homography(&ref_stars, &stars, &config->ransac,
-                                            &fi->H, &n_inliers);
+            if (config->use_gpu_ransac) {
+                StarPos *d_ref_stars = NULL;
+                StarPos *d_src_stars = NULL;
+                size_t ref_bytes = (size_t)ref_stars.n * sizeof(StarPos);
+                size_t src_bytes = (size_t)stars.n * sizeof(StarPos);
+                if (cudaMalloc((void **)&d_ref_stars, ref_bytes) != cudaSuccess ||
+                    cudaMalloc((void **)&d_src_stars, src_bytes) != cudaSuccess ||
+                    cudaMemcpyAsync(d_ref_stars, ref_stars.stars, ref_bytes,
+                                    cudaMemcpyHostToDevice, stream_compute) != cudaSuccess ||
+                    cudaMemcpyAsync(d_src_stars, stars.stars, src_bytes,
+                                    cudaMemcpyHostToDevice, stream_compute) != cudaSuccess ||
+                    cudaStreamSynchronize(stream_compute) != cudaSuccess) {
+                    cudaFree(d_ref_stars);
+                    cudaFree(d_src_stars);
+                    free(stars.stars);
+                    err = DSO_ERR_CUDA;
+                    goto cleanup;
+                }
+                err = ransac_compute_homography_gpu(d_ref_stars, ref_stars.n,
+                                                    d_src_stars, stars.n,
+                                                    &config->ransac,
+                                                    &fi->H, &n_inliers, stream_compute);
+                cudaFree(d_ref_stars);
+                cudaFree(d_src_stars);
+            } else {
+                err = ransac_compute_homography(&ref_stars, &stars, &config->ransac,
+                                                &fi->H, &n_inliers);
+            }
             free(stars.stars);
             if (err != DSO_OK) {
                 fprintf(stderr,
