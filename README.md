@@ -64,7 +64,7 @@ cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n
 
 ## Technology Stack
 
-- **C11** — Core library (FITS I/O, image I/O dispatch, CSV parser, Lanczos CPU, integration, debayer CPU, star detection, RANSAC, CPU pipeline)
+- **C11** — Core library (FITS I/O, image I/O dispatch, CSV parser, Lanczos CPU, integration, debayer CPU, star detection, triangle matching, CPU pipeline)
 - **OpenMP** — CPU parallelism for debayer, Moffat convolution, Lanczos warp, and integration
 - **CUDA 12** — GPU acceleration (VNG debayer, Moffat convolution, Lanczos warp, kappa-sigma integration, GPU pipeline)
 - **CFITSIO 4.6.3** — FITS image I/O
@@ -87,7 +87,7 @@ cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n
 
 **Color output**: when a Bayer pattern is active (from `--bayer` or the FITS `BAYERPAT` keyword), stage 4 debayers to separate R, G, B planes; stages 5–6 run once per channel; the output FITS has `NAXIS=3` with planes R=1/G=2/B=3. Star detection (stages 1–2) always uses luminance regardless of color mode.
 
-**RANSAC mismatch handling**: if a non-reference frame cannot be aligned (too few stars or RANSAC mismatch), that frame is skipped and processing continues. At the end, the CLI prints a summary with successful and skipped frame counts.
+**Triangle-matching mismatch handling**: if a non-reference frame cannot be aligned (too few stars or triangle-matching mismatch), that frame is skipped and processing continues. At the end, the CLI prints a summary with successful and skipped frame counts.
 
 **Calibration pre-processing** (applied to every raw frame before debayering when `--dark`/`--flat` are provided):
 
@@ -185,11 +185,13 @@ Star detection (2-column CSV only):
       --moffat-alpha <float>     Moffat PSF alpha / FWHM (default: 2.5)
       --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
       --top-stars <int>          Top-K stars for matching (default: 50)
-      --min-stars <int>          Minimum stars for RANSAC (default: 6)
+      --min-stars <int>          Minimum stars for triangle matching (default: 6)
 
-RANSAC (2-column CSV only):
-      --ransac-iters <int>       Max RANSAC iterations (default: 1000)
-      --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)
+Triangle matching (2-column CSV only):
+      --triangle-iters <int>     Max triangle-matching iterations (default: 1000)
+      --triangle-thresh <float>  Inlier reprojection threshold px (default: 2.0)
+      --ransac-iters <int>       Deprecated alias of --triangle-iters
+      --ransac-thresh <float>    Deprecated alias of --triangle-thresh
       --match-radius <float>     Star matching search radius px (default: 30.0)
       --match-device <device>    auto | cpu | gpu (default: auto = stacking device)
 
@@ -316,7 +318,7 @@ cd build && ctest --output-on-failure -V
 | `test_cpu` | 29 | CSV parser, FITS I/O, integration, Lanczos CPU |
 | `test_gpu` | 5 | GPU Lanczos (2 known pre-existing failures without GPU) |
 | `test_star_detect` | 21 | CCL + CoM; Moffat convolution + threshold (CPU) |
-| `test_ransac` | 13 | DLT homography + RANSAC |
+| `test_ransac` | 13 | DLT homography + triangle matching |
 | `test_debayer_cpu` | 10 | VNG debayer CPU: all patterns, uniform, non-uniform, edge cases |
 | `test_integration_gpu` | 9 | GPU mini-batch kappa-sigma |
 | `test_calibration` | 26 | CPU calibration: dark/flat apply, dead-pixel guard, dimension validation, FITS master loading, frame-list stacking, winsorized mean, median, bias/darkflat subtraction, flat normalization |

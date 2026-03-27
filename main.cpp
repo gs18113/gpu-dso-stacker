@@ -2,7 +2,7 @@
  * main.cpp — DSO Stacker CLI
  *
  * Entry point for the gpu-dso-stacker pipeline. Parses a CSV describing
- * input FITS frames, optionally runs star detection and RANSAC alignment
+ * input FITS frames, optionally runs star detection and triangle matching
  * (when the CSV has no pre-computed transforms), then applies Lanczos-3
  * alignment and GPU mini-batch kappa-sigma integration via pipeline_run().
  *
@@ -26,9 +26,9 @@
  *       --moffat-alpha <float>       Moffat PSF alpha (FWHM control, default: 2.5)
  *       --moffat-beta <float>        Moffat PSF beta (wing slope, default: 2.0)
  *       --top-stars <int>            Top-K stars to use for matching (default: 50)
- *       --min-stars <int>            Minimum stars required for RANSAC (default: 6)
- *       --ransac-iters <int>         Max RANSAC iterations (default: 1000)
- *       --ransac-thresh <float>      Inlier reprojection threshold in px (default: 2.0)
+ *       --min-stars <int>            Minimum stars required for triangle matching (default: 6)
+ *       --triangle-iters <int>       Max triangle-matching iterations (default: 1000)
+ *       --triangle-thresh <float>    Inlier reprojection threshold in px (default: 2.0)
  *       --match-radius <float>       Star matching search radius in px (default: 30.0)
  *       --match-device <device>      auto | cpu | gpu (default: auto)
  *
@@ -128,11 +128,13 @@ static void usage(const char *prog)
         "      --moffat-alpha <float>     Moffat PSF alpha / FWHM (default: 2.5)\n"
         "      --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)\n"
         "      --top-stars <int>          Top-K stars for matching (default: 50)\n"
-        "      --min-stars <int>          Minimum stars for RANSAC (default: 6)\n"
+        "      --min-stars <int>          Minimum stars for triangle matching (default: 6)\n"
         "\n"
-        "RANSAC alignment (used only for 2-column CSV input):\n"
-        "      --ransac-iters <int>       Max RANSAC iterations (default: 1000)\n"
-        "      --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)\n"
+        "Triangle matching alignment (used only for 2-column CSV input):\n"
+        "      --triangle-iters <int>     Max triangle-matching iterations (default: 1000)\n"
+        "      --triangle-thresh <float>  Inlier reprojection threshold px (default: 2.0)\n"
+        "      --ransac-iters <int>       Deprecated alias of --triangle-iters\n"
+        "      --ransac-thresh <float>    Deprecated alias of --triangle-thresh\n"
         "      --match-radius <float>     Star matching radius px (default: 30.0)\n"
         "      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)\n"
         "\n"
@@ -242,8 +244,10 @@ int main(int argc, char **argv)
         {"moffat-beta",       required_argument, nullptr, OPT_MOFFAT_BETA},
         {"top-stars",         required_argument, nullptr, OPT_TOP_STARS},
         {"min-stars",         required_argument, nullptr, OPT_MIN_STARS},
-        {"ransac-iters",      required_argument, nullptr, OPT_RANSAC_ITERS},
-        {"ransac-thresh",     required_argument, nullptr, OPT_RANSAC_THRESH},
+        {"triangle-iters",    required_argument, nullptr, OPT_RANSAC_ITERS},
+        {"triangle-thresh",   required_argument, nullptr, OPT_RANSAC_THRESH},
+        {"ransac-iters",      required_argument, nullptr, OPT_RANSAC_ITERS},  /* deprecated alias */
+        {"ransac-thresh",     required_argument, nullptr, OPT_RANSAC_THRESH}, /* deprecated alias */
         {"match-radius",      required_argument, nullptr, OPT_MATCH_RADIUS},
         {"match-device",      required_argument, nullptr, OPT_MATCH_DEVICE},
         {"batch-size",        required_argument, nullptr, OPT_BATCH_SIZE},

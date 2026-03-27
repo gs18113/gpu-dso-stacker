@@ -7,11 +7,11 @@
  *
  *   fits_load_to_buffer → H2D (stream_copy)
  *   → calib → debayer_lum → Moffat+threshold  (stream_compute)
- *   → D2H → CCL+CoM → RANSAC                  (CPU)
+ *   → D2H → CCL+CoM → triangle matching       (CPU)
  *   → Lanczos warp → integration batch slot    (stream_compute)
  *
  * I/O overlap:
- *   After RANSAC the Lanczos warp for frame m runs on stream_compute while
+ *   After triangle matching the Lanczos warp for frame m runs on stream_compute while
  *   the CPU simultaneously loads frame m+1 from disk and streams it to the
  *   device via stream_copy.  At batch boundaries the H2D of frame m+1 also
  *   overlaps with mini-batch kappa-sigma integration on stream_compute.
@@ -165,7 +165,7 @@ done:
  *   2. SYNC: cudaStreamSynchronize(stream_compute)
  *            Also clears the Lanczos warp from the previous frame,
  *            ensuring d_raw[next_slot] is safe to overwrite.
- *   3. CPU:  D2H (lum/conv/mask) → CCL+CoM → RANSAC
+ *   3. CPU:  D2H (lum/conv/mask) → CCL+CoM → triangle matching
  *   4. GPU:  Lanczos warp  (stream_compute)
  *   5. CPU:  Load next frame from disk + async H2D  (stream_copy)
  *            Overlaps with the GPU warp in step 4.
@@ -296,7 +296,7 @@ static DsoError phase_detect_warp_integrate(
         CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup, "star_detect sync");
 
         /* ----------------------------------------------------------
-         * 3. D2H: copy lum/conv/mask to host for CCL+RANSAC.
+         * 3. D2H: copy lum/conv/mask to host for CCL+triangle matching.
          * ---------------------------------------------------------- */
         CUDA_CHECK(cudaMemcpy(lum_host,  d_lum,  npix_f, cudaMemcpyDeviceToHost),
                    cleanup, fi->filepath);
@@ -306,7 +306,7 @@ static DsoError phase_detect_warp_integrate(
                    cleanup, fi->filepath);
 
         /* ----------------------------------------------------------
-         * 4. CPU: CCL + CoM, then RANSAC (or store ref_stars).
+         * 4. CPU: CCL + CoM, then triangle matching (or store ref_stars).
          * ---------------------------------------------------------- */
         StarList stars = {NULL, 0};
         int skip_current = 0;
@@ -329,7 +329,7 @@ static DsoError phase_detect_warp_integrate(
             if (stars.n < config->min_stars) {
                 fprintf(stderr,
                         "pipeline: skipping frame %d/%d "
-                        "(csv index=%d, path=%s): insufficient stars for RANSAC "
+                        "(csv index=%d, path=%s): insufficient stars for triangle matching "
                         "(ref=%d, frame=%d, min=%d)\n",
                         pos + 1, n_frames, fi_idx + 1, fi->filepath,
                         ref_stars.n, stars.n, config->min_stars);
@@ -373,7 +373,7 @@ static DsoError phase_detect_warp_integrate(
                 if (err != DSO_OK) {
                     fprintf(stderr,
                             "pipeline: skipping frame %d/%d "
-                            "(csv index=%d, path=%s): RANSAC mismatch (err=%d)\n",
+                            "(csv index=%d, path=%s): triangle-matching mismatch (err=%d)\n",
                             pos + 1, n_frames, fi_idx + 1, fi->filepath, (int)err);
                     skipped_frames++;
                     err = DSO_OK;
@@ -529,7 +529,7 @@ DsoError pipeline_run(FrameInfo            *frames,
 
     if (successful_frames <= 0) {
         fprintf(stderr,
-                "pipeline: no successfully aligned frame available after RANSAC filtering\n");
+                "pipeline: no successfully aligned frame available after triangle-matching filtering\n");
         err = DSO_ERR_RANSAC;
         goto done;
     }

@@ -4,10 +4,10 @@
  * Single-pass streaming: each frame is read from disk exactly once, then
  * processed end-to-end before the next frame is loaded.
  *
- *   fits_load → calib → debayer_lum → star detect → [RANSAC] → Lanczos warp
+ *   fits_load → calib → debayer_lum → star detect → [triangle matching] → Lanczos warp
  *   → accumulate into mini-batch → integrate batch when full → repeat
  *
- * Frame ordering: reference frame processed first (builds ref_stars for RANSAC
+ * Frame ordering: reference frame processed first (builds ref_stars for triangle matching
  * of all subsequent frames), then all non-reference frames in CSV order.
  *
  * Memory at any point:
@@ -294,12 +294,12 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
             if (i == ref_idx) {
                 ref_stars = stars;
             } else {
-                /* ---- RANSAC against reference ---- */
+                /* ---- Triangle matching against reference ---- */
                 if (stars.n < config->min_stars ||
                     ref_stars.n < config->min_stars) {
                     fprintf(stderr,
                             "pipeline_cpu: skipping frame %d/%d "
-                            "(csv index=%d, path=%s): insufficient stars for RANSAC "
+                            "(csv index=%d, path=%s): insufficient stars for triangle matching "
                             "(ref=%d, frame=%d, min=%d)\n",
                             pos + 1, n_frames, i + 1, frames[i].filepath,
                             ref_stars.n, stars.n, config->min_stars);
@@ -317,7 +317,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                 if (err != DSO_OK) {
                     fprintf(stderr,
                             "pipeline_cpu: skipping frame %d/%d "
-                            "(csv index=%d, path=%s): RANSAC mismatch (err=%d)\n",
+                            "(csv index=%d, path=%s): triangle-matching mismatch (err=%d)\n",
                             pos + 1, n_frames, i + 1, frames[i].filepath, (int)err);
                     image_free(&lum);
                     if (color) image_free(&raw);

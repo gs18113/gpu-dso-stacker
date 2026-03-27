@@ -423,7 +423,7 @@ class MainWindow(QMainWindow):
             "<b>DSO Stacker GUI</b><br>"
             "A graphical front-end for the <tt>dso_stacker</tt> CLI.<br><br>"
             "GPU-accelerated deep-sky image stacking with star detection, "
-            "RANSAC alignment, Lanczos warping, and kappa-sigma integration.<br><br>"
+            "triangle matching alignment, Lanczos warping, and kappa-sigma integration.<br><br>"
             "Stack frames, save YAML projects, and view live output in the log panel.",
         )
 

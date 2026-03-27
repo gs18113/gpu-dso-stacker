@@ -198,11 +198,13 @@ Star detection (2-column CSV only):
       --moffat-alpha <float>     Moffat PSF alpha / FWHM (default: 2.5)
       --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
       --top-stars <int>          Top-K stars for matching (default: 50)
-      --min-stars <int>          Minimum stars for RANSAC (default: 6)
+      --min-stars <int>          Minimum stars for triangle matching (default: 6)
 
-RANSAC (2-column CSV only):
-      --ransac-iters <int>       Max RANSAC iterations (default: 1000)
-      --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)
+Triangle matching (2-column CSV only):
+      --triangle-iters <int>     Max triangle-matching iterations (default: 1000)
+      --triangle-thresh <float>  Inlier reprojection threshold px (default: 2.0)
+      --ransac-iters <int>       Deprecated alias of --triangle-iters
+      --ransac-thresh <float>    Deprecated alias of --triangle-thresh
       --match-radius <float>     Star matching search radius px (default: 30.0)
       --match-device <device>    auto | cpu | gpu (default: auto = stacking device)
 
@@ -234,7 +236,7 @@ filepath, is_reference
 - First row is a header and is always skipped.
 - Exactly **one** row must have `is_reference = 1`.
 - Only 2-column format is accepted. Any other column count returns `DSO_ERR_CSV`.
-- Homographies are computed at runtime via star detection + RANSAC.
+- Homographies are computed at runtime via star detection + triangle matching.
 
 ---
 
@@ -514,7 +516,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames,
 - **DLT produces backward H directly**: row setup uses `(ref_x, ref_y)` as H input and `(src_x, src_y)` as output → null vector = backward map (ref → src). No post-inversion needed.
 - **Moffat constant memory cap**: max kernel radius is 15 (alpha ≤ 5 → R = ceil(3·alpha) ≤ 15, diameter 31, 961 floats × 4 = ~3.8 KB within 64 KB constant limit).
 - **Single-pass pipeline**: each frame is loaded from disk exactly once. Star detection, RANSAC, and warp all run in the same pass before the next frame is loaded. No separate Phase 1 / Phase 2; no 11-column pre-computed transform path. The only CSV format is 2-column (`filepath, is_reference`).
-- **RANSAC mismatch policy**: non-reference frames that fail alignment are skipped (not fatal). Both CPU and GPU pipelines print a final summary: `successful frames: X/Y (skipped: Z)`. Reference-frame alignment failure still aborts.
+- **Triangle-matching mismatch policy**: non-reference frames that fail alignment are skipped (not fatal). Both CPU and GPU pipelines print a final summary: `successful frames: X/Y (skipped: Z)`. Reference-frame alignment failure still aborts.
 - **CPU vs GPU output agreement**: not bit-identical due to different Moffat conv precision (→ slightly different homographies), different Lanczos implementations (nppi vs hand-coded), and different integration paths. Empirical PSNR ≈ 44.6 dB; mean relative error ≈ 0.25% in the interior on 10 × 4656×3520 frames.
 - **`lanczos_transform_cpu` identity fast path**: if H is identity and src/dst dimensions match, falls back to `memcpy` before entering the warp loop.
 - **`lanczos_transform_cpu` weight precomputation**: `wx_arr[6]` and `wy_arr[6]` are computed once before the 6×6 tap loop, reducing `lanczos_weight` calls from 42 to 12 per destination pixel.
@@ -694,7 +696,7 @@ src/GUI/
 - **Async FITS metadata**: `FitsMetaWorker(QRunnable)` submitted to `QThreadPool.globalInstance()` so reading FITS headers never blocks the UI thread. Uses a minimal pure-Python FITS header parser (`_read_fits_keywords` in `fits_meta.py`) — reads 2880-byte blocks, 80-byte cards, stops at END — no external library needed.
 - **Bias / Darkflat mutual exclusion**: `QTabWidget.setTabEnabled(False)` grays out and disables the opposing tab; `setTabToolTip` explains why. Checked again at run time.
 - **Conditional visibility**: single `_update_visibility()` slot in `StackingOptionsTab` connected to all relevant widget change signals (integration combo, CPU checkbox, output path, bit depth).
-- **RANSAC match-device in GUI**: `StackingOptionsTab` exposes `match_device` (`auto|cpu|gpu`) and `utils.build_command()` emits `--match-device` when GPU mode is active and the value is not `auto`.
+- **Triangle-matching device in GUI**: `StackingOptionsTab` exposes `match_device` (`auto|cpu|gpu`) and `utils.build_command()` emits `--match-device` when GPU mode is active and the value is not `auto`.
 - **Bit depth combo item disabling**: uses `QStandardItemModel` — items are disabled (not removed) based on output format. Snaps to nearest valid selection automatically.
 - **Binary path resolution**: `utils._binary_path()` resolves `<repo>/build/dso_stacker` relative to `utils.py`. Raises `FileNotFoundError` with a helpful build instruction if absent.
 - **Dark theme**: Fusion style + custom `QPalette` applied in `main.py`. No external theme library required.
@@ -715,7 +717,7 @@ options:
   integration: kappa-sigma     kappa: 3.0     iterations: 3     batch_size: 16
   star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
   top_stars: 50     min_stars: 6
-  ransac_iters: 1000     ransac_thresh: 2.0     match_radius: 30.0     match_device: auto
+  triangle_iters: 1000     triangle_thresh: 2.0     match_radius: 30.0     match_device: auto
   bayer: auto     bit_depth: f32     tiff_compression: none
   stretch_min: null     stretch_max: null
   save_master_dir: ./master     wsor_clip: 0.1
