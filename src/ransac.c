@@ -324,9 +324,10 @@ static int build_triangle_hashes(const StarList *list,
 {
     int n = list->n;
     int count = 0;
+    int i;
 
 #pragma omp parallel for schedule(dynamic)
-    for (int i = 0; i < n - 2; i++) {
+    for (i = 0; i < n - 2; i++) {
         int j;
         for (j = i + 1; j < n - 1; j++) {
             int k;
@@ -374,8 +375,10 @@ static void vote_triangle_matches(const TriangleHash *ref_hashes, int n_ref_hash
                                   int n_ref_stars, int *votes,
                                   float eps)
 {
+    int s;
+
 #pragma omp parallel for schedule(dynamic)
-    for (int s = 0; s < n_src_hash; s++) {
+    for (s = 0; s < n_src_hash; s++) {
         const TriangleHash *sh = &src_hashes[s];
         float r1_min = sh->r1 - eps;
         float r1_max = sh->r1 + eps;
@@ -387,11 +390,11 @@ static void vote_triangle_matches(const TriangleHash *ref_hashes, int n_ref_hash
                 int idx0 = sh->v0 * n_ref_stars + rh->v0;
                 int idx1 = sh->v1 * n_ref_stars + rh->v1;
                 int idx2 = sh->v2 * n_ref_stars + rh->v2;
-#pragma omp atomic update
+#pragma omp atomic
                 votes[idx0] += 1;
-#pragma omp atomic update
+#pragma omp atomic
                 votes[idx1] += 1;
-#pragma omp atomic update
+#pragma omp atomic
                 votes[idx2] += 1;
             }
             r++;
