@@ -145,6 +145,8 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     int       color      = config->color_output;
     int       batch_size = PIPELINE_CPU_BATCH_SIZE;
     int       batch_n    = 0;
+    int       successful_frames = 0;
+    int       skipped_frames    = 0;
 
     /* Shared scratch (reused per frame) */
     float   *conv_buf    = NULL;
@@ -296,13 +298,15 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                 if (stars.n < config->min_stars ||
                     ref_stars.n < config->min_stars) {
                     fprintf(stderr,
-                            "pipeline_cpu: frame %d has too few stars (%d) "
-                            "for RANSAC (need %d)\n",
-                            i, stars.n, config->min_stars);
+                            "pipeline_cpu: skipping frame %d/%d "
+                            "(csv index=%d, path=%s): insufficient stars for RANSAC "
+                            "(ref=%d, frame=%d, min=%d)\n",
+                            pos + 1, n_frames, i + 1, frames[i].filepath,
+                            ref_stars.n, stars.n, config->min_stars);
                     free(stars.stars); image_free(&lum);
                     if (color) image_free(&raw);
-                    err = DSO_ERR_STAR_DETECT;
-                    free(order); goto cleanup;
+                    skipped_frames++;
+                    continue;
                 }
                 int n_inliers = 0;
                 err = ransac_compute_homography(&ref_stars, &stars,
@@ -311,12 +315,13 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                 free(stars.stars);
                 if (err != DSO_OK) {
                     fprintf(stderr,
-                            "pipeline_cpu: RANSAC failed for frame %d/%d "
-                            "(csv index=%d, path=%s, err=%d)\n",
+                            "pipeline_cpu: skipping frame %d/%d "
+                            "(csv index=%d, path=%s): RANSAC mismatch (err=%d)\n",
                             pos + 1, n_frames, i + 1, frames[i].filepath, (int)err);
                     image_free(&lum);
                     if (color) image_free(&raw);
-                    free(order); goto cleanup;
+                    skipped_frames++;
+                    continue;
                 }
                 printf("[Pipeline CPU] Frame %d/%d (csv index=%d): aligned with %d inlier(s)\n",
                        pos + 1, n_frames, i + 1, n_inliers);
@@ -379,6 +384,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
             }
 
             batch_n++;
+            successful_frames++;
 
             /* ---- Flush batch when full ---- */
             if (batch_n == batch_size) {
@@ -463,7 +469,8 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     }
 
     if (err == DSO_OK)
-        printf("pipeline_cpu: done.\n");
+        printf("pipeline_cpu: done. successful frames: %d/%d (skipped: %d)\n",
+               successful_frames, n_frames, skipped_frames);
 
 cleanup:
     free(ref_stars.stars);

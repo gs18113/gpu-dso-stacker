@@ -87,6 +87,8 @@ cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n
 
 **Color output**: when a Bayer pattern is active (from `--bayer` or the FITS `BAYERPAT` keyword), stage 4 debayers to separate R, G, B planes; stages 5–6 run once per channel; the output FITS has `NAXIS=3` with planes R=1/G=2/B=3. Star detection (stages 1–2) always uses luminance regardless of color mode.
 
+**RANSAC mismatch handling**: if a non-reference frame cannot be aligned (too few stars or RANSAC mismatch), that frame is skipped and processing continues. At the end, the CLI prints a summary with successful and skipped frame counts.
+
 **Calibration pre-processing** (applied to every raw frame before debayering when `--dark`/`--flat` are provided):
 
 | Step | What it does |

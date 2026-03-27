@@ -127,6 +127,8 @@ def build_command(
     argv += ["--ransac-iters",  str(opts["ransac_iters"])]
     argv += ["--ransac-thresh", str(opts["ransac_thresh"])]
     argv += ["--match-radius",  str(opts["match_radius"])]
+    if not opts.get("use_cpu") and opts.get("match_device", "auto") != "auto":
+        argv += ["--match-device", opts["match_device"]]
 
     # --- calibration ---
     for key, flag in (("dark", "--dark"), ("flat", "--flat"),

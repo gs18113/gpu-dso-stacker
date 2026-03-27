@@ -12,7 +12,7 @@ Sections
   Execution        CPU mode, batch size
   Integration      method, kappa, iterations
   Star Detection   star_sigma, moffat_alpha/beta, top_stars, min_stars
-  RANSAC           ransac_iters, ransac_thresh, match_radius
+  RANSAC           ransac_iters, ransac_thresh, match_radius, match_device
   Sensor           Bayer pattern override
   Output Format    bit depth, TIFF compression, stretch bounds
   Calibration      save_master_dir, wsor_clip
@@ -80,6 +80,7 @@ class StackingOptionsTab(QWidget):
             "ransac_iters":     self._ransac_iters_spin.value(),
             "ransac_thresh":    self._ransac_thresh_spin.value(),
             "match_radius":     self._match_radius_spin.value(),
+            "match_device":     self._match_device_combo.currentText(),
             "bayer":            self._bayer_combo.currentText(),
             "bit_depth":        self._bit_depth_combo.currentText(),
             "tiff_compression": self._tiff_compress_combo.currentText(),
@@ -112,6 +113,7 @@ class StackingOptionsTab(QWidget):
         self._ransac_iters_spin.setValue(      opts.get("ransac_iters", 1000))
         self._ransac_thresh_spin.setValue(     opts.get("ransac_thresh", 2.0))
         self._match_radius_spin.setValue(      opts.get("match_radius", 30.0))
+        self._set_combo(self._match_device_combo, opts.get("match_device", "auto"))
         self._set_combo(self._bayer_combo,     opts.get("bayer", "auto"))
         self._set_combo(self._bit_depth_combo, opts.get("bit_depth", "f32"))
         self._set_combo(self._tiff_compress_combo, opts.get("tiff_compression", "none"))
@@ -236,10 +238,14 @@ class StackingOptionsTab(QWidget):
         self._ransac_iters_spin  = _int_spin(10, 10000, 1000)
         self._ransac_thresh_spin = _dbl_spin(0.1, 50.0, 2.0, 1, 0.1)
         self._match_radius_spin  = _dbl_spin(1.0, 500.0, 30.0, 1, 1.0)
+        self._match_device_combo = QComboBox()
+        self._match_device_combo.addItems(["auto", "cpu", "gpu"])
+        self._match_device_lbl = QLabel("Match device:")
 
         form.addRow("Max iterations:",       self._ransac_iters_spin)
         form.addRow("Inlier threshold (px):", self._ransac_thresh_spin)
         form.addRow("Match radius (px):",     self._match_radius_spin)
+        form.addRow(self._match_device_lbl,   self._match_device_combo)
         return box
 
     def _build_sensor_group(self) -> QGroupBox:
@@ -350,6 +356,8 @@ class StackingOptionsTab(QWidget):
         # Batch size: only in GPU mode
         self._batch_lbl.setVisible(not use_cpu)
         self._batch_spin.setVisible(not use_cpu)
+        self._match_device_lbl.setVisible(not use_cpu)
+        self._match_device_combo.setVisible(not use_cpu)
 
         # TIFF compression: only for TIFF output
         is_tiff = (fmt == "tiff")

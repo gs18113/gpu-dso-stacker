@@ -31,6 +31,7 @@ _DEFAULT_OPTIONS: dict = {
     "ransac_iters": 1000,
     "ransac_thresh": 2.0,
     "match_radius": 30.0,
+    "match_device": "auto",
     "bayer": "auto",
     "bit_depth": "f32",
     "tiff_compression": "none",

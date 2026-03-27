@@ -180,13 +180,19 @@ static DsoError phase_detect_warp_integrate(
     CalibGpuCtx          *calib_ctx,
     IntegrationGpuCtx    *ctx_r,
     IntegrationGpuCtx    *ctx_g,
-    IntegrationGpuCtx    *ctx_b)
+    IntegrationGpuCtx    *ctx_b,
+    int                  *successful_frames_out,
+    int                  *skipped_frames_out)
 {
+    if (!successful_frames_out || !skipped_frames_out) return DSO_ERR_INVALID_ARG;
+
     DsoError     err           = DSO_OK;
     size_t       npix_f        = (size_t)W * H * sizeof(float);
     size_t       npix_b        = (size_t)W * H;
     int          color         = (ctx_g != NULL);
     int          batch_n       = 0;
+    int          successful_frames = 0;
+    int          skipped_frames = 0;
     int         *order         = NULL;
 
     cudaStream_t stream_copy   = 0;
@@ -303,6 +309,7 @@ static DsoError phase_detect_warp_integrate(
          * 4. CPU: CCL + CoM, then RANSAC (or store ref_stars).
          * ---------------------------------------------------------- */
         StarList stars = {NULL, 0};
+        int skip_current = 0;
         PIPE_CHECK(star_detect_cpu_ccl_com(mask_host, lum_host, conv_host,
                                             W, H, config->top_stars, &stars),
                    cleanup, fi->filepath);
@@ -321,61 +328,74 @@ static DsoError phase_detect_warp_integrate(
         } else {
             if (stars.n < config->min_stars) {
                 fprintf(stderr,
-                        "pipeline: frame %d has only %d star(s) "
-                        "(min_stars=%d) — cannot align\n",
-                        fi_idx, stars.n, config->min_stars);
-                free(stars.stars); err = DSO_ERR_STAR_DETECT; goto cleanup;
+                        "pipeline: skipping frame %d/%d "
+                        "(csv index=%d, path=%s): insufficient stars for RANSAC "
+                        "(ref=%d, frame=%d, min=%d)\n",
+                        pos + 1, n_frames, fi_idx + 1, fi->filepath,
+                        ref_stars.n, stars.n, config->min_stars);
+                free(stars.stars);
+                stars.stars = NULL;
+                skipped_frames++;
+                skip_current = 1;
             }
-            int n_inliers = 0;
-            if (config->use_gpu_ransac) {
-                StarPos *d_ref_stars = NULL;
-                StarPos *d_src_stars = NULL;
-                size_t ref_bytes = (size_t)ref_stars.n * sizeof(StarPos);
-                size_t src_bytes = (size_t)stars.n * sizeof(StarPos);
-                if (cudaMalloc((void **)&d_ref_stars, ref_bytes) != cudaSuccess ||
-                    cudaMalloc((void **)&d_src_stars, src_bytes) != cudaSuccess ||
-                    cudaMemcpyAsync(d_ref_stars, ref_stars.stars, ref_bytes,
-                                    cudaMemcpyHostToDevice, stream_compute) != cudaSuccess ||
-                    cudaMemcpyAsync(d_src_stars, stars.stars, src_bytes,
-                                    cudaMemcpyHostToDevice, stream_compute) != cudaSuccess ||
-                    cudaStreamSynchronize(stream_compute) != cudaSuccess) {
-                    if (d_ref_stars) cudaFree(d_ref_stars);
-                    if (d_src_stars) cudaFree(d_src_stars);
-                    free(stars.stars);
-                    err = DSO_ERR_CUDA;
-                    goto cleanup;
+            if (!skip_current) {
+                int n_inliers = 0;
+                if (config->use_gpu_ransac) {
+                    StarPos *d_ref_stars = NULL;
+                    StarPos *d_src_stars = NULL;
+                    size_t ref_bytes = (size_t)ref_stars.n * sizeof(StarPos);
+                    size_t src_bytes = (size_t)stars.n * sizeof(StarPos);
+                    if (cudaMalloc((void **)&d_ref_stars, ref_bytes) != cudaSuccess ||
+                        cudaMalloc((void **)&d_src_stars, src_bytes) != cudaSuccess ||
+                        cudaMemcpyAsync(d_ref_stars, ref_stars.stars, ref_bytes,
+                                        cudaMemcpyHostToDevice, stream_compute) != cudaSuccess ||
+                        cudaMemcpyAsync(d_src_stars, stars.stars, src_bytes,
+                                        cudaMemcpyHostToDevice, stream_compute) != cudaSuccess ||
+                        cudaStreamSynchronize(stream_compute) != cudaSuccess) {
+                        if (d_ref_stars) cudaFree(d_ref_stars);
+                        if (d_src_stars) cudaFree(d_src_stars);
+                        free(stars.stars);
+                        err = DSO_ERR_CUDA;
+                        goto cleanup;
+                    }
+                    err = ransac_compute_homography_gpu(d_ref_stars, ref_stars.n,
+                                                        d_src_stars, stars.n,
+                                                        &config->ransac,
+                                                        &fi->H, &n_inliers, stream_compute);
+                    cudaFree(d_ref_stars);
+                    cudaFree(d_src_stars);
+                } else {
+                    err = ransac_compute_homography(&ref_stars, &stars, &config->ransac,
+                                                    &fi->H, &n_inliers);
                 }
-                err = ransac_compute_homography_gpu(d_ref_stars, ref_stars.n,
-                                                    d_src_stars, stars.n,
-                                                    &config->ransac,
-                                                    &fi->H, &n_inliers, stream_compute);
-                cudaFree(d_ref_stars);
-                cudaFree(d_src_stars);
-            } else {
-                err = ransac_compute_homography(&ref_stars, &stars, &config->ransac,
-                                                &fi->H, &n_inliers);
+                free(stars.stars);
+                stars.stars = NULL;
+                if (err != DSO_OK) {
+                    fprintf(stderr,
+                            "pipeline: skipping frame %d/%d "
+                            "(csv index=%d, path=%s): RANSAC mismatch (err=%d)\n",
+                            pos + 1, n_frames, fi_idx + 1, fi->filepath, (int)err);
+                    skipped_frames++;
+                    skip_current = 1;
+                } else {
+                    printf("[Pipeline] Frame %d/%d (csv index=%d): aligned with %d inlier(s)\n",
+                           pos + 1, n_frames, fi_idx + 1, n_inliers);
+                }
             }
-            free(stars.stars);
-            if (err != DSO_OK) {
-                fprintf(stderr,
-                        "pipeline: RANSAC failed for frame %d/%d "
-                        "(csv index=%d, path=%s, err=%d)\n",
-                        pos + 1, n_frames, fi_idx + 1, fi->filepath, (int)err);
-                goto cleanup;
-            }
-            printf("[Pipeline] Frame %d/%d (csv index=%d): aligned with %d inlier(s)\n",
-                   pos + 1, n_frames, fi_idx + 1, n_inliers);
         }
 
         /* ----------------------------------------------------------
          * 5. GPU: Lanczos warp on stream_compute.
          *    d_raw[slot] is still valid (H2D completed at step 2 sync).
          * ---------------------------------------------------------- */
-        PIPE_CHECK(phase_warp(d_raw[slot], d_lum, d_ch_g, d_ch_b,
-                               W, H, color, pat, &fi->H, batch_n,
-                               ctx_r, ctx_g, ctx_b, stream_compute, fi->filepath),
-                   cleanup, fi->filepath);
-        batch_n++;
+        if (!skip_current) {
+            PIPE_CHECK(phase_warp(d_raw[slot], d_lum, d_ch_g, d_ch_b,
+                                   W, H, color, pat, &fi->H, batch_n,
+                                   ctx_r, ctx_g, ctx_b, stream_compute, fi->filepath),
+                       cleanup, fi->filepath);
+            batch_n++;
+            successful_frames++;
+        }
 
         /* ----------------------------------------------------------
          * 6. Pre-load next frame (overlaps with GPU warp above).
@@ -424,6 +444,8 @@ static DsoError phase_detect_warp_integrate(
     }
 
 cleanup:
+    *successful_frames_out = successful_frames;
+    *skipped_frames_out = skipped_frames;
     free(order);
     free(ref_stars.stars);
     free(lum_host); free(conv_host); free(mask_host);
@@ -460,6 +482,8 @@ DsoError pipeline_run(FrameInfo            *frames,
     DsoError           err       = DSO_OK;
     int                W         = 0;
     int                H         = 0;
+    int                successful_frames = 0;
+    int                skipped_frames = 0;
     IntegrationGpuCtx *ctx_r     = NULL;
     IntegrationGpuCtx *ctx_g     = NULL;
     IntegrationGpuCtx *ctx_b     = NULL;
@@ -498,8 +522,16 @@ DsoError pipeline_run(FrameInfo            *frames,
 
     PIPE_CHECK(phase_detect_warp_integrate(frames, n_frames, ref_idx, W, H,
                                             config, calib_ctx,
-                                            ctx_r, ctx_g, ctx_b),
+                                            ctx_r, ctx_g, ctx_b,
+                                            &successful_frames, &skipped_frames),
                done, "phase_detect_warp_integrate");
+
+    if (successful_frames <= 0) {
+        fprintf(stderr,
+                "pipeline: no successfully aligned frame available after RANSAC filtering\n");
+        err = DSO_ERR_RANSAC;
+        goto done;
+    }
 
     /* ---- Finalise: compute output image(s) and save ---- */
     printf("pipeline: saving to %s\n", config->output_file);
@@ -514,9 +546,9 @@ DsoError pipeline_run(FrameInfo            *frames,
             image_free(&img_r); image_free(&img_g); image_free(&img_b);
             err = DSO_ERR_ALLOC; goto done;
         }
-        err = integration_gpu_finalize(ctx_r, n_frames, &img_r, 0);
-        if (err == DSO_OK) err = integration_gpu_finalize(ctx_g, n_frames, &img_g, 0);
-        if (err == DSO_OK) err = integration_gpu_finalize(ctx_b, n_frames, &img_b, 0);
+        err = integration_gpu_finalize(ctx_r, successful_frames, &img_r, 0);
+        if (err == DSO_OK) err = integration_gpu_finalize(ctx_g, successful_frames, &img_g, 0);
+        if (err == DSO_OK) err = integration_gpu_finalize(ctx_b, successful_frames, &img_b, 0);
         if (err == DSO_OK)
             err = image_save_rgb(config->output_file, &img_r, &img_g, &img_b,
                                  &config->save_opts);
@@ -525,7 +557,7 @@ DsoError pipeline_run(FrameInfo            *frames,
         Image out = {NULL, W, H};
         out.data = (float *)calloc((size_t)W * H, sizeof(float));
         if (!out.data) { err = DSO_ERR_ALLOC; goto done; }
-        if (integration_gpu_finalize(ctx_r, n_frames, &out, 0) == DSO_OK)
+        if (integration_gpu_finalize(ctx_r, successful_frames, &out, 0) == DSO_OK)
             err = image_save(config->output_file, &out, &config->save_opts);
         else
             err = DSO_ERR_CUDA;
@@ -540,7 +572,8 @@ done:
     lanczos_gpu_cleanup();
 
     if (err == DSO_OK)
-        printf("pipeline: done.\n");
+        printf("pipeline: done. successful frames: %d/%d (skipped: %d)\n",
+               successful_frames, n_frames, skipped_frames);
     else
         fprintf(stderr, "pipeline: failed with error code %d\n", (int)err);
 

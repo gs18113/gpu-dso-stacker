@@ -486,9 +486,9 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames,
                            int ref_idx, const PipelineConfig *config);
 ```
 
-`pipeline_run`: GPU orchestrator. First line dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0` — zero GPU overhead. Processes frames in order `[ref_idx, non_ref_0, ...]` via `phase_detect_warp_integrate`: double-buffered `pinned[2]`/`d_raw[2]` + `stream_copy`/`stream_compute`. Per frame: `stream_compute` waits for `e_h2d[slot]` → calib → debayer_lum → star_detect → `cudaStreamSynchronize` → D2H → CCL+CoM → RANSAC → Lanczos warp on `stream_compute`; then CPU pre-loads next frame + async H2D on `stream_copy` (overlaps with the warp). At batch boundaries, H2D of the next frame also overlaps mini-batch integration. The `cudaStreamSynchronize` for D2H also implicitly frees `d_raw[next_slot]` (clears the prior warp), so no `e_gpu` event is needed. For color output allocates ctx_r/g/b + d_ch_g/d_ch_b; `phase_warp` calls `debayer_gpu_rgb_d2d` + 3× Lanczos per frame. Finalizes via `image_save_rgb`/`image_save`.
+`pipeline_run`: GPU orchestrator. First line dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0` — zero GPU overhead. Processes frames in order `[ref_idx, non_ref_0, ...]` via `phase_detect_warp_integrate`: double-buffered `pinned[2]`/`d_raw[2]` + `stream_copy`/`stream_compute`. Per frame: `stream_compute` waits for `e_h2d[slot]` → calib → debayer_lum → star_detect → `cudaStreamSynchronize` → D2H → CCL+CoM → RANSAC → Lanczos warp on `stream_compute`; then CPU pre-loads next frame + async H2D on `stream_copy` (overlaps with the warp). At batch boundaries, H2D of the next frame also overlaps mini-batch integration. The `cudaStreamSynchronize` for D2H also implicitly frees `d_raw[next_slot]` (clears the prior warp), so no `e_gpu` event is needed. For color output allocates ctx_r/g/b + d_ch_g/d_ch_b; `phase_warp` calls `debayer_gpu_rgb_d2d` + 3× Lanczos per frame. Finalizes via `image_save_rgb`/`image_save`. **Non-reference frames that fail alignment (too few stars or RANSAC mismatch) are skipped, not fatal; successful-frame count is passed to `integration_gpu_finalize`.**
 
-`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Processes frames in order `[ref_idx, non_ref_0, ...]` (single pass, each file loaded once). Per frame: debayer_cpu (lum) → star_detect_cpu_detect → ccl_com → ransac → batch warp+integrate. Mini-batched (PIPELINE_CPU_BATCH_SIZE=32). For color: debayer_cpu_rgb → 3× lanczos_transform_cpu; finalizes via `image_save_rgb`.
+`pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Processes frames in order `[ref_idx, non_ref_0, ...]` (single pass, each file loaded once). Per frame: debayer_cpu (lum) → star_detect_cpu_detect → ccl_com → ransac → batch warp+integrate. Mini-batched (PIPELINE_CPU_BATCH_SIZE=32). For color: debayer_cpu_rgb → 3× lanczos_transform_cpu; finalizes via `image_save_rgb`. **Non-reference frames that fail alignment (too few stars or RANSAC mismatch) are skipped and processing continues.**
 
 ---
 
@@ -514,6 +514,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames,
 - **DLT produces backward H directly**: row setup uses `(ref_x, ref_y)` as H input and `(src_x, src_y)` as output → null vector = backward map (ref → src). No post-inversion needed.
 - **Moffat constant memory cap**: max kernel radius is 15 (alpha ≤ 5 → R = ceil(3·alpha) ≤ 15, diameter 31, 961 floats × 4 = ~3.8 KB within 64 KB constant limit).
 - **Single-pass pipeline**: each frame is loaded from disk exactly once. Star detection, RANSAC, and warp all run in the same pass before the next frame is loaded. No separate Phase 1 / Phase 2; no 11-column pre-computed transform path. The only CSV format is 2-column (`filepath, is_reference`).
+- **RANSAC mismatch policy**: non-reference frames that fail alignment are skipped (not fatal). Both CPU and GPU pipelines print a final summary: `successful frames: X/Y (skipped: Z)`. Reference-frame alignment failure still aborts.
 - **CPU vs GPU output agreement**: not bit-identical due to different Moffat conv precision (→ slightly different homographies), different Lanczos implementations (nppi vs hand-coded), and different integration paths. Empirical PSNR ≈ 44.6 dB; mean relative error ≈ 0.25% in the interior on 10 × 4656×3520 frames.
 - **`lanczos_transform_cpu` identity fast path**: if H is identity and src/dst dimensions match, falls back to `memcpy` before entering the warp loop.
 - **`lanczos_transform_cpu` weight precomputation**: `wx_arr[6]` and `wy_arr[6]` are computed once before the 6×6 tap loop, reducing `lanczos_weight` calls from 42 to 12 per destination pixel.
@@ -693,6 +694,7 @@ src/GUI/
 - **Async FITS metadata**: `FitsMetaWorker(QRunnable)` submitted to `QThreadPool.globalInstance()` so reading FITS headers never blocks the UI thread. Uses a minimal pure-Python FITS header parser (`_read_fits_keywords` in `fits_meta.py`) — reads 2880-byte blocks, 80-byte cards, stops at END — no external library needed.
 - **Bias / Darkflat mutual exclusion**: `QTabWidget.setTabEnabled(False)` grays out and disables the opposing tab; `setTabToolTip` explains why. Checked again at run time.
 - **Conditional visibility**: single `_update_visibility()` slot in `StackingOptionsTab` connected to all relevant widget change signals (integration combo, CPU checkbox, output path, bit depth).
+- **RANSAC match-device in GUI**: `StackingOptionsTab` exposes `match_device` (`auto|cpu|gpu`) and `utils.build_command()` emits `--match-device` when GPU mode is active and the value is not `auto`.
 - **Bit depth combo item disabling**: uses `QStandardItemModel` — items are disabled (not removed) based on output format. Snaps to nearest valid selection automatically.
 - **Binary path resolution**: `utils._binary_path()` resolves `<repo>/build/dso_stacker` relative to `utils.py`. Raises `FileNotFoundError` with a helpful build instruction if absent.
 - **Dark theme**: Fusion style + custom `QPalette` applied in `main.py`. No external theme library required.
@@ -713,7 +715,7 @@ options:
   integration: kappa-sigma     kappa: 3.0     iterations: 3     batch_size: 16
   star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
   top_stars: 50     min_stars: 6
-  ransac_iters: 1000     ransac_thresh: 2.0     match_radius: 30.0
+  ransac_iters: 1000     ransac_thresh: 2.0     match_radius: 30.0     match_device: auto
   bayer: auto     bit_depth: f32     tiff_compression: none
   stretch_min: null     stretch_max: null
   save_master_dir: ./master     wsor_clip: 0.1
