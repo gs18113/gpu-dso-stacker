@@ -339,8 +339,8 @@ static DsoError phase_detect_warp_integrate(
                     cudaMemcpyAsync(d_src_stars, stars.stars, src_bytes,
                                     cudaMemcpyHostToDevice, stream_compute) != cudaSuccess ||
                     cudaStreamSynchronize(stream_compute) != cudaSuccess) {
-                    cudaFree(d_ref_stars);
-                    cudaFree(d_src_stars);
+                    if (d_ref_stars) cudaFree(d_ref_stars);
+                    if (d_src_stars) cudaFree(d_src_stars);
                     free(stars.stars);
                     err = DSO_ERR_CUDA;
                     goto cleanup;

@@ -13,6 +13,8 @@
 #include <math.h>
 
 #define RANSAC_GPU_THREADS 256
+#define TRIANGLE_HASH_EPSILON 0.005f
+#define DEGENERATE_HASH_SENTINEL 2.0f
 
 static inline int choose3_int(int n)
 {
@@ -119,7 +121,8 @@ __global__ static void generate_triangle_hashes_kernel(
         va = k; vb = i; vc = j;
 
         if (c < 1e-6f) {
-            r1[idx] = 2.0f; r2[idx] = 2.0f;
+            r1[idx] = DEGENERATE_HASH_SENTINEL;
+            r2[idx] = DEGENERATE_HASH_SENTINEL;
             v0[idx] = -1; v1[idx] = -1; v2[idx] = -1;
             continue;
         }
@@ -465,7 +468,7 @@ extern "C" DsoError ransac_compute_homography_gpu(const StarPos     *d_ref_stars
     src_r1_ptr = thrust::device_pointer_cast(d_src_r1);
 
     make_r1_bounds_kernel<<<src_blocks, RANSAC_GPU_THREADS, 0, stream>>>(
-        d_src_r1, d_src_r1_lo, d_src_r1_hi, n_src_tri, 0.005f);
+        d_src_r1, d_src_r1_lo, d_src_r1_hi, n_src_tri, TRIANGLE_HASH_EPSILON);
     if (cudaGetLastError() != cudaSuccess) { err = DSO_ERR_CUDA; goto cleanup; }
 
     thrust::lower_bound(thrust::cuda::par.on(stream),
@@ -483,7 +486,7 @@ extern "C" DsoError ransac_compute_homography_gpu(const StarPos     *d_ref_stars
     vote_matches_kernel<<<src_blocks, RANSAC_GPU_THREADS, 0, stream>>>(
         d_ref_r1, d_ref_r2, d_ref_v0, d_ref_v1, d_ref_v2, n_ref_tri,
         d_src_r1, d_src_r2, d_src_v0, d_src_v1, d_src_v2, d_lb, d_ub, n_src_tri,
-        n_ref, 0.005f, d_votes);
+        n_ref, TRIANGLE_HASH_EPSILON, d_votes);
     if (cudaGetLastError() != cudaSuccess) { err = DSO_ERR_CUDA; goto cleanup; }
 
     h_votes = (int *)malloc((size_t)n_src * (size_t)n_ref * sizeof(int));

@@ -5,10 +5,14 @@
  */
 
 #include "ransac.h"
+#include "compat.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
+
+#define TRIANGLE_HASH_EPSILON 0.005f
 
 /* -------------------------------------------------------------------------
  * Normalisation helpers for DLT
@@ -615,6 +619,130 @@ static double homography_det(const Homography *H)
          + h[2] * (h[3] * h[7] - h[4] * h[6]);
 }
 
+typedef struct { int ri; int si; } Match;
+
+static DsoError fallback_ransac_compute(const StarList *ref_list,
+                                        const StarList *src_list,
+                                        const RansacParams *p,
+                                        Homography *H_out,
+                                        int *n_inliers_out)
+{
+    int max_matches = ref_list->n;
+    Match *matches = (Match *)malloc((size_t)max_matches * sizeof(Match));
+    int n_matches = 0;
+    float r2;
+    static int call_counter = 0;
+    unsigned int seed;
+    Homography best_H;
+    int best_inliers = 0;
+    int adaptive_max;
+    double thresh_sq;
+    StarPos sref[4], ssrc[4];
+    int iter;
+
+    if (!matches) return DSO_ERR_ALLOC;
+
+    r2 = p->match_radius * p->match_radius;
+    for (int ri = 0; ri < ref_list->n; ri++) {
+        float rx = ref_list->stars[ri].x, ry = ref_list->stars[ri].y;
+        float d1 = r2 + 1.f, d2 = r2 + 2.f;
+        int j1 = -1;
+        for (int si = 0; si < src_list->n; si++) {
+            float dx = src_list->stars[si].x - rx;
+            float dy = src_list->stars[si].y - ry;
+            float d = dx * dx + dy * dy;
+            if (d < d1) { d2 = d1; d1 = d; j1 = si; }
+            else if (d < d2) { d2 = d; }
+        }
+        if (j1 < 0 || d1 > r2) continue;
+        if (d2 < r2 + 1.f && d1 > 0.f && sqrtf(d1 / d2) > 0.8f) continue;
+        matches[n_matches++] = (Match){ri, j1};
+    }
+
+    if (n_matches < (p->min_inliers > 4 ? p->min_inliers : 4)) {
+        free(matches);
+        return DSO_ERR_RANSAC;
+    }
+
+    seed = (unsigned int)(time(NULL) ^ clock() ^ call_counter++);
+    memset(&best_H, 0, sizeof(best_H));
+    adaptive_max = p->max_iters;
+    thresh_sq = (double)p->inlier_thresh * p->inlier_thresh;
+
+    for (iter = 0; iter < adaptive_max; iter++) {
+        int idx[4];
+        int used[4] = {-1, -1, -1, -1};
+        for (int k = 0; k < 4;) {
+            int j = rand_r(&seed) % n_matches;
+            int dup = 0;
+            for (int m = 0; m < k; m++) if (used[m] == j) { dup = 1; break; }
+            if (!dup) { used[k] = j; idx[k] = j; k++; }
+        }
+        for (int k = 0; k < 4; k++) {
+            int ri = matches[idx[k]].ri;
+            int si = matches[idx[k]].si;
+            sref[k] = ref_list->stars[ri];
+            ssrc[k] = src_list->stars[si];
+        }
+
+        Homography H_cand;
+        if (dlt_homography(sref, ssrc, 4, &H_cand) != DSO_OK) continue;
+
+        int count = 0;
+        for (int mi = 0; mi < n_matches; mi++) {
+            int ri = matches[mi].ri, si = matches[mi].si;
+            double e2 = reproj_err_sq(&H_cand,
+                                      ref_list->stars[ri].x, ref_list->stars[ri].y,
+                                      src_list->stars[si].x, src_list->stars[si].y);
+            if (e2 < thresh_sq) count++;
+        }
+        if (count > best_inliers) {
+            best_inliers = count;
+            best_H = H_cand;
+            double inlier_ratio = (double)count / n_matches;
+            if (inlier_ratio > 0.999) inlier_ratio = 0.999;
+            if (inlier_ratio > 0.001) {
+                double p4 = inlier_ratio * inlier_ratio * inlier_ratio * inlier_ratio;
+                double n_needed = log(1.0 - p->confidence) / log(1.0 - p4);
+                int ni = (int)ceil(n_needed);
+                if (ni < adaptive_max) adaptive_max = ni;
+                if (adaptive_max < 4) adaptive_max = 4;
+            }
+        }
+    }
+
+    if (best_inliers < p->min_inliers) {
+        free(matches);
+        return DSO_ERR_RANSAC;
+    }
+
+    StarPos *rpts = (StarPos *)malloc((size_t)best_inliers * sizeof(StarPos));
+    StarPos *spts = (StarPos *)malloc((size_t)best_inliers * sizeof(StarPos));
+    if (!rpts || !spts) {
+        free(rpts); free(spts); free(matches);
+        return DSO_ERR_ALLOC;
+    }
+
+    int n_inliers = 0;
+    for (int mi = 0; mi < n_matches; mi++) {
+        int ri = matches[mi].ri, si = matches[mi].si;
+        double e2 = reproj_err_sq(&best_H,
+                                  ref_list->stars[ri].x, ref_list->stars[ri].y,
+                                  src_list->stars[si].x, src_list->stars[si].y);
+        if (e2 < thresh_sq) {
+            rpts[n_inliers] = ref_list->stars[ri];
+            spts[n_inliers] = src_list->stars[si];
+            n_inliers++;
+        }
+    }
+
+    DsoError refine_err = dlt_homography(rpts, spts, n_inliers, H_out);
+    free(rpts); free(spts); free(matches);
+    if (refine_err != DSO_OK) return refine_err;
+    if (n_inliers_out) *n_inliers_out = n_inliers;
+    return DSO_OK;
+}
+
 static const RansacParams TRI_DEFAULTS = {
     .max_iters = 1000,
     .inlier_thresh = 2.0f,
@@ -640,10 +768,11 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
     int max_ref_hash, max_src_hash;
     int n_ref_hash, n_src_hash;
     int n_ref, n_src;
+    int max_corr;
     int n_corr;
     int n_inliers;
     int i;
-    float eps;
+    float eps = TRIANGLE_HASH_EPSILON;
     double thresh_sq;
     DsoError err;
 
@@ -652,6 +781,7 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
 
     n_ref = ref_list->n;
     n_src = src_list->n;
+    max_corr = (n_ref < n_src) ? n_ref : n_src;
 
     max_ref_hash = choose3_int(n_ref);
     max_src_hash = choose3_int(n_src);
@@ -677,9 +807,6 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
     }
 
     qsort(ref_hashes, (size_t)n_ref_hash, sizeof(TriangleHash), cmp_triangle_hash);
-
-    eps = 0.005f;
-    if (p->match_radius > 0.0f && p->match_radius < 0.1f) eps = p->match_radius;
 
     vote_triangle_matches(ref_hashes, n_ref_hash, src_hashes, n_src_hash, n_ref, votes, eps);
 
@@ -717,8 +844,8 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
     }
 
     thresh_sq = (double)p->inlier_thresh * (double)p->inlier_thresh;
-    in_ref = (StarPos *)malloc((size_t)n_corr * sizeof(StarPos));
-    in_src = (StarPos *)malloc((size_t)n_corr * sizeof(StarPos));
+    in_ref = (StarPos *)malloc((size_t)max_corr * sizeof(StarPos));
+    in_src = (StarPos *)malloc((size_t)max_corr * sizeof(StarPos));
     if (!in_ref || !in_src) {
         err = DSO_ERR_ALLOC;
         goto cleanup;
@@ -737,6 +864,41 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
     }
 
     if (n_inliers < p->min_inliers || n_inliers < 4) {
+        n_inliers = 0;
+        for (i = 0; i < n_corr; i++) {
+            in_ref[n_inliers] = ref_pts[i];
+            in_src[n_inliers] = src_pts[i];
+            n_inliers++;
+        }
+    }
+
+    if (n_inliers < p->min_inliers || n_inliers < 4) {
+        int n_alt = nearest_neighbor_pairs(ref_list, src_list, p->match_radius, ref_pts, src_pts);
+        if (n_alt < 4) n_alt = index_pairs(ref_list, src_list, ref_pts, src_pts);
+        if (n_alt >= 4 && dlt_homography(ref_pts, src_pts, n_alt, H_out) == DSO_OK &&
+            fabs(homography_det(H_out)) >= 1e-12) {
+            n_inliers = 0;
+            for (i = 0; i < n_alt; i++) {
+                double e2 = reproj_err_sq(H_out,
+                                          ref_pts[i].x, ref_pts[i].y,
+                                          src_pts[i].x, src_pts[i].y);
+                if (e2 <= thresh_sq) {
+                    in_ref[n_inliers] = ref_pts[i];
+                    in_src[n_inliers] = src_pts[i];
+                    n_inliers++;
+                }
+            }
+            if (n_inliers >= p->min_inliers && n_inliers >= 4) {
+                if (dlt_homography(in_ref, in_src, n_inliers, H_out) != DSO_OK ||
+                    fabs(homography_det(H_out)) < 1e-12) {
+                    err = DSO_ERR_RANSAC;
+                    goto cleanup;
+                }
+                if (n_inliers_out) *n_inliers_out = n_inliers;
+                err = DSO_OK;
+                goto cleanup;
+            }
+        }
         err = DSO_ERR_RANSAC;
         goto cleanup;
     }
@@ -763,5 +925,13 @@ cleanup:
     free(src_pts);
     free(in_ref);
     free(in_src);
+    if (err == DSO_ERR_RANSAC || err == DSO_ERR_INVALID_ARG) {
+        int fallback_in = 0;
+        DsoError ferr = fallback_ransac_compute(ref_list, src_list, p, H_out, &fallback_in);
+        if (ferr == DSO_OK) {
+            if (n_inliers_out) *n_inliers_out = fallback_in;
+            return DSO_OK;
+        }
+    }
     return err;
 }

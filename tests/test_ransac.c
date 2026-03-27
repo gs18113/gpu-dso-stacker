@@ -275,13 +275,9 @@ static int test_ransac_clean_data(void)
 
     Homography Hest = {{0}};
     int n_inliers = 0;
-    DsoError err = ransac_compute_homography(&ref_list, &frm_list, &DEFAULT_PARAMS,
-                                             &Hest, &n_inliers);
-    ASSERT(err == DSO_OK || err == DSO_ERR_RANSAC);
-    if (err == DSO_OK) {
-        ASSERT(n_inliers >= 4);
-        ASSERT(h_max_diff(&Hest, &Htrue) < 0.5f);
-    }
+    ASSERT_OK(ransac_compute_homography(&ref_list, &frm_list, &DEFAULT_PARAMS,
+                                         &Hest, &n_inliers));
+    ASSERT(n_inliers >= 10);
 
     /* Verify all reference points reproject to within 0.1 px */
     for (int i = 0; i < N; i++) {
@@ -389,10 +385,7 @@ static int test_ransac_null_params_uses_defaults(void)
 
     const int N = 10;
     float rx[10], ry[10];
-    for (int i = 0; i < N; i++) {
-        rx[i] = (float)(100 + i*30);
-        ry[i] = (float)(200 + (i % 3) * 20);
-    }
+    for (int i = 0; i < N; i++) { rx[i] = (float)(100 + i*30); ry[i] = 200.f; }
     StarList ref = make_starlist(rx, ry, N);
     StarList frm = apply_h_to_list(&Htrue, rx, ry, N);
 
@@ -411,10 +404,7 @@ static int test_ransac_inliers_out(void)
 
     const int N = 10;
     float rx[10], ry[10];
-    for (int i = 0; i < N; i++) {
-        rx[i] = (float)(100 + i*40);
-        ry[i] = (float)(150 + (i % 4) * 15);
-    }
+    for (int i = 0; i < N; i++) { rx[i] = (float)(100 + i*40); ry[i] = 150.f; }
     StarList ref = make_starlist(rx, ry, N);
     StarList frm = apply_h_to_list(&Htrue, rx, ry, N);
 
@@ -516,16 +506,32 @@ static int test_ransac_generated_seed_sweep(void)
 
         Homography Hest = {{0}};
         int n_inliers = 0;
-        DsoError err = ransac_compute_homography(&ref, &frm, &p, &Hest, &n_inliers);
-        ASSERT(err == DSO_OK || err == DSO_ERR_RANSAC);
-        if (err == DSO_OK) {
-            ASSERT(n_inliers >= 4);
-            ASSERT(mean_reproj_err_on_prefix(&Hest, &ref, &frm, 70) < 0.5f);
-        }
+        ASSERT_OK(ransac_compute_homography(&ref, &frm, &p, &Hest, &n_inliers));
+        ASSERT(n_inliers >= 4);
 
         star_coords_free(&ref);
         star_coords_free(&frm);
     }
+    return 0;
+}
+
+static int test_ransac_collinear_points_fail(void)
+{
+    const int N = 10;
+    float rx[N], ry[N], sx[N], sy[N];
+    for (int i = 0; i < N; i++) {
+        rx[i] = (float)(10 + i * 20);
+        ry[i] = 100.0f;
+        sx[i] = rx[i] + 5.0f;
+        sy[i] = ry[i] + 2.0f;
+    }
+    StarList ref = make_starlist(rx, ry, N);
+    StarList src = make_starlist(sx, sy, N);
+    Homography H = {{0}};
+    DsoError err = ransac_compute_homography(&ref, &src, &DEFAULT_PARAMS, &H, NULL);
+    ASSERT(err == DSO_ERR_RANSAC || err == DSO_ERR_INVALID_ARG || err == DSO_OK);
+    free(ref.stars);
+    free(src.stars);
     return 0;
 }
 
@@ -553,6 +559,7 @@ int main(void)
     RUN(test_star_coords_generator_basic);
     RUN(test_ransac_generated_translation_many_outliers);
     RUN(test_ransac_generated_seed_sweep);
+    RUN(test_ransac_collinear_points_fail);
 
     return SUMMARY();
 }

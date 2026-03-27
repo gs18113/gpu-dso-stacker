@@ -477,7 +477,7 @@ int main(int argc, char **argv)
     if (use_cpu && cfg.use_gpu_ransac) {
         fprintf(stderr,
                 "Error: --match-device gpu is not supported together with --cpu.\n"
-                "  Use --match-device cpu or --match-device auto with --cpu.\n");
+                "  Use --match-device cpu with --cpu (auto follows stacking device).\n");
         return 1;
     }
     /* color_output is set after CSV parsing and ref_idx resolution below */
