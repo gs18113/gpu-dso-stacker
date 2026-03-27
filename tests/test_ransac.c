@@ -517,7 +517,7 @@ static int test_ransac_generated_seed_sweep(void)
 
 static int test_ransac_collinear_points_fail(void)
 {
-    const int N = 10;
+    enum { N = 10 };
     float rx[N], ry[N], sx[N], sy[N];
     for (int i = 0; i < N; i++) {
         rx[i] = (float)(10 + i * 20);
