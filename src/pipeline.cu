@@ -376,6 +376,7 @@ static DsoError phase_detect_warp_integrate(
                             "(csv index=%d, path=%s): RANSAC mismatch (err=%d)\n",
                             pos + 1, n_frames, fi_idx + 1, fi->filepath, (int)err);
                     skipped_frames++;
+                    err = DSO_OK;
                     skip_current = 1;
                 } else {
                     printf("[Pipeline] Frame %d/%d (csv index=%d): aligned with %d inlier(s)\n",

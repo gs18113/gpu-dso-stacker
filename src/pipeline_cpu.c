@@ -306,6 +306,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                     free(stars.stars); image_free(&lum);
                     if (color) image_free(&raw);
                     skipped_frames++;
+                    err = DSO_OK;
                     continue;
                 }
                 int n_inliers = 0;
@@ -321,6 +322,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                     image_free(&lum);
                     if (color) image_free(&raw);
                     skipped_frames++;
+                    err = DSO_OK;
                     continue;
                 }
                 printf("[Pipeline CPU] Frame %d/%d (csv index=%d): aligned with %d inlier(s)\n",
