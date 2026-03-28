@@ -116,7 +116,7 @@ def build_command(
     if not opts.get("use_cpu"):
         argv += ["--batch-size", str(opts["batch_size"])]
 
-    # --- star detection (always passed; CLI ignores for 11-col CSV) ---
+    # --- star detection (always used with the GUI's 2-column CSV) ---
     argv += ["--star-sigma",    str(opts["star_sigma"])]
     argv += ["--moffat-alpha",  str(opts["moffat_alpha"])]
     argv += ["--moffat-beta",   str(opts["moffat_beta"])]

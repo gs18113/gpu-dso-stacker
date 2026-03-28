@@ -213,7 +213,7 @@ class StackingOptionsTab(QWidget):
         return box
 
     def _build_star_detect_group(self) -> QGroupBox:
-        box = QGroupBox("Star Detection  (used when no pre-computed homographies)")
+        box = QGroupBox("Star Detection")
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -231,7 +231,7 @@ class StackingOptionsTab(QWidget):
         return box
 
     def _build_ransac_group(self) -> QGroupBox:
-        box = QGroupBox("Triangle Matching Alignment  (used when no pre-computed homographies)")
+        box = QGroupBox("Triangle Matching Alignment")
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
