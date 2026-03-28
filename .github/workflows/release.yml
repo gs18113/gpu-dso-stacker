@@ -107,6 +107,14 @@ jobs:
           sub-packages: '["nvcc", "cudart", "npp", "npp_dev", "visual_studio_integration"]'
 
       - name: Setup vcpkg
+        id: setup-vcpkg-1
+        continue-on-error: true
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Retry setup vcpkg on transient failure
+        if: steps.setup-vcpkg-1.outcome == 'failure'
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgJsonGlob: 'vcpkg.json'
@@ -168,7 +176,7 @@ jobs:
           path: artifact-cpu/
 
   # ==================================================================
-  # macOS (Apple Silicon): Metal scaffold build + focused CPU tests
+  # macOS (Apple Silicon): build Metal-enabled + CPU-only CLI binaries
   # ==================================================================
   macos-metal:
     runs-on: macos-14
@@ -182,28 +190,51 @@ jobs:
           brew update
           brew install cfitsio libtiff libpng pkg-config libomp
 
-      - name: Build (Metal scaffold, CUDA off)
+      - name: Build (Metal-enabled)
         run: |
           BREW_PREFIX="$(brew --prefix)"
           LIBOMP_PREFIX="$(brew --prefix libomp)"
-          cmake -B build \
+          cmake -B build-metal \
             -DCMAKE_BUILD_TYPE=Release \
             -DDSO_ENABLE_CUDA=OFF \
             -DDSO_ENABLE_METAL=ON \
             -DCMAKE_PREFIX_PATH="${BREW_PREFIX}" \
             -DOpenMP_ROOT="${LIBOMP_PREFIX}" \
-            -DCMAKE_INSTALL_PREFIX=install
-          cmake --build build --parallel
-          cmake --install build
+            -DCMAKE_INSTALL_PREFIX=install-metal
+          cmake --build build-metal --parallel
+          cmake --install build-metal
 
-      - name: Run focused tests
-        run: cd build && ctest --output-on-failure -V -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
+      - name: Run focused tests (Metal-enabled)
+        run: cd build-metal && ctest --output-on-failure -V -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
 
-      - name: Upload CLI binary
+      - name: Build (CPU-only)
+        run: |
+          BREW_PREFIX="$(brew --prefix)"
+          LIBOMP_PREFIX="$(brew --prefix libomp)"
+          cmake -B build-cpu \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDSO_ENABLE_CUDA=OFF \
+            -DDSO_ENABLE_METAL=OFF \
+            -DCMAKE_PREFIX_PATH="${BREW_PREFIX}" \
+            -DOpenMP_ROOT="${LIBOMP_PREFIX}" \
+            -DCMAKE_INSTALL_PREFIX=install-cpu
+          cmake --build build-cpu --parallel
+          cmake --install build-cpu
+
+      - name: Run focused tests (CPU-only)
+        run: cd build-cpu && ctest --output-on-failure -V -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
+
+      - name: Upload Metal-enabled CLI binary
         uses: actions/upload-artifact@v4
         with:
-          name: dso-stacker-macos-arm64
-          path: install/bin/dso_stacker
+          name: dso-stacker-macos-arm64-metal
+          path: install-metal/bin/dso_stacker
+
+      - name: Upload CPU-only CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dso-stacker-macos-arm64-cpu
+          path: install-cpu/bin/dso_stacker
 
   # ==================================================================
   # GUI package (Linux)
@@ -293,7 +324,7 @@ jobs:
       - name: Download CLI binary
         uses: actions/download-artifact@v4
         with:
-          name: dso-stacker-macos-arm64
+          name: dso-stacker-macos-arm64-cpu
           path: bundled_bin/
 
       - name: Install Python dependencies
@@ -345,7 +376,8 @@ jobs:
         run: |
           tar czf dso-stacker-cli-linux-x86_64-cpu.tar.gz   -C dso-stacker-linux-x86_64-cpu .
           tar czf dso-stacker-cli-linux-x86_64-gpu.tar.gz   -C dso-stacker-linux-x86_64-gpu .
-          tar czf dso-stacker-cli-macos-arm64.tar.gz    -C dso-stacker-macos-arm64 .
+          tar czf dso-stacker-cli-macos-arm64-cpu.tar.gz    -C dso-stacker-macos-arm64-cpu .
+          tar czf dso-stacker-cli-macos-arm64-metal.tar.gz  -C dso-stacker-macos-arm64-metal .
           tar czf dso-stacker-gui-linux-x86_64.tar.gz    -C dso-stacker-gui-linux-x86_64 .
           tar czf dso-stacker-gui-macos-arm64.tar.gz     -C dso-stacker-gui-macos-arm64 .
           cd dso-stacker-windows-x86_64-cpu && zip -r ../dso-stacker-cli-windows-x86_64-cpu.zip . && cd ..
@@ -360,7 +392,8 @@ jobs:
           files: |
             dso-stacker-cli-linux-x86_64-cpu.tar.gz
             dso-stacker-cli-linux-x86_64-gpu.tar.gz
-            dso-stacker-cli-macos-arm64.tar.gz
+            dso-stacker-cli-macos-arm64-cpu.tar.gz
+            dso-stacker-cli-macos-arm64-metal.tar.gz
             dso-stacker-gui-linux-x86_64.tar.gz
             dso-stacker-gui-macos-arm64.tar.gz
             dso-stacker-cli-windows-x86_64-cpu.zip
