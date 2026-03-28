@@ -39,6 +39,7 @@ sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
 
 from fits_meta import FitsMetaWorker
 from utils import format_size
+from ui_density import get_ui_density
 
 _FITS_EXTS = {".fit", ".fits", ".fts"}
 
@@ -71,17 +72,18 @@ class FrameTableWidget(QWidget):
     # ------------------------------------------------------------------ #
 
     def _setup_ui(self) -> None:
+        density = get_ui_density()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(density.main_spacing)
 
         # Toolbar
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(6)
+        toolbar.setSpacing(density.toolbar_spacing)
         self._btn_add = QPushButton("Add Files…")
-        self._btn_add.setFixedHeight(32)
+        self._btn_add.setFixedHeight(density.table_button_h)
         self._btn_remove = QPushButton("Remove Selected")
-        self._btn_remove.setFixedHeight(32)
+        self._btn_remove.setFixedHeight(density.table_button_h)
         toolbar.addWidget(self._btn_add)
         toolbar.addWidget(self._btn_remove)
         toolbar.addStretch()

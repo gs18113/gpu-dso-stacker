@@ -746,6 +746,7 @@ src/GUI/
 - **Binary path resolution**: `utils._binary_path()` resolves `<repo>/build/dso_stacker` relative to `utils.py`. Raises `FileNotFoundError` with a helpful build instruction if absent.
 - **Dark theme**: Fusion style + custom `QPalette` applied in `main.py`. No external theme library required.
 - **GUI styling split**: `main.py` now applies an app-wide Qt stylesheet (tabs, tables, inputs, menus, group boxes) on top of the dark `QPalette`, while `main_window.py` keeps control-specific Run/Abort/Log styling.
+- **GUI density presets**: spacing/size density is selectable via `DSO_GUI_DENSITY=compact|comfortable|airy` (default `comfortable`) and consumed by `ui_density.py` from `main.py`, `main_window.py`, `frame_table.py`, and `stacking_options_tab.py`.
 
 ### YAML project schema
 

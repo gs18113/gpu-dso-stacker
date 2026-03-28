@@ -46,6 +46,7 @@ from utils import build_command, write_calib_list, write_csv
 from widgets.calib_tab import CalibTab
 from widgets.light_tab import LightTab
 from widgets.stacking_options_tab import StackingOptionsTab
+from ui_density import get_ui_density
 
 
 class MainWindow(QMainWindow):
@@ -68,11 +69,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
 
     def _setup_ui(self) -> None:
+        density = get_ui_density()
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(6)
+        root.setContentsMargins(density.main_margin, density.main_margin, density.main_margin, density.main_margin)
+        root.setSpacing(density.main_spacing)
 
         # ---- Tab widget ----
         self._tabs = QTabWidget()
@@ -101,10 +103,10 @@ class MainWindow(QMainWindow):
 
         # ---- Bottom toolbar ----
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
+        toolbar.setSpacing(density.toolbar_spacing)
 
         self._run_btn   = QPushButton("▶  Stack")
-        self._run_btn.setFixedHeight(32)
+        self._run_btn.setFixedHeight(density.action_button_h)
         self._run_btn.setMinimumWidth(120)
         self._run_btn.setStyleSheet(
             "QPushButton { font-weight: bold; background-color: #2e7d32; color: white; "
@@ -115,7 +117,7 @@ class MainWindow(QMainWindow):
         )
 
         self._abort_btn = QPushButton("■  Abort")
-        self._abort_btn.setFixedHeight(32)
+        self._abort_btn.setFixedHeight(density.action_button_h)
         self._abort_btn.setMinimumWidth(100)
         self._abort_btn.setEnabled(False)
         self._abort_btn.setStyleSheet(
@@ -127,7 +129,7 @@ class MainWindow(QMainWindow):
         )
 
         self._log_toggle_btn = QPushButton("▼  Log")
-        self._log_toggle_btn.setFixedHeight(34)
+        self._log_toggle_btn.setFixedHeight(density.action_button_h)
         self._log_toggle_btn.setCheckable(True)
         self._log_toggle_btn.setChecked(True)
         self._log_toggle_btn.setStyleSheet(
@@ -151,9 +153,9 @@ class MainWindow(QMainWindow):
         self._log.setMinimumHeight(120)
         self._log.setMaximumHeight(300)
         self._log.setStyleSheet(
-            "QPlainTextEdit { font-family: monospace; font-size: 13px; "
+            f"QPlainTextEdit {{ font-family: monospace; font-size: {density.log_font_size}px; "
             "background: #1e1e1e; color: #d4d4d4; border: 1px solid #555; "
-            "border-radius: 4px; padding: 4px; }"
+            f"border-radius: 4px; padding: {density.log_padding}px; }}"
         )
 
         # ---- Splitter: tabs / log ----

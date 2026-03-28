@@ -46,6 +46,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from utils import detect_output_format
+from ui_density import get_ui_density
 
 
 class StackingOptionsTab(QWidget):
@@ -130,6 +131,7 @@ class StackingOptionsTab(QWidget):
     # ------------------------------------------------------------------ #
 
     def _setup_ui(self) -> None:
+        density = get_ui_density()
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
@@ -141,8 +143,8 @@ class StackingOptionsTab(QWidget):
         container = QWidget()
         scroll.setWidget(container)
         vbox = QVBoxLayout(container)
-        vbox.setSpacing(12)
-        vbox.setContentsMargins(12, 12, 12, 12)
+        vbox.setSpacing(density.options_spacing)
+        vbox.setContentsMargins(density.options_margin, density.options_margin, density.options_margin, density.options_margin)
 
         vbox.addWidget(self._build_io_group())
         vbox.addWidget(self._build_execution_group())
@@ -158,8 +160,9 @@ class StackingOptionsTab(QWidget):
 
     @staticmethod
     def _style_groupbox(box: QGroupBox) -> None:
+        density = get_ui_density()
         box.setStyleSheet(
-            "QGroupBox { font-weight: bold; margin-top: 6px; padding-top: 8px; }"
+            f"QGroupBox {{ font-weight: bold; margin-top: {density.group_margin_top}px; padding-top: {density.group_padding}px; }}"
             "QGroupBox::title { subcontrol-origin: margin; left: 0px; padding: 0 4px; }"
         )
 

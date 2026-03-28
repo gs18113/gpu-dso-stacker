@@ -17,10 +17,12 @@ from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 from main_window import MainWindow
+from ui_density import get_ui_density
 
 
 def _apply_dark_palette(app: QApplication) -> None:
     """Apply a clean dark Fusion palette."""
+    density = get_ui_density()
     app.setStyle("Fusion")
     palette = QPalette()
 
@@ -58,14 +60,15 @@ def _apply_dark_palette(app: QApplication) -> None:
         "QMenu::item:selected { background-color: #4287f5; color: #ffffff; }"
         "QTabWidget::pane { border: 1px solid #4a4a4a; }"
         "QTabBar::tab { background: #3a3a3a; color: #dcdcdc; border: 1px solid #4a4a4a; "
-        "padding: 6px 12px; margin-right: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px; }"
+        f"padding: {density.tab_padding_v}px {density.tab_padding_h}px; "
+        "margin-right: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px; }"
         "QTabBar::tab:selected { background: #474747; }"
         "QTabBar::tab:hover:!selected { background: #444444; }"
         "QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background-color: #1f1f1f; "
-        "border: 1px solid #565656; border-radius: 4px; padding: 4px 6px; }"
-        "QGroupBox { border: 1px solid #4a4a4a; border-radius: 6px; margin-top: 10px; padding: 8px; }"
+        f"border: 1px solid #565656; border-radius: 4px; padding: {density.input_padding_v}px {density.input_padding_h}px; }}"
+        f"QGroupBox {{ border: 1px solid #4a4a4a; border-radius: 6px; margin-top: {density.group_margin_top}px; padding: {density.group_padding}px; }}"
         "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }"
-        "QHeaderView::section { background-color: #333333; color: #dcdcdc; border: 1px solid #4a4a4a; padding: 4px; }"
+        f"QHeaderView::section {{ background-color: #333333; color: #dcdcdc; border: 1px solid #4a4a4a; padding: {density.header_padding}px; }}"
         "QTableWidget { background-color: #1e1e1e; alternate-background-color: #252525; "
         "gridline-color: #3a3a3a; color: #dcdcdc; border: 1px solid #4a4a4a; }"
     )
