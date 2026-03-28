@@ -641,10 +641,14 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 | `dso-stacker-cli-linux-x86_64-gpu.tar.gz` | GPU-selectable CLI binary (CUDA runtime required) |
 | `dso-stacker-cli-macos-arm64-cpu.tar.gz` | CPU-only CLI binary |
 | `dso-stacker-cli-macos-arm64-metal.tar.gz` | Metal-enabled CLI binary |
-| `dso-stacker-gui-linux-x86_64.tar.gz` | GUI + CLI bundle |
+| `dso-stacker-gui-linux-x86_64-cpu.tar.gz` | GUI + CPU-only CLI bundle |
+| `dso-stacker-gui-linux-x86_64-gpu.tar.gz` | GUI + GPU-selectable CLI bundle |
+| `dso-stacker-gui-macos-arm64-cpu.tar.gz` | GUI + CPU-only CLI bundle |
+| `dso-stacker-gui-macos-arm64-metal.tar.gz` | GUI + Metal-enabled CLI bundle |
 | `dso-stacker-cli-windows-x86_64-cpu.zip` | CPU-only CLI .exe + DLLs |
 | `dso-stacker-cli-windows-x86_64-gpu.zip` | GPU-selectable CLI .exe + DLLs |
-| `dso-stacker-gui-windows-x86_64.zip` | GUI + CLI bundle |
+| `dso-stacker-gui-windows-x86_64-cpu.zip` | GUI + CPU-only CLI .exe + DLLs |
+| `dso-stacker-gui-windows-x86_64-gpu.zip` | GUI + GPU-selectable CLI .exe + DLLs |
 
 ---
 
