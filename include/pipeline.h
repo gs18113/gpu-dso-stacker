@@ -32,10 +32,20 @@ typedef struct CalibFrames CalibFrames;
 extern "C" {
 #endif
 
+typedef enum {
+    DSO_BACKEND_AUTO  = 0,
+    DSO_BACKEND_CPU   = 1,
+    DSO_BACKEND_CUDA  = 2,
+    DSO_BACKEND_METAL = 3
+} DsoBackend;
+
 /* -------------------------------------------------------------------------
  * PipelineConfig — complete configuration for one pipeline run.
  * ------------------------------------------------------------------------- */
 typedef struct {
+    /* --- Backend selection --- */
+    DsoBackend    backend;         /* auto | cpu | cuda | metal (default: auto) */
+
     /* --- Star detection --- */
     float        star_sigma;      /* detection threshold: mean + star_sigma*σ (3.0) */
     MoffatParams moffat;          /* Moffat kernel shape {alpha=2.5, beta=2.0}       */
@@ -95,9 +105,26 @@ DsoError pipeline_run(FrameInfo            *frames,
  * Lanczos warp, integration) execute on the CPU with OpenMP parallelism.
  */
 DsoError pipeline_run_cpu(FrameInfo            *frames,
-                           int                   n_frames,
-                           int                   ref_idx,
-                           const PipelineConfig *config);
+                            int                   n_frames,
+                            int                   ref_idx,
+                            const PipelineConfig *config);
+
+/* CUDA backend entry point (internal dispatch target). */
+DsoError pipeline_run_cuda(FrameInfo            *frames,
+                            int                   n_frames,
+                            int                   ref_idx,
+                            const PipelineConfig *config);
+
+/*
+ * pipeline_run_metal — Metal backend entry point.
+ *
+ * Phase-1 implementation provides orchestration and safe fallback behavior.
+ * Full Metal stage kernels are introduced incrementally.
+ */
+DsoError pipeline_run_metal(FrameInfo            *frames,
+                             int                   n_frames,
+                             int                   ref_idx,
+                             const PipelineConfig *config);
 
 #ifdef __cplusplus
 }

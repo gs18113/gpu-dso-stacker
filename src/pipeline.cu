@@ -466,19 +466,15 @@ cleanup:
  * Public API: pipeline_run
  * ------------------------------------------------------------------------- */
 
-DsoError pipeline_run(FrameInfo            *frames,
-                       int                   n_frames,
-                       int                   ref_idx,
-                       const PipelineConfig *config)
+DsoError pipeline_run_cuda(FrameInfo            *frames,
+                            int                   n_frames,
+                            int                   ref_idx,
+                            const PipelineConfig *config)
 {
     if (!frames || n_frames <= 0 || !config || !config->output_file)
         return DSO_ERR_INVALID_ARG;
     if (ref_idx < 0 || ref_idx >= n_frames)
         return DSO_ERR_INVALID_ARG;
-
-    /* Dispatch to CPU-only pipeline when GPU Lanczos is disabled */
-    if (!config->use_gpu_lanczos)
-        return pipeline_run_cpu(frames, n_frames, ref_idx, config);
 
     DsoError           err       = DSO_OK;
     int                W         = 0;

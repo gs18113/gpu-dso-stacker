@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/youruser/gpu-dso-stacker/actions/workflows/ci.yml/badge.svg)](https://github.com/youruser/gpu-dso-stacker/actions/workflows/ci.yml)
 
-> A high-performance DSO (Deep Sky Object) stacker using CUDA for GPU-accelerated processing
+> A high-performance DSO (Deep Sky Object) stacker with CUDA (Linux/Windows) and Metal scaffolding (Apple Silicon) backends
 
 **Pre-built binaries** (CLI + GUI) for Linux and Windows are available on the [Releases](https://github.com/youruser/gpu-dso-stacker/releases) page.
 
@@ -67,6 +67,7 @@ cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n
 - **C11** — Core library (FITS I/O, image I/O dispatch, CSV parser, Lanczos CPU, integration, debayer CPU, star detection, triangle matching, CPU pipeline)
 - **OpenMP** — CPU parallelism for debayer, Moffat convolution, Lanczos warp, and integration
 - **CUDA 12** — GPU acceleration (VNG debayer, Moffat convolution, Lanczos warp, kappa-sigma integration, GPU pipeline)
+- **Metal (scaffold)** — Apple Silicon backend entry point with phased kernel porting plan
 - **CFITSIO 4.6.3** — FITS image I/O
 - **libtiff 4.5.1** — TIFF output (FP32, FP16, INT16, INT8; none/zip/lzw/rle compression)
 - **libpng 1.6.43** — PNG output (INT8 and INT16)
@@ -122,6 +123,13 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build --parallel $(nproc)
 ```
 
+CPU-only configure (no CUDA toolkit required):
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DDSO_ENABLE_CUDA=OFF
+cmake --build build --parallel $(nproc)
+```
+
 ### Windows
 
 Requires Visual Studio 2022, CUDA Toolkit 12.x, and [vcpkg](https://vcpkg.io/) for C library dependencies.
@@ -138,6 +146,25 @@ cmake -B build -G "Visual Studio 17 2022" -A x64 `
 # Compile
 cmake --build build --config Release --parallel
 ```
+
+### Apple Silicon / macOS (scaffold)
+
+Metal backend support is scaffolded behind CMake options. Phase-1 behavior keeps
+numerical semantics safe by falling back to the CPU pipeline while wiring
+backend selection and build isolation.
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DDSO_ENABLE_CUDA=OFF \
+      -DDSO_ENABLE_METAL=ON
+cmake --build build --parallel
+```
+
+Backend selection at runtime:
+- `--backend auto` (default): preserves existing behavior (`--cpu` still forces CPU)
+- `--backend cpu`
+- `--backend cuda`
+- `--backend metal`
 
 ### CUDA Architectures
 
@@ -194,6 +221,7 @@ Triangle matching (2-column CSV only):
       --ransac-thresh <float>    Deprecated alias of --triangle-thresh
       --match-radius <float>     Star matching search radius px (default: 30.0)
       --match-device <device>    auto | cpu | gpu (default: auto = stacking device)
+      --backend <backend>        auto | cpu | cuda | metal (default: auto)
 
 Calibration (applied before debayering; bias and darkflat are mutually exclusive):
       --dark <path>              Master dark FITS or text list of dark FITS paths

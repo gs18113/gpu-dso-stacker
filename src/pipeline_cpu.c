@@ -23,7 +23,6 @@
 #include "fits_io.h"
 #include "debayer_cpu.h"
 #include "star_detect_cpu.h"
-#include "star_detect_gpu.h"   /* MoffatParams (now from dso_types.h via this header) */
 #include "ransac.h"
 #include "lanczos_cpu.h"
 #include "integration.h"

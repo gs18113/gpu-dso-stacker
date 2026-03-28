@@ -49,6 +49,7 @@
 #pragma once
 
 #include "dso_types.h"
+#include "integration_limits.h"
 #include <cuda_runtime.h>
 
 #ifdef __cplusplus
@@ -60,8 +61,6 @@ extern "C" {
  * The GPU kappa-sigma kernel uses stack arrays of this size.
  * Recommended range: 8-32.
  */
-#define INTEGRATION_GPU_MAX_BATCH 32
-
 /*
  * IntegrationGpuCtx — GPU integration context.
  *
