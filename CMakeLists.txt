@@ -1,18 +1,47 @@
 cmake_minimum_required(VERSION 3.18)
-project(dso_stacker LANGUAGES C CXX CUDA)
+
+option(DSO_ENABLE_CUDA "Enable CUDA backend" ON)
+option(DSO_ENABLE_METAL "Enable Metal backend (macOS only)" OFF)
+
+set(DSO_PROJECT_LANGUAGES C CXX)
+if(DSO_ENABLE_CUDA)
+    list(APPEND DSO_PROJECT_LANGUAGES CUDA)
+endif()
+if(DSO_ENABLE_METAL)
+    list(APPEND DSO_PROJECT_LANGUAGES OBJCXX)
+endif()
+
+project(dso_stacker LANGUAGES ${DSO_PROJECT_LANGUAGES})
+
+if(DSO_ENABLE_CUDA)
+    add_compile_definitions(DSO_HAS_CUDA=1)
+else()
+    add_compile_definitions(DSO_HAS_CUDA=0)
+endif()
+if(DSO_ENABLE_METAL)
+    add_compile_definitions(DSO_HAS_METAL=1)
+else()
+    add_compile_definitions(DSO_HAS_METAL=0)
+endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CUDA_STANDARD 17)
+if(DSO_ENABLE_CUDA)
+    set(CMAKE_CUDA_STANDARD 17)
+endif()
 
 # ---- Configurable CUDA architectures (override with -DDSO_CUDA_ARCHITECTURES=) ----
-set(DSO_CUDA_ARCHITECTURES "86;89" CACHE STRING "CUDA architectures to compile for")
+if(DSO_ENABLE_CUDA)
+    set(DSO_CUDA_ARCHITECTURES "86;89" CACHE STRING "CUDA architectures to compile for")
+endif()
 
 # ---- CUDA Toolkit ----
-if(NOT DEFINED CUDAToolkit_ROOT AND EXISTS "/usr/local/cuda")
-    set(CUDAToolkit_ROOT "/usr/local/cuda")
+if(DSO_ENABLE_CUDA)
+    if(NOT DEFINED CUDAToolkit_ROOT AND EXISTS "/usr/local/cuda")
+        set(CUDAToolkit_ROOT "/usr/local/cuda")
+    endif()
+    find_package(CUDAToolkit 12 REQUIRED)
 endif()
-find_package(CUDAToolkit 12 REQUIRED)
 
 # ---- OpenMP (C and CXX only; NVCC does not support OpenMP) ----
 find_package(OpenMP COMPONENTS C CXX REQUIRED)
@@ -60,15 +89,32 @@ set(LIB_SOURCES
     src/star_detect_cpu.c
     src/ransac.c
     src/calibration.c
+    src/pipeline_dispatch.c
     src/pipeline_cpu.c
-    src/lanczos_gpu.cu
-    src/debayer_gpu.cu
-    src/star_detect_gpu.cu
-    src/integration_gpu.cu
-    src/ransac_gpu.cu
-    src/calibration_gpu.cu
-    src/pipeline.cu
 )
+
+if(DSO_ENABLE_CUDA)
+    list(APPEND LIB_SOURCES
+        src/lanczos_gpu.cu
+        src/debayer_gpu.cu
+        src/star_detect_gpu.cu
+        src/integration_gpu.cu
+        src/ransac_gpu.cu
+        src/calibration_gpu.cu
+        src/pipeline.cu
+    )
+else()
+    list(APPEND LIB_SOURCES src/pipeline_cuda_stub.c)
+endif()
+
+if(DSO_ENABLE_METAL)
+    if(NOT APPLE)
+        message(FATAL_ERROR "DSO_ENABLE_METAL is only supported on Apple platforms")
+    endif()
+    list(APPEND LIB_SOURCES src/pipeline_metal.mm)
+else()
+    list(APPEND LIB_SOURCES src/pipeline_metal_stub.c)
+endif()
 
 # Bundle portable getopt on MSVC (no system <getopt.h>)
 if(MSVC)
@@ -81,17 +127,23 @@ if(WIN32)
     # vcpkg imported targets
     target_include_directories(dso_stacker_lib PUBLIC
         include
-        ${CUDAToolkit_INCLUDE_DIRS}
     )
+    if(DSO_ENABLE_CUDA)
+        target_include_directories(dso_stacker_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
+    endif()
     target_link_libraries(dso_stacker_lib PUBLIC
         ${CFITSIO_TARGET}
         ${TIFF_TARGET}
         ${PNG_TARGET}
-        CUDA::cudart
-        CUDA::nppc
-        CUDA::nppig
         OpenMP::OpenMP_C
     )
+    if(DSO_ENABLE_CUDA)
+        target_link_libraries(dso_stacker_lib PUBLIC
+            CUDA::cudart
+            CUDA::nppc
+            CUDA::nppig
+        )
+    endif()
 else()
     # pkg-config variables
     target_include_directories(dso_stacker_lib PUBLIC
@@ -99,8 +151,10 @@ else()
         ${CFITSIO_INCLUDE_DIRS}
         ${LIBTIFF_INCLUDE_DIRS}
         ${LIBPNG_INCLUDE_DIRS}
-        ${CUDAToolkit_INCLUDE_DIRS}
     )
+    if(DSO_ENABLE_CUDA)
+        target_include_directories(dso_stacker_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
+    endif()
     target_link_directories(dso_stacker_lib PUBLIC
         ${CFITSIO_LIBRARY_DIRS}
         ${LIBTIFF_LIBRARY_DIRS}
@@ -110,25 +164,33 @@ else()
         ${CFITSIO_LIBRARIES}
         ${LIBTIFF_LIBRARIES}
         ${LIBPNG_LIBRARIES}
-        CUDA::cudart
-        CUDA::nppc
-        CUDA::nppig
         OpenMP::OpenMP_C
     )
+    if(DSO_ENABLE_CUDA)
+        target_link_libraries(dso_stacker_lib PUBLIC
+            CUDA::cudart
+            CUDA::nppc
+            CUDA::nppig
+        )
+    endif()
 endif()
 
-set_target_properties(dso_stacker_lib PROPERTIES
-    CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
-    CUDA_SEPARABLE_COMPILATION ON
-    CUDA_RESOLVE_DEVICE_SYMBOLS ON
-)
+if(DSO_ENABLE_CUDA)
+    set_target_properties(dso_stacker_lib PROPERTIES
+        CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+    )
+endif()
 
 add_executable(dso_stacker main.cpp)
 target_link_libraries(dso_stacker PRIVATE dso_stacker_lib)
 
 # Star detection visualization helper (CLI)
-add_executable(star_detect_overlay test/star_detect_overlay.cpp)
-target_link_libraries(star_detect_overlay PRIVATE dso_stacker_lib ${MATH_LIB})
+if(DSO_ENABLE_CUDA)
+    add_executable(star_detect_overlay test/star_detect_overlay.cpp)
+    target_link_libraries(star_detect_overlay PRIVATE dso_stacker_lib ${MATH_LIB})
+endif()
 
 # RANSAC status diagnostic helper (CLI)
 add_executable(ransac_status test/ransac_status.cpp)
@@ -146,16 +208,18 @@ target_include_directories(test_cpu PRIVATE tests)
 target_link_libraries(test_cpu PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_cpu COMMAND test_cpu)
 
-# GPU tests (CUDA): lanczos_gpu init/transform vs CPU baseline
-add_executable(test_gpu tests/test_gpu.cu)
-set_target_properties(test_gpu PROPERTIES
-    CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
-    CUDA_SEPARABLE_COMPILATION ON)
-target_include_directories(test_gpu PRIVATE tests)
-target_link_libraries(test_gpu PRIVATE dso_stacker_lib)
-add_test(NAME test_gpu COMMAND test_gpu)
-# Exit code 77 = SKIP (no GPU available)
-set_property(TEST test_gpu PROPERTY SKIP_RETURN_CODE 77)
+if(DSO_ENABLE_CUDA)
+    # GPU tests (CUDA): lanczos_gpu init/transform vs CPU baseline
+    add_executable(test_gpu tests/test_gpu.cu)
+    set_target_properties(test_gpu PROPERTIES
+        CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
+        CUDA_SEPARABLE_COMPILATION ON)
+    target_include_directories(test_gpu PRIVATE tests)
+    target_link_libraries(test_gpu PRIVATE dso_stacker_lib)
+    add_test(NAME test_gpu COMMAND test_gpu)
+    # Exit code 77 = SKIP (no GPU available)
+    set_property(TEST test_gpu PROPERTY SKIP_RETURN_CODE 77)
+endif()
 
 # CPU tests for star detection (CCL, CoM) and RANSAC homography
 add_executable(test_star_detect tests/test_star_detect.c)
@@ -192,18 +256,26 @@ target_include_directories(test_color PRIVATE tests)
 target_link_libraries(test_color PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_color COMMAND test_color)
 
-# GPU tests for mini-batch kappa-sigma integration
-add_executable(test_integration_gpu tests/test_integration_gpu.cu)
-set_target_properties(test_integration_gpu PROPERTIES
-    CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
-    CUDA_SEPARABLE_COMPILATION ON)
-target_include_directories(test_integration_gpu PRIVATE tests)
-target_link_libraries(test_integration_gpu PRIVATE dso_stacker_lib)
-add_test(NAME test_integration_gpu COMMAND test_integration_gpu)
-set_property(TEST test_integration_gpu PROPERTY SKIP_RETURN_CODE 77)
+if(DSO_ENABLE_CUDA)
+    # GPU tests for mini-batch kappa-sigma integration
+    add_executable(test_integration_gpu tests/test_integration_gpu.cu)
+    set_target_properties(test_integration_gpu PROPERTIES
+        CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
+        CUDA_SEPARABLE_COMPILATION ON)
+    target_include_directories(test_integration_gpu PRIVATE tests)
+    target_link_libraries(test_integration_gpu PRIVATE dso_stacker_lib)
+    add_test(NAME test_integration_gpu COMMAND test_integration_gpu)
+    set_property(TEST test_integration_gpu PROPERTY SKIP_RETURN_CODE 77)
+endif()
 
 # image_io tests: TIFF and PNG save/load round-trips for all bit depths and compressions
 add_executable(test_image_io tests/test_image_io.c)
 target_include_directories(test_image_io PRIVATE tests)
 target_link_libraries(test_image_io PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_image_io COMMAND test_image_io)
+
+# backend-dispatch tests
+add_executable(test_pipeline_backend tests/test_pipeline_backend.c)
+target_include_directories(test_pipeline_backend PRIVATE tests)
+target_link_libraries(test_pipeline_backend PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_pipeline_backend COMMAND test_pipeline_backend)

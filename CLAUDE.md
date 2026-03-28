@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A high-performance Deep Sky Object (DSO) image stacker using C/CUDA for GPU-accelerated processing. Python reference stacker and transform-verification tools live in `python/`.
+A high-performance Deep Sky Object (DSO) image stacker using C/CUDA for GPU-accelerated processing, with additive backend scaffolding for Apple Silicon Metal. Python reference stacker and transform-verification tools live in `python/`.
 
 ## Processing Pipeline
 
@@ -22,7 +22,8 @@ All stages are implemented for both GPU and CPU execution paths. The pipeline ru
 | Integration | `integration_gpu.cu` | `integration.c` |
 | Pipeline orchestrator | `pipeline.cu` | `pipeline_cpu.c` |
 
-Pass `--cpu` to run the complete CPU path; omit it for the GPU path (default).
+Pass `--cpu` to run the complete CPU path.
+Pass `--backend auto|cpu|cuda|metal` for explicit backend selection (default: `auto`).
 Triangle matching device is controlled by `--match-device auto|cpu|gpu` (default `auto` follows stacking device).
 The CSV input is always 2-column (`filepath, is_reference`). Star detection + alignment always run.
 
@@ -66,7 +67,7 @@ gpu-dso-stacker/
 │   ├── integration_gpu.h        ← GPU mini-batch kappa-sigma context + API
 │   ├── calibration.h            ← CalibFrames, CalibMethod, calib_load_or_generate, calib_apply_cpu
 │   ├── calibration_gpu.h        ← CalibGpuCtx, calib_gpu_init/apply_d2d/cleanup
-│   └── pipeline.h               ← pipeline_run (GPU) + pipeline_run_cpu + PipelineConfig
+│   └── pipeline.h               ← pipeline_run dispatch + pipeline_run_{cpu,cuda,metal} + PipelineConfig
 ├── src/
 │   ├── fits_io.c                ← CFITSIO-based I/O
 │   ├── image_io.c               ← Format dispatch (FITS/TIFF/PNG) + libtiff + libpng writers
@@ -82,8 +83,12 @@ gpu-dso-stacker/
 │   ├── integration_gpu.cu       ← Mini-batch kappa-sigma + finalize kernels
 │   ├── calibration.c            ← Master frame generation (winsorized mean / median) + CPU apply
 │   ├── calibration_gpu.cu       ← GPU calibration kernel (dark subtract + flat divide, D2D)
-│   ├── pipeline.cu              ← GPU orchestrator; dispatches to pipeline_cpu if --cpu
+│   ├── pipeline.cu              ← CUDA orchestrator implementation (`pipeline_run_cuda`)
+│   ├── pipeline_dispatch.c      ← backend dispatch (`pipeline_run`)
 │   ├── pipeline_cpu.c           ← Pure-C CPU orchestrator (no CUDA)
+│   ├── pipeline_metal.mm        ← Metal scaffold entry point (currently CPU fallback)
+│   ├── pipeline_cuda_stub.c     ← CUDA-disabled build stub (`DSO_ERR_CUDA`)
+│   └── pipeline_metal_stub.c    ← Metal-disabled build stub (`DSO_ERR_INVALID_ARG`)
 │   └── getopt_port.c            ← Portable getopt_long (compiled only on MSVC)
 ├── tests/
 │   ├── test_framework.h         ← Minimal test harness (ASSERT_*, RUN, SUITE)
@@ -145,6 +150,13 @@ cmake --build build --parallel $(nproc)
 ./build/dso_stacker
 ```
 
+CPU-only build without CUDA toolkit:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DDSO_ENABLE_CUDA=OFF
+cmake --build build --parallel $(nproc)
+```
+
 ### Build (Windows)
 
 Requires Visual Studio 2022, CUDA Toolkit 12.x, and [vcpkg](https://vcpkg.io/).
@@ -167,6 +179,18 @@ Default: `86;89` (RTX 30xx / 40xx). Override at configure time:
 cmake -B build -DDSO_CUDA_ARCHITECTURES="75;80;86;89;90" ...
 ```
 
+### Metal scaffold build (macOS / Apple Silicon)
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DDSO_ENABLE_CUDA=OFF \
+      -DDSO_ENABLE_METAL=ON
+cmake --build build --parallel
+```
+
+`DSO_ENABLE_METAL` is guarded to Apple platforms and currently wires a safe
+Phase-1 backend path (`pipeline_run_metal`) that falls back to `pipeline_run_cpu`.
+
 ### CFITSIO in CI
 
 Set `CFITSIO_PREFIX` env var to the CFITSIO install prefix so CMake can find it via pkg-config:
@@ -188,6 +212,7 @@ I/O:
 
 Integration:
       --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)
+      --backend <backend>        auto | cpu | cuda | metal (default: auto)
       --integration <method>     mean | kappa-sigma (default: kappa-sigma)
       --kappa <float>            Sigma clipping threshold (default: 3.0)
       --iterations <int>         Max clipping passes per pixel (default: 3)
@@ -486,11 +511,19 @@ DsoError pipeline_run(FrameInfo *frames, int n_frames,
                        int ref_idx, const PipelineConfig *config);
 DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames,
                            int ref_idx, const PipelineConfig *config);
+DsoError pipeline_run_cuda(FrameInfo *frames, int n_frames,
+                            int ref_idx, const PipelineConfig *config);
+DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
+                             int ref_idx, const PipelineConfig *config);
 ```
 
-`pipeline_run`: GPU orchestrator. First line dispatches to `pipeline_run_cpu` when `config->use_gpu_lanczos == 0` — zero GPU overhead. Processes frames in order `[ref_idx, non_ref_0, ...]` via `phase_detect_warp_integrate`: double-buffered `pinned[2]`/`d_raw[2]` + `stream_copy`/`stream_compute`. Per frame: `stream_compute` waits for `e_h2d[slot]` → calib → debayer_lum → star_detect → `cudaStreamSynchronize` → D2H → CCL+CoM → RANSAC → Lanczos warp on `stream_compute`; then CPU pre-loads next frame + async H2D on `stream_copy` (overlaps with the warp). At batch boundaries, H2D of the next frame also overlaps mini-batch integration. The `cudaStreamSynchronize` for D2H also implicitly frees `d_raw[next_slot]` (clears the prior warp), so no `e_gpu` event is needed. For color output allocates ctx_r/g/b + d_ch_g/d_ch_b; `phase_warp` calls `debayer_gpu_rgb_d2d` + 3× Lanczos per frame. Finalizes via `image_save_rgb`/`image_save`. **Non-reference frames that fail alignment (too few stars or RANSAC mismatch) are skipped, not fatal; successful-frame count is passed to `integration_gpu_finalize`.**
+`pipeline_run` is now a backend dispatcher in `pipeline_dispatch.c` using `PipelineConfig.backend` (`AUTO/CPU/CUDA/METAL`) with legacy `use_gpu_lanczos` preserved for AUTO behavior.
+
+`pipeline_run_cuda` is the CUDA orchestrator. Processes frames in order `[ref_idx, non_ref_0, ...]` via `phase_detect_warp_integrate`: double-buffered `pinned[2]`/`d_raw[2]` + `stream_copy`/`stream_compute`. Per frame: `stream_compute` waits for `e_h2d[slot]` → calib → debayer_lum → star_detect → `cudaStreamSynchronize` → D2H → CCL+CoM → RANSAC → Lanczos warp on `stream_compute`; then CPU pre-loads next frame + async H2D on `stream_copy` (overlaps with the warp). At batch boundaries, H2D of the next frame also overlaps mini-batch integration. The `cudaStreamSynchronize` for D2H also implicitly frees `d_raw[next_slot]` (clears the prior warp), so no `e_gpu` event is needed. For color output allocates ctx_r/g/b + d_ch_g/d_ch_b; `phase_warp` calls `debayer_gpu_rgb_d2d` + 3× Lanczos per frame. Finalizes via `image_save_rgb`/`image_save`. **Non-reference frames that fail alignment (too few stars or RANSAC mismatch) are skipped, not fatal; successful-frame count is passed to `integration_gpu_finalize`.**
 
 `pipeline_run_cpu`: pure-C orchestrator in `pipeline_cpu.c` (no CUDA headers). Processes frames in order `[ref_idx, non_ref_0, ...]` (single pass, each file loaded once). Per frame: debayer_cpu (lum) → star_detect_cpu_detect → ccl_com → ransac → batch warp+integrate. Mini-batched (PIPELINE_CPU_BATCH_SIZE=32). For color: debayer_cpu_rgb → 3× lanczos_transform_cpu; finalizes via `image_save_rgb`. **Non-reference frames that fail alignment (too few stars or RANSAC mismatch) are skipped and processing continues.**
+
+`pipeline_run_metal`: Phase-1 scaffold implemented in `pipeline_metal.mm`; currently logs backend selection and falls back to `pipeline_run_cpu` to preserve numerical semantics while Metal kernels are ported incrementally.
 
 ---
 
@@ -498,7 +531,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames,
 
 - **Homography convention**: H is the *backward* map (ref → src). Transform functions use it directly for pixel sampling — **do not invert**. The `invert_homography` helpers remain in the source but are dead code.
 - **GPU Lanczos strategy**: `nppiWarpPerspective` only supports NN/LINEAR/CUBIC. We instead pre-compute backward-homography coordinate maps (H used directly, no inversion) in a CUDA kernel, then feed them to `nppiRemap_32f_C1R_Ctx` with `NPPI_INTER_LANCZOS` (= 16).
-- **CPU dispatch is a no-cost early return**: `pipeline_run()` checks `!config->use_gpu_lanczos` as its very first statement and returns `pipeline_run_cpu(...)`. No GPU resources are allocated, no CUDA context is created.
+- **Backend dispatch is centralized**: `pipeline_run()` now lives in `pipeline_dispatch.c` and dispatches via `PipelineConfig.backend` (`AUTO/CPU/CUDA/METAL`). AUTO preserves legacy behavior: `use_gpu_lanczos==0` forces CPU; otherwise it prefers compiled GPU backend(s).
 - **`MoffatParams` lives in `dso_types.h`**: moved from `star_detect_gpu.h` (which includes `cuda_runtime.h`) so that `pipeline_cpu.c` and `star_detect_cpu.c` can use it without any CUDA dependency.
 - **OpenMP parallelism strategy**:
   - `debayer_cpu`: `OMP_PARALLEL_FOR_COLLAPSE2` (collapse(2) on GCC/Clang, outer-only on MSVC) — each pixel is independent.
@@ -559,6 +592,8 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames,
 **MSVC OpenMP**: MSVC only supports OpenMP 2.0. The `OMP_PARALLEL_FOR_COLLAPSE2` macro falls back to `#pragma omp parallel for schedule(static)` (outer loop only). Performance impact is minimal since the outer loop iterates over image rows (thousands of iterations).
 
 **`getopt_port.c`**: compiled only on MSVC via conditional `list(APPEND LIB_SOURCES ...)` in `CMakeLists.txt`. BSD-2-Clause licensed.
+
+**Optional CUDA/Metal build toggles**: `CMakeLists.txt` now supports `DSO_ENABLE_CUDA` (default ON) and `DSO_ENABLE_METAL` (default OFF, Apple-only). CUDA sources/tests are conditionally added; CPU-only builds compile without NVCC by setting `-DDSO_ENABLE_CUDA=OFF`.
 
 **`test_framework.h`**: `SUMMARY()` macro uses `static inline` function instead of GCC statement expression `({...})` for MSVC compatibility.
 

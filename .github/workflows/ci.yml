@@ -152,6 +152,48 @@ jobs:
             artifact/*.dll
 
   # ==================================================================
+  # macOS (Apple Silicon): Metal scaffold build + focused CPU tests
+  # ==================================================================
+  macos-metal:
+    runs-on: macos-14
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Homebrew dependencies
+        run: |
+          brew update
+          brew install cfitsio libtiff libpng pkg-config libomp
+
+      - name: Configure CMake (Metal scaffold, CUDA off)
+        run: |
+          BREW_PREFIX="$(brew --prefix)"
+          LIBOMP_PREFIX="$(brew --prefix libomp)"
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDSO_ENABLE_CUDA=OFF \
+            -DDSO_ENABLE_METAL=ON \
+            -DCMAKE_PREFIX_PATH="${BREW_PREFIX}" \
+            -DOpenMP_ROOT="${LIBOMP_PREFIX}" \
+            -DCMAKE_INSTALL_PREFIX=install
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run focused tests
+        run: cd build && ctest --output-on-failure -V -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
+
+      - name: Install
+        run: cmake --install build
+
+      - name: Upload CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dso-stacker-macos-arm64
+          path: install/bin/dso_stacker
+
+  # ==================================================================
   # GUI package (Linux) — PyInstaller bundle with CLI binary
   # ==================================================================
   gui-linux:
@@ -217,4 +259,41 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dso-stacker-gui-windows-x86_64
+          path: dist/DSOStacker/
+
+  # ==================================================================
+  # GUI package (macOS arm64) — PyInstaller bundle with CLI binary
+  # ==================================================================
+  gui-macos:
+    runs-on: macos-14
+    needs: macos-metal
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: src/GUI/requirements.txt
+
+      - name: Download CLI binary
+        uses: actions/download-artifact@v4
+        with:
+          name: dso-stacker-macos-arm64
+          path: bundled_bin/
+
+      - name: Install Python dependencies
+        run: pip install PySide6 pyyaml pyinstaller
+
+      - name: Package GUI
+        run: |
+          chmod +x bundled_bin/dso_stacker
+          pyinstaller dso_stacker_gui.spec
+
+      - name: Upload GUI bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dso-stacker-gui-macos-arm64
           path: dist/DSOStacker/

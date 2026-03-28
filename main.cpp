@@ -67,7 +67,7 @@
 #include "calibration.h"
 #include "fits_io.h"           /* fits_get_bayer_pattern */
 #include "image_io.h"          /* ImageSaveOptions, image_detect_format */
-#include "integration_gpu.h"   /* INTEGRATION_GPU_MAX_BATCH */
+#include "integration_limits.h"/* INTEGRATION_GPU_MAX_BATCH */
 #include "pipeline.h"
 
 /* -------------------------------------------------------------------------
@@ -87,6 +87,7 @@ enum {
     OPT_RANSAC_THRESH,
     OPT_MATCH_RADIUS,
     OPT_MATCH_DEVICE,
+    OPT_BACKEND,
     OPT_BATCH_SIZE,
     OPT_BAYER,
     /* Calibration options */
@@ -137,6 +138,7 @@ static void usage(const char *prog)
         "      --ransac-thresh <float>    Deprecated alias of --triangle-thresh\n"
         "      --match-radius <float>     Star matching radius px (default: 30.0)\n"
         "      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)\n"
+        "      --backend <backend>        auto | cpu | cuda | metal (default: auto)\n"
         "\n"
         "Calibration:\n"
         "      --dark <path>              Master dark FITS or text list of dark FITS paths\n"
@@ -186,6 +188,17 @@ static int parse_calib_method(const char *s, CalibMethod *out)
     return -1;
 }
 
+static const char *backend_name(DsoBackend backend)
+{
+    switch (backend) {
+    case DSO_BACKEND_CPU:   return "cpu";
+    case DSO_BACKEND_CUDA:  return "cuda";
+    case DSO_BACKEND_METAL: return "metal";
+    case DSO_BACKEND_AUTO:
+    default:                return "auto";
+    }
+}
+
 /* -------------------------------------------------------------------------
  * main
  * ------------------------------------------------------------------------- */
@@ -197,6 +210,7 @@ int main(int argc, char **argv)
     const char *output_file = "output.fits";
     bool        use_cpu     = false;
     const char *integ_str   = "kappa-sigma";
+    bool        backend_explicit = false;
 
     /* Pipeline config defaults */
     PipelineConfig cfg = {};
@@ -210,6 +224,7 @@ int main(int argc, char **argv)
     cfg.iterations      = 3;
     cfg.use_kappa_sigma = 1;
     cfg.output_file     = "output.fits";
+    cfg.backend         = DSO_BACKEND_AUTO;
     cfg.bayer_override  = BAYER_NONE;   /* auto-detect */
     cfg.use_gpu_lanczos = 1;
     cfg.use_gpu_ransac  = -1; /* auto: follow stacking device */
@@ -250,6 +265,7 @@ int main(int argc, char **argv)
         {"ransac-thresh",     required_argument, nullptr, OPT_RANSAC_THRESH}, /* deprecated alias */
         {"match-radius",      required_argument, nullptr, OPT_MATCH_RADIUS},
         {"match-device",      required_argument, nullptr, OPT_MATCH_DEVICE},
+        {"backend",           required_argument, nullptr, OPT_BACKEND},
         {"batch-size",        required_argument, nullptr, OPT_BATCH_SIZE},
         {"bayer",             required_argument, nullptr, OPT_BAYER},
         /* Calibration */
@@ -300,6 +316,22 @@ int main(int argc, char **argv)
                 cfg.use_gpu_ransac = 1;
             } else {
                 fprintf(stderr, "Error: unknown --match-device '%s'; use auto, cpu, or gpu\n",
+                        optarg);
+                return 1;
+            }
+            break;
+        case OPT_BACKEND:
+            backend_explicit = true;
+            if (strcmp(optarg, "auto") == 0) {
+                cfg.backend = DSO_BACKEND_AUTO;
+            } else if (strcmp(optarg, "cpu") == 0) {
+                cfg.backend = DSO_BACKEND_CPU;
+            } else if (strcmp(optarg, "cuda") == 0) {
+                cfg.backend = DSO_BACKEND_CUDA;
+            } else if (strcmp(optarg, "metal") == 0) {
+                cfg.backend = DSO_BACKEND_METAL;
+            } else {
+                fprintf(stderr, "Error: unknown --backend '%s'; use auto, cpu, cuda, or metal\n",
                         optarg);
                 return 1;
             }
@@ -474,14 +506,35 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Wire output path and GPU flag into config */
-    cfg.output_file     = output_file;
-    cfg.use_gpu_lanczos = !use_cpu;
-    if (cfg.use_gpu_ransac < 0) cfg.use_gpu_ransac = cfg.use_gpu_lanczos;
-    if (use_cpu && cfg.use_gpu_ransac) {
+    /* Resolve backend selection with backward-compatible semantics. */
+    if (use_cpu && backend_explicit &&
+        (cfg.backend == DSO_BACKEND_CUDA || cfg.backend == DSO_BACKEND_METAL)) {
         fprintf(stderr,
-                "Error: --match-device gpu is not supported together with --cpu.\n"
-                "  Use --match-device cpu with --cpu (auto follows stacking device).\n");
+                "Error: --cpu cannot be combined with --backend %s.\n"
+                "  Use either --cpu or --backend cpu.\n",
+                backend_name(cfg.backend));
+        return 1;
+    }
+    if (use_cpu) cfg.backend = DSO_BACKEND_CPU;
+    if (cfg.backend == DSO_BACKEND_AUTO) {
+        if (!cfg.use_gpu_lanczos) cfg.backend = DSO_BACKEND_CPU;
+#if defined(DSO_HAS_CUDA) && DSO_HAS_CUDA
+        else cfg.backend = DSO_BACKEND_CUDA;
+#elif defined(DSO_HAS_METAL) && DSO_HAS_METAL
+        else cfg.backend = DSO_BACKEND_METAL;
+#else
+        else cfg.backend = DSO_BACKEND_CPU;
+#endif
+    }
+
+    /* Wire output path and per-stage defaults into config */
+    cfg.output_file     = output_file;
+    cfg.use_gpu_lanczos = (cfg.backend != DSO_BACKEND_CPU);
+    if (cfg.use_gpu_ransac < 0) cfg.use_gpu_ransac = cfg.use_gpu_lanczos;
+    if (cfg.backend == DSO_BACKEND_CPU && cfg.use_gpu_ransac) {
+        fprintf(stderr,
+                "Error: --match-device gpu is not supported with CPU backend.\n"
+                "  Use --match-device cpu, or leave it as auto.\n");
         return 1;
     }
     /* color_output is set after CSV parsing and ref_idx resolution below */
@@ -544,11 +597,21 @@ int main(int argc, char **argv)
         cfg.color_output = (detected != BAYER_NONE) ? 1 : 0;
     }
 
+    const char *selected_backend = backend_name(cfg.backend);
+    const char *compute_name = "CPU";
+    switch (cfg.backend) {
+    case DSO_BACKEND_CPU:   compute_name = "CPU";   break;
+    case DSO_BACKEND_CUDA:  compute_name = "CUDA";  break;
+    case DSO_BACKEND_METAL: compute_name = "METAL"; break;
+    case DSO_BACKEND_AUTO:  compute_name = "AUTO";  break;
+    default:                compute_name = "AUTO";  break;
+    }
     printf("Parsed %d frame(s), reference = %d\n", n_frames, ref_idx);
     static const char *bit_depth_names[] = {"f32", "f16", "16-bit", "8-bit"};
-    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s | Matching: %s | Output: %s %s\n",
+    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Backend: %s | Lanczos: %s | Matching: %s | Output: %s %s\n",
            integ_str, (double)cfg.kappa, cfg.iterations, cfg.batch_size,
-            use_cpu ? "CPU" : "GPU",
+            selected_backend,
+            compute_name,
             cfg.use_gpu_ransac ? "GPU" : "CPU",
             cfg.color_output ? "color RGB" : "mono luminance",
             bit_depth_names[cfg.save_opts.bit_depth]);
