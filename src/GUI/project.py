@@ -28,9 +28,10 @@ _DEFAULT_OPTIONS: dict = {
     "moffat_beta": 2.0,
     "top_stars": 50,
     "min_stars": 6,
-    "ransac_iters": 1000,
-    "ransac_thresh": 2.0,
+    "triangle_iters": 1000,
+    "triangle_thresh": 2.0,
     "match_radius": 30.0,
+    "match_device": "auto",
     "bayer": "auto",
     "bit_depth": "f32",
     "tiff_compression": "none",
@@ -104,6 +105,10 @@ class ProjectState:
 
         opts = copy.deepcopy(_DEFAULT_OPTIONS)
         saved_opts = d.get("options", {})
+        if "triangle_iters" not in saved_opts and "ransac_iters" in saved_opts:
+            saved_opts["triangle_iters"] = saved_opts["ransac_iters"]
+        if "triangle_thresh" not in saved_opts and "ransac_thresh" in saved_opts:
+            saved_opts["triangle_thresh"] = saved_opts["ransac_thresh"]
         opts.update({k: v for k, v in saved_opts.items() if k in opts})
 
         # Per-tab methods may also live in the frame sub-dicts in older files.

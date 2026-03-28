@@ -123,10 +123,12 @@ def build_command(
     argv += ["--top-stars",     str(opts["top_stars"])]
     argv += ["--min-stars",     str(opts["min_stars"])]
 
-    # --- RANSAC ---
-    argv += ["--ransac-iters",  str(opts["ransac_iters"])]
-    argv += ["--ransac-thresh", str(opts["ransac_thresh"])]
+    # --- triangle matching ---
+    argv += ["--triangle-iters",  str(opts["triangle_iters"])]
+    argv += ["--triangle-thresh", str(opts["triangle_thresh"])]
     argv += ["--match-radius",  str(opts["match_radius"])]
+    if not opts.get("use_cpu") and opts.get("match_device", "auto") != "auto":
+        argv += ["--match-device", opts["match_device"]]
 
     # --- calibration ---
     for key, flag in (("dark", "--dark"), ("flat", "--flat"),

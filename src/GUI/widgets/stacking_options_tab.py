@@ -12,7 +12,7 @@ Sections
   Execution        CPU mode, batch size
   Integration      method, kappa, iterations
   Star Detection   star_sigma, moffat_alpha/beta, top_stars, min_stars
-  RANSAC           ransac_iters, ransac_thresh, match_radius
+  Triangle Matching  triangle_iters, triangle_thresh, match_radius, match_device
   Sensor           Bayer pattern override
   Output Format    bit depth, TIFF compression, stretch bounds
   Calibration      save_master_dir, wsor_clip
@@ -77,9 +77,10 @@ class StackingOptionsTab(QWidget):
             "moffat_beta":      self._moffat_beta_spin.value(),
             "top_stars":        self._top_stars_spin.value(),
             "min_stars":        self._min_stars_spin.value(),
-            "ransac_iters":     self._ransac_iters_spin.value(),
-            "ransac_thresh":    self._ransac_thresh_spin.value(),
+            "triangle_iters":   self._triangle_iters_spin.value(),
+            "triangle_thresh":  self._triangle_thresh_spin.value(),
             "match_radius":     self._match_radius_spin.value(),
+            "match_device":     self._match_device_combo.currentText(),
             "bayer":            self._bayer_combo.currentText(),
             "bit_depth":        self._bit_depth_combo.currentText(),
             "tiff_compression": self._tiff_compress_combo.currentText(),
@@ -109,9 +110,10 @@ class StackingOptionsTab(QWidget):
         self._moffat_beta_spin.setValue(       opts.get("moffat_beta", 2.0))
         self._top_stars_spin.setValue(         opts.get("top_stars", 50))
         self._min_stars_spin.setValue(         opts.get("min_stars", 6))
-        self._ransac_iters_spin.setValue(      opts.get("ransac_iters", 1000))
-        self._ransac_thresh_spin.setValue(     opts.get("ransac_thresh", 2.0))
+        self._triangle_iters_spin.setValue(    opts.get("triangle_iters", opts.get("ransac_iters", 1000)))
+        self._triangle_thresh_spin.setValue(   opts.get("triangle_thresh", opts.get("ransac_thresh", 2.0)))
         self._match_radius_spin.setValue(      opts.get("match_radius", 30.0))
+        self._set_combo(self._match_device_combo, opts.get("match_device", "auto"))
         self._set_combo(self._bayer_combo,     opts.get("bayer", "auto"))
         self._set_combo(self._bit_depth_combo, opts.get("bit_depth", "f32"))
         self._set_combo(self._tiff_compress_combo, opts.get("tiff_compression", "none"))
@@ -225,21 +227,25 @@ class StackingOptionsTab(QWidget):
         form.addRow("Moffat alpha:",      self._moffat_alpha_spin)
         form.addRow("Moffat beta:",       self._moffat_beta_spin)
         form.addRow("Top-K stars:",       self._top_stars_spin)
-        form.addRow("Min stars (RANSAC):", self._min_stars_spin)
+        form.addRow("Min stars (triangle matching):", self._min_stars_spin)
         return box
 
     def _build_ransac_group(self) -> QGroupBox:
-        box = QGroupBox("RANSAC Alignment  (used when no pre-computed homographies)")
+        box = QGroupBox("Triangle Matching Alignment  (used when no pre-computed homographies)")
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self._ransac_iters_spin  = _int_spin(10, 10000, 1000)
-        self._ransac_thresh_spin = _dbl_spin(0.1, 50.0, 2.0, 1, 0.1)
+        self._triangle_iters_spin  = _int_spin(10, 10000, 1000)
+        self._triangle_thresh_spin = _dbl_spin(0.1, 50.0, 2.0, 1, 0.1)
         self._match_radius_spin  = _dbl_spin(1.0, 500.0, 30.0, 1, 1.0)
+        self._match_device_combo = QComboBox()
+        self._match_device_combo.addItems(["auto", "cpu", "gpu"])
+        self._match_device_lbl = QLabel("Match device:")
 
-        form.addRow("Max iterations:",       self._ransac_iters_spin)
-        form.addRow("Inlier threshold (px):", self._ransac_thresh_spin)
+        form.addRow("Max iterations:",       self._triangle_iters_spin)
+        form.addRow("Inlier threshold (px):", self._triangle_thresh_spin)
         form.addRow("Match radius (px):",     self._match_radius_spin)
+        form.addRow(self._match_device_lbl,   self._match_device_combo)
         return box
 
     def _build_sensor_group(self) -> QGroupBox:
@@ -350,6 +356,8 @@ class StackingOptionsTab(QWidget):
         # Batch size: only in GPU mode
         self._batch_lbl.setVisible(not use_cpu)
         self._batch_spin.setVisible(not use_cpu)
+        self._match_device_lbl.setVisible(not use_cpu)
+        self._match_device_combo.setVisible(not use_cpu)
 
         # TIFF compression: only for TIFF output
         is_tiff = (fmt == "tiff")

@@ -2,7 +2,7 @@
  * main.cpp — DSO Stacker CLI
  *
  * Entry point for the gpu-dso-stacker pipeline. Parses a CSV describing
- * input FITS frames, optionally runs star detection and RANSAC alignment
+ * input FITS frames, optionally runs star detection and triangle matching
  * (when the CSV has no pre-computed transforms), then applies Lanczos-3
  * alignment and GPU mini-batch kappa-sigma integration via pipeline_run().
  *
@@ -26,10 +26,11 @@
  *       --moffat-alpha <float>       Moffat PSF alpha (FWHM control, default: 2.5)
  *       --moffat-beta <float>        Moffat PSF beta (wing slope, default: 2.0)
  *       --top-stars <int>            Top-K stars to use for matching (default: 50)
- *       --min-stars <int>            Minimum stars required for RANSAC (default: 6)
- *       --ransac-iters <int>         Max RANSAC iterations (default: 1000)
- *       --ransac-thresh <float>      Inlier reprojection threshold in px (default: 2.0)
+ *       --min-stars <int>            Minimum stars required for triangle matching (default: 6)
+ *       --triangle-iters <int>       Max triangle-matching iterations (default: 1000)
+ *       --triangle-thresh <float>    Inlier reprojection threshold in px (default: 2.0)
  *       --match-radius <float>       Star matching search radius in px (default: 30.0)
+ *       --match-device <device>      auto | cpu | gpu (default: auto)
  *
  * Options (calibration):
  *       --dark <path>                Master dark FITS or list of dark FITS paths
@@ -85,6 +86,7 @@ enum {
     OPT_RANSAC_ITERS,
     OPT_RANSAC_THRESH,
     OPT_MATCH_RADIUS,
+    OPT_MATCH_DEVICE,
     OPT_BATCH_SIZE,
     OPT_BAYER,
     /* Calibration options */
@@ -126,12 +128,15 @@ static void usage(const char *prog)
         "      --moffat-alpha <float>     Moffat PSF alpha / FWHM (default: 2.5)\n"
         "      --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)\n"
         "      --top-stars <int>          Top-K stars for matching (default: 50)\n"
-        "      --min-stars <int>          Minimum stars for RANSAC (default: 6)\n"
+        "      --min-stars <int>          Minimum stars for triangle matching (default: 6)\n"
         "\n"
-        "RANSAC alignment (used only for 2-column CSV input):\n"
-        "      --ransac-iters <int>       Max RANSAC iterations (default: 1000)\n"
-        "      --ransac-thresh <float>    Inlier reprojection threshold px (default: 2.0)\n"
+        "Triangle matching alignment (used only for 2-column CSV input):\n"
+        "      --triangle-iters <int>     Max triangle-matching iterations (default: 1000)\n"
+        "      --triangle-thresh <float>  Inlier reprojection threshold px (default: 2.0)\n"
+        "      --ransac-iters <int>       Deprecated alias of --triangle-iters\n"
+        "      --ransac-thresh <float>    Deprecated alias of --triangle-thresh\n"
         "      --match-radius <float>     Star matching radius px (default: 30.0)\n"
+        "      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)\n"
         "\n"
         "Calibration:\n"
         "      --dark <path>              Master dark FITS or text list of dark FITS paths\n"
@@ -207,6 +212,7 @@ int main(int argc, char **argv)
     cfg.output_file     = "output.fits";
     cfg.bayer_override  = BAYER_NONE;   /* auto-detect */
     cfg.use_gpu_lanczos = 1;
+    cfg.use_gpu_ransac  = -1; /* auto: follow stacking device */
     cfg.calib           = nullptr;
     /* save_opts defaults: FP32, no compression, auto stretch (NAN) */
     cfg.save_opts.tiff_compress = TIFF_COMPRESS_NONE;
@@ -238,9 +244,12 @@ int main(int argc, char **argv)
         {"moffat-beta",       required_argument, nullptr, OPT_MOFFAT_BETA},
         {"top-stars",         required_argument, nullptr, OPT_TOP_STARS},
         {"min-stars",         required_argument, nullptr, OPT_MIN_STARS},
-        {"ransac-iters",      required_argument, nullptr, OPT_RANSAC_ITERS},
-        {"ransac-thresh",     required_argument, nullptr, OPT_RANSAC_THRESH},
+        {"triangle-iters",    required_argument, nullptr, OPT_RANSAC_ITERS},
+        {"triangle-thresh",   required_argument, nullptr, OPT_RANSAC_THRESH},
+        {"ransac-iters",      required_argument, nullptr, OPT_RANSAC_ITERS},  /* deprecated alias */
+        {"ransac-thresh",     required_argument, nullptr, OPT_RANSAC_THRESH}, /* deprecated alias */
         {"match-radius",      required_argument, nullptr, OPT_MATCH_RADIUS},
+        {"match-device",      required_argument, nullptr, OPT_MATCH_DEVICE},
         {"batch-size",        required_argument, nullptr, OPT_BATCH_SIZE},
         {"bayer",             required_argument, nullptr, OPT_BAYER},
         /* Calibration */
@@ -282,6 +291,19 @@ int main(int argc, char **argv)
         case OPT_RANSAC_ITERS:  cfg.ransac.max_iters     = atoi(optarg);             break;
         case OPT_RANSAC_THRESH: cfg.ransac.inlier_thresh  = strtof(optarg, nullptr); break;
         case OPT_MATCH_RADIUS:  cfg.ransac.match_radius   = strtof(optarg, nullptr); break;
+        case OPT_MATCH_DEVICE:
+            if (strcmp(optarg, "auto") == 0) {
+                cfg.use_gpu_ransac = -1;
+            } else if (strcmp(optarg, "cpu") == 0) {
+                cfg.use_gpu_ransac = 0;
+            } else if (strcmp(optarg, "gpu") == 0) {
+                cfg.use_gpu_ransac = 1;
+            } else {
+                fprintf(stderr, "Error: unknown --match-device '%s'; use auto, cpu, or gpu\n",
+                        optarg);
+                return 1;
+            }
+            break;
 
         case OPT_BATCH_SIZE: cfg.batch_size = atoi(optarg); break;
 
@@ -455,6 +477,13 @@ int main(int argc, char **argv)
     /* Wire output path and GPU flag into config */
     cfg.output_file     = output_file;
     cfg.use_gpu_lanczos = !use_cpu;
+    if (cfg.use_gpu_ransac < 0) cfg.use_gpu_ransac = cfg.use_gpu_lanczos;
+    if (use_cpu && cfg.use_gpu_ransac) {
+        fprintf(stderr,
+                "Error: --match-device gpu is not supported together with --cpu.\n"
+                "  Use --match-device cpu with --cpu (auto follows stacking device).\n");
+        return 1;
+    }
     /* color_output is set after CSV parsing and ref_idx resolution below */
 
     /* ---- Generate / load calibration master frames ---- */
@@ -517,11 +546,12 @@ int main(int argc, char **argv)
 
     printf("Parsed %d frame(s), reference = %d\n", n_frames, ref_idx);
     static const char *bit_depth_names[] = {"f32", "f16", "16-bit", "8-bit"};
-    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s | Output: %s %s\n",
+    printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Lanczos: %s | Matching: %s | Output: %s %s\n",
            integ_str, (double)cfg.kappa, cfg.iterations, cfg.batch_size,
-           use_cpu ? "CPU" : "GPU",
-           cfg.color_output ? "color RGB" : "mono luminance",
-           bit_depth_names[cfg.save_opts.bit_depth]);
+            use_cpu ? "CPU" : "GPU",
+            cfg.use_gpu_ransac ? "GPU" : "CPU",
+            cfg.color_output ? "color RGB" : "mono luminance",
+            bit_depth_names[cfg.save_opts.bit_depth]);
     if (has_calib) {
         printf("Calibration: dark=%s flat=%s\n",
                calib.has_dark ? "yes" : "no",

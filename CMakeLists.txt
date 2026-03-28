@@ -65,6 +65,7 @@ set(LIB_SOURCES
     src/debayer_gpu.cu
     src/star_detect_gpu.cu
     src/integration_gpu.cu
+    src/ransac_gpu.cu
     src/calibration_gpu.cu
     src/pipeline.cu
 )

@@ -57,6 +57,8 @@ typedef struct {
     const char         *output_file;     /* output FITS path                                */
     BayerPattern        bayer_override;  /* BAYER_NONE = auto-detect per frame header       */
     int                 use_gpu_lanczos; /* 1 = GPU Lanczos (default), 0 = CPU Lanczos      */
+    int                 use_gpu_ransac;  /* 1 = GPU triangle matching, 0 = CPU triangle
+                                             matching; default follows use_gpu_lanczos       */
 
     /* --- Calibration --- */
     const CalibFrames  *calib;           /* NULL = no calibration; applied before debayer   */
