@@ -4,6 +4,8 @@
 
 > A high-performance DSO (Deep Sky Object) stacker using CUDA for GPU-accelerated processing
 
+Apple Silicon (Metal) implementation planning guide (including an AI-assistant implementation prompt): [`APPLE_SILICON_METAL_PLAN.md`](APPLE_SILICON_METAL_PLAN.md)
+
 **Pre-built binaries** (CLI + GUI) for Linux and Windows are available on the [Releases](https://github.com/youruser/gpu-dso-stacker/releases) page.
 
 ---

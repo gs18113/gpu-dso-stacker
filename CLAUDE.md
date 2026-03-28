@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A high-performance Deep Sky Object (DSO) image stacker using C/CUDA for GPU-accelerated processing. Python reference stacker and transform-verification tools live in `python/`.
 
+> Apple Silicon roadmap: see `APPLE_SILICON_METAL_PLAN.md` for the phased Metal backend strategy, numerical-correctness guardrails, performance priorities, and AI-assistant implementation prompt.
+
 ## Processing Pipeline
 
 All stages are implemented for both GPU and CPU execution paths. The pipeline runs end-to-end from raw FITS frames to a stacked output.
