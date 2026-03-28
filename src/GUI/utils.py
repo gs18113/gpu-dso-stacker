@@ -48,12 +48,18 @@ def _binary_path() -> Path:
     """Resolve the dso_stacker binary.
 
     Search order:
-      1. PyInstaller bundle: <exe_dir>/bin/dso_stacker[.exe]
-      2. Development layout:  <repo>/build/dso_stacker[.exe]
+      1. PyInstaller bundle: <exe_dir>/bin/dso_stacker[-cpu|-gpu|-metal][.exe]
+      2. Development layout:  <repo>/build/dso_stacker[-cpu|-gpu|-metal][.exe]
 
     Raises FileNotFoundError if the binary is absent.
     """
-    exe_name = "dso_stacker.exe" if platform.system() == "Windows" else "dso_stacker"
+    suffix = ".exe" if platform.system() == "Windows" else ""
+    exe_names = [
+        f"dso_stacker{suffix}",
+        f"dso_stacker-cpu{suffix}",
+        f"dso_stacker-gpu{suffix}",
+        f"dso_stacker-metal{suffix}",
+    ]
     searched: list[Path] = []
 
     # 1. PyInstaller / frozen bundle (one-dir mode)
@@ -61,16 +67,19 @@ def _binary_path() -> Path:
     if getattr(sys, "frozen", False):
         bundle_dir = Path(sys.executable).parent
         for subdir in ("bin", "_internal/bin"):
-            candidate = bundle_dir / subdir / exe_name
-            searched.append(candidate)
-            if candidate.is_file():
-                return candidate
+            for exe_name in exe_names:
+                candidate = bundle_dir / subdir / exe_name
+                searched.append(candidate)
+                if candidate.is_file():
+                    return candidate
 
-    # 2. Standard development layout: <repo>/build/dso_stacker
-    candidate = Path(__file__).parent.parent.parent / "build" / exe_name
-    searched.append(candidate)
-    if candidate.is_file():
-        return candidate
+    # 2. Standard development layout: <repo>/build/dso_stacker*
+    build_dir = Path(__file__).parent.parent.parent / "build"
+    for exe_name in exe_names:
+        candidate = build_dir / exe_name
+        searched.append(candidate)
+        if candidate.is_file():
+            return candidate
 
     locations = "\n".join(f"  {p}" for p in searched)
     raise FileNotFoundError(

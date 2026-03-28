@@ -262,7 +262,9 @@ jobs:
 
       - name: Package GUI
         run: |
-          chmod +x bundled_bin/dso_stacker
+          for b in dso_stacker dso_stacker-cpu dso_stacker-gpu dso_stacker-metal; do
+            [ -f "bundled_bin/$b" ] && chmod +x "bundled_bin/$b"
+          done
           pyinstaller dso_stacker_gui.spec
 
       - name: Upload GUI bundle
@@ -297,7 +299,9 @@ jobs:
 
       - name: Package GUI
         run: |
-          chmod +x bundled_bin/dso_stacker
+          for b in dso_stacker dso_stacker-cpu dso_stacker-gpu dso_stacker-metal; do
+            [ -f "bundled_bin/$b" ] && chmod +x "bundled_bin/$b"
+          done
           pyinstaller dso_stacker_gui.spec
 
       - name: Upload GUI bundle
@@ -400,7 +404,9 @@ jobs:
 
       - name: Package GUI
         run: |
-          chmod +x bundled_bin/dso_stacker
+          for b in dso_stacker dso_stacker-cpu dso_stacker-gpu dso_stacker-metal; do
+            [ -f "bundled_bin/$b" ] && chmod +x "bundled_bin/$b"
+          done
           pyinstaller dso_stacker_gui.spec
 
       - name: Upload GUI bundle
@@ -437,7 +443,9 @@ jobs:
 
       - name: Package GUI
         run: |
-          chmod +x bundled_bin/dso_stacker
+          for b in dso_stacker dso_stacker-cpu dso_stacker-gpu dso_stacker-metal; do
+            [ -f "bundled_bin/$b" ] && chmod +x "bundled_bin/$b"
+          done
           pyinstaller dso_stacker_gui.spec
 
       - name: Upload GUI bundle
