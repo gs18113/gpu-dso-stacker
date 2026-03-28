@@ -8,7 +8,7 @@ on:
 
 jobs:
   # ==================================================================
-  # Linux: build CLI + run tests inside nvidia/cuda container
+  # Linux: build GPU-selectable + CPU-only CLI binaries
   # ==================================================================
   linux:
     runs-on: ubuntu-22.04
@@ -41,46 +41,65 @@ jobs:
           make -j$(nproc)
           make install
 
-      - name: Configure CMake
+      - name: Configure CMake (GPU-selectable)
         run: |
-          cmake -B build \
+          cmake -B build-gpu \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
             -DDSO_CUDA_ARCHITECTURES="61;70;75;80;86;89" \
-            -DCMAKE_INSTALL_PREFIX=install
+            -DCMAKE_INSTALL_PREFIX=install-gpu
         env:
           CFITSIO_PREFIX: /opt/cfitsio
           PKG_CONFIG_PATH: /opt/cfitsio/lib/pkgconfig
 
-      - name: Build
-        run: cmake --build build --parallel $(nproc)
+      - name: Build (GPU-selectable)
+        run: cmake --build build-gpu --parallel $(nproc)
 
-      - name: Run tests
-        run: cd build && ctest --output-on-failure -V
+      - name: Run tests (GPU-selectable)
+        run: cd build-gpu && ctest --output-on-failure -V
 
-      - name: Install
-        run: cmake --install build
+      - name: Install (GPU-selectable)
+        run: cmake --install build-gpu
 
-      - name: Upload CLI binary
+      - name: Configure CMake (CPU-only)
+        run: |
+          cmake -B build-cpu \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDSO_ENABLE_CUDA=OFF \
+            -DCMAKE_INSTALL_PREFIX=install-cpu
+        env:
+          CFITSIO_PREFIX: /opt/cfitsio
+          PKG_CONFIG_PATH: /opt/cfitsio/lib/pkgconfig
+
+      - name: Build (CPU-only)
+        run: cmake --build build-cpu --parallel $(nproc)
+
+      - name: Run focused tests (CPU-only)
+        run: cd build-cpu && ctest --output-on-failure -V -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
+
+      - name: Install (CPU-only)
+        run: cmake --install build-cpu
+
+      - name: Upload GPU-selectable CLI binary
         uses: actions/upload-artifact@v4
         with:
-          name: dso-stacker-linux-x86_64
-          path: install/bin/dso_stacker
+          name: dso-stacker-linux-x86_64-gpu
+          path: install-gpu/bin/dso_stacker
+
+      - name: Upload CPU-only CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dso-stacker-linux-x86_64-cpu
+          path: install-cpu/bin/dso_stacker
 
       - name: Upload star_detect_overlay binary
         uses: actions/upload-artifact@v4
         with:
           name: star-detect-overlay-linux-x86_64
-          path: build/star_detect_overlay
-
-      - name: Upload ransac_status binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ransac-status-linux-x86_64
-          path: build/ransac_status
+          path: build-gpu/star_detect_overlay
 
   # ==================================================================
-  # Windows: build CLI + run tests using vcpkg + CUDA Toolkit
+  # Windows: build GPU-selectable + CPU-only CLI binaries
   # ==================================================================
   windows:
     runs-on: windows-2022
@@ -103,53 +122,72 @@ jobs:
       - name: Install vcpkg dependencies
         run: vcpkg install --triplet x64-windows
 
-      - name: Configure CMake
+      - name: Configure CMake (GPU-selectable)
         run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+          cmake -B build-gpu -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DCMAKE_CUDA_COMPILER="${{ steps.cuda-toolkit.outputs.CUDA_PATH }}/bin/nvcc.exe" `
             -DDSO_CUDA_ARCHITECTURES="61;70;75;80;86;89" `
-            -DCMAKE_INSTALL_PREFIX=install
+            -DCMAKE_INSTALL_PREFIX=install-gpu
 
-      - name: Build
-        run: cmake --build build --config Release --parallel
+      - name: Build (GPU-selectable)
+        run: cmake --build build-gpu --config Release --parallel
 
-      - name: Run tests
-        run: cd build && ctest --output-on-failure -V -C Release
+      - name: Run tests (GPU-selectable)
+        run: cd build-gpu && ctest --output-on-failure -V -C Release
 
-      - name: Collect binaries and DLLs
+      - name: Collect GPU-selectable binaries and DLLs
         shell: bash
         run: |
-          mkdir -p artifact
-          cp build/Release/dso_stacker.exe artifact/
-          cp build/Release/star_detect_overlay.exe artifact/
-          cp build/Release/ransac_status.exe artifact/
+          mkdir -p artifact-gpu
+          cp build-gpu/Release/dso_stacker.exe artifact-gpu/
+          cp build-gpu/Release/star_detect_overlay.exe artifact-gpu/
           # Copy vcpkg DLLs needed at runtime
-          for dll in build/Release/*.dll; do
-            [ -f "$dll" ] && cp "$dll" artifact/
+          for dll in build-gpu/Release/*.dll; do
+            [ -f "$dll" ] && cp "$dll" artifact-gpu/
           done
 
-      - name: Upload CLI binary
+      - name: Configure CMake (CPU-only)
+        run: |
+          cmake -B build-cpu -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DDSO_ENABLE_CUDA=OFF `
+            -DCMAKE_INSTALL_PREFIX=install-cpu
+
+      - name: Build (CPU-only)
+        run: cmake --build build-cpu --config Release --parallel
+
+      - name: Run focused tests (CPU-only)
+        run: cd build-cpu && ctest --output-on-failure -V -C Release -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
+
+      - name: Collect CPU-only binaries and DLLs
+        shell: bash
+        run: |
+          mkdir -p artifact-cpu
+          cp build-cpu/Release/dso_stacker.exe artifact-cpu/
+          for dll in build-cpu/Release/*.dll; do
+            [ -f "$dll" ] && cp "$dll" artifact-cpu/
+          done
+
+      - name: Upload GPU-selectable CLI binary
         uses: actions/upload-artifact@v4
         with:
-          name: dso-stacker-windows-x86_64
-          path: artifact/
+          name: dso-stacker-windows-x86_64-gpu
+          path: artifact-gpu/
+
+      - name: Upload CPU-only CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dso-stacker-windows-x86_64-cpu
+          path: artifact-cpu/
 
       - name: Upload star_detect_overlay binary
         uses: actions/upload-artifact@v4
         with:
           name: star-detect-overlay-windows-x86_64
           path: |
-            artifact/star_detect_overlay.exe
-            artifact/*.dll
-
-      - name: Upload ransac_status binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ransac-status-windows-x86_64
-          path: |
-            artifact/ransac_status.exe
-            artifact/*.dll
+            artifact-gpu/star_detect_overlay.exe
+            artifact-gpu/*.dll
 
   # ==================================================================
   # macOS (Apple Silicon): Metal scaffold build + focused CPU tests
@@ -211,7 +249,7 @@ jobs:
       - name: Download CLI binary
         uses: actions/download-artifact@v4
         with:
-          name: dso-stacker-linux-x86_64
+          name: dso-stacker-linux-x86_64-cpu
           path: bundled_bin/
 
       - name: Install Python dependencies
@@ -246,7 +284,7 @@ jobs:
       - name: Download CLI binary
         uses: actions/download-artifact@v4
         with:
-          name: dso-stacker-windows-x86_64
+          name: dso-stacker-windows-x86_64-cpu
           path: bundled_bin/
 
       - name: Install Python dependencies

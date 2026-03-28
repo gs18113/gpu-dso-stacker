@@ -614,6 +614,7 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - CFITSIO 4.6.3 built from source and cached at `/opt/cfitsio`
 - libtiff, libpng via `apt-get`
 - CUDA architectures: `61;70;75;80;86;89` (Pascal GTX 10xx through Ada Lovelace RTX 40xx)
+- Builds **two** CLI variants on Linux: CUDA-enabled (`dso-stacker-linux-x86_64-gpu`) and CPU-only (`dso-stacker-linux-x86_64-cpu`)
 - GPU tests auto-skip via exit code 77 (no GPU on CI runners)
 
 ### Windows CI
@@ -622,6 +623,7 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - CUDA via `Jimver/cuda-toolkit@v0.2.19` with sub-packages: `nvcc, cudart, npp, npp_dev, visual_studio_integration`
 - C libraries via vcpkg (manifest: `vcpkg.json`): cfitsio, tiff, libpng
 - CMake generator: `Visual Studio 17 2022` with vcpkg toolchain file
+- Builds **two** CLI variants on Windows: CUDA-enabled (`dso-stacker-windows-x86_64-gpu`) and CPU-only (`dso-stacker-windows-x86_64-cpu`)
 - GPU tests auto-skip
 
 ### GUI Packaging
@@ -635,9 +637,11 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 
 | Archive | Contents |
 |---|---|
-| `dso-stacker-cli-linux-x86_64.tar.gz` | CLI binary |
+| `dso-stacker-cli-linux-x86_64-cpu.tar.gz` | CPU-only CLI binary |
+| `dso-stacker-cli-linux-x86_64-gpu.tar.gz` | GPU-selectable CLI binary (CUDA runtime required) |
 | `dso-stacker-gui-linux-x86_64.tar.gz` | GUI + CLI bundle |
-| `dso-stacker-cli-windows-x86_64.zip` | CLI .exe + DLLs |
+| `dso-stacker-cli-windows-x86_64-cpu.zip` | CPU-only CLI .exe + DLLs |
+| `dso-stacker-cli-windows-x86_64-gpu.zip` | GPU-selectable CLI .exe + DLLs |
 | `dso-stacker-gui-windows-x86_64.zip` | GUI + CLI bundle |
 
 ---
