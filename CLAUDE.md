@@ -571,7 +571,7 @@ DsoError pipeline_run_cpu(FrameInfo *frames, int n_frames,
 | File | Trigger | Jobs |
 |---|---|---|
 | `.github/workflows/ci.yml` | Push / PR to `main` | `linux`, `windows`, `gui-linux`, `gui-windows` |
-| `.github/workflows/release.yml` | Tag push `v*` | Same 4 build jobs + `create-release` |
+| `.github/workflows/release.yml` | Tag push `v*` or manual dispatch (`workflow_dispatch`) | Same 4 build jobs + `create-release` |
 
 ### Linux CI
 
