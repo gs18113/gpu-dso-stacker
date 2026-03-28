@@ -22,7 +22,11 @@ static int test_dispatch_metal_stub_when_disabled(void)
     cfg.output_file = "out.fits";
     cfg.backend = DSO_BACKEND_METAL;
 
+#if defined(DSO_HAS_METAL) && DSO_HAS_METAL
+    ASSERT_ERR(pipeline_run(&frame, 1, 0, &cfg), DSO_ERR_FITS);
+#else
     ASSERT_ERR(pipeline_run(&frame, 1, 0, &cfg), DSO_ERR_INVALID_ARG);
+#endif
     return 0;
 }
 
