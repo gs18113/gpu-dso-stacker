@@ -14,7 +14,7 @@
  *   -o, --output <path>              Output FITS file (default: output.fits)
  *
  * Options (integration):
- *       --cpu                        Use CPU Lanczos (default: GPU)
+ *       --cpu                        Run ALL pipeline stages on CPU (default: GPU)
  *       --integration <method>       mean | kappa-sigma (default: kappa-sigma)
  *       --kappa <float>              Sigma multiplier for clipping (default: 3.0)
  *       --iterations <int>           Max clipping iterations (default: 3)
@@ -117,7 +117,7 @@ static void usage(const char *prog)
         "  -o, --output <path>            Output FITS file (default: output.fits)\n"
         "\n"
         "Integration:\n"
-        "      --cpu                      Use CPU Lanczos instead of GPU\n"
+        "      --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)\n"
         "      --integration <method>     mean | kappa-sigma (default: kappa-sigma)\n"
         "      --kappa <float>            Sigma clipping threshold (default: 3.0)\n"
         "      --iterations <int>         Max clipping passes per pixel (default: 3)\n"
