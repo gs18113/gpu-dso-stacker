@@ -188,6 +188,17 @@ static int parse_calib_method(const char *s, CalibMethod *out)
     return -1;
 }
 
+static const char *backend_name(DsoBackend backend)
+{
+    switch (backend) {
+    case DSO_BACKEND_CPU:   return "cpu";
+    case DSO_BACKEND_CUDA:  return "cuda";
+    case DSO_BACKEND_METAL: return "metal";
+    case DSO_BACKEND_AUTO:
+    default:                return "auto";
+    }
+}
+
 /* -------------------------------------------------------------------------
  * main
  * ------------------------------------------------------------------------- */
@@ -501,9 +512,7 @@ int main(int argc, char **argv)
         fprintf(stderr,
                 "Error: --cpu cannot be combined with --backend %s.\n"
                 "  Use either --cpu or --backend cpu.\n",
-                cfg.backend == DSO_BACKEND_AUTO ? "auto" :
-                cfg.backend == DSO_BACKEND_CUDA ? "cuda" :
-                cfg.backend == DSO_BACKEND_METAL ? "metal" : "cpu");
+                backend_name(cfg.backend));
         return 1;
     }
     if (use_cpu) cfg.backend = DSO_BACKEND_CPU;
@@ -588,20 +597,21 @@ int main(int argc, char **argv)
         cfg.color_output = (detected != BAYER_NONE) ? 1 : 0;
     }
 
-    const char *backend_name = "auto";
+    const char *selected_backend = backend_name(cfg.backend);
+    const char *compute_name = "CPU";
     switch (cfg.backend) {
-    case DSO_BACKEND_CPU:   backend_name = "cpu";   break;
-    case DSO_BACKEND_CUDA:  backend_name = "cuda";  break;
-    case DSO_BACKEND_METAL: backend_name = "metal"; break;
-    case DSO_BACKEND_AUTO:
-    default:                backend_name = "auto";  break;
+    case DSO_BACKEND_CPU:   compute_name = "CPU";   break;
+    case DSO_BACKEND_CUDA:  compute_name = "CUDA";  break;
+    case DSO_BACKEND_METAL: compute_name = "METAL"; break;
+    case DSO_BACKEND_AUTO:  compute_name = "AUTO";  break;
+    default:                compute_name = "AUTO";  break;
     }
     printf("Parsed %d frame(s), reference = %d\n", n_frames, ref_idx);
     static const char *bit_depth_names[] = {"f32", "f16", "16-bit", "8-bit"};
     printf("Integration: %s (kappa=%.1f, iter=%d, batch=%d) | Backend: %s | Lanczos: %s | Matching: %s | Output: %s %s\n",
            integ_str, (double)cfg.kappa, cfg.iterations, cfg.batch_size,
-            backend_name,
-            cfg.use_gpu_lanczos ? "GPU-like" : "CPU",
+            selected_backend,
+            compute_name,
             cfg.use_gpu_ransac ? "GPU" : "CPU",
             cfg.color_output ? "color RGB" : "mono luminance",
             bit_depth_names[cfg.save_opts.bit_depth]);

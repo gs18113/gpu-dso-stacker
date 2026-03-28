@@ -11,7 +11,7 @@ static int test_dispatch_prefers_cpu_backend(void)
     cfg.use_gpu_lanczos = 1;
     cfg.use_gpu_ransac = 1;
 
-    ASSERT_ERR(pipeline_run(&frame, 1, 0, &cfg), DSO_ERR_IO);
+    ASSERT_ERR(pipeline_run(&frame, 1, 0, &cfg), DSO_ERR_FITS);
     return 0;
 }
 
@@ -35,7 +35,7 @@ static int test_dispatch_auto_with_cpu_flag(void)
     cfg.use_gpu_lanczos = 0;
     cfg.use_gpu_ransac = 0;
 
-    ASSERT_ERR(pipeline_run(&frame, 1, 0, &cfg), DSO_ERR_IO);
+    ASSERT_ERR(pipeline_run(&frame, 1, 0, &cfg), DSO_ERR_FITS);
     return 0;
 }
 

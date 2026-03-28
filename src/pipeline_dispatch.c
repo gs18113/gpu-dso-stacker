@@ -1,10 +1,5 @@
 #include "pipeline.h"
 
-DsoError pipeline_run_cuda(FrameInfo            *frames,
-                            int                   n_frames,
-                            int                   ref_idx,
-                            const PipelineConfig *config);
-
 DsoError pipeline_run(FrameInfo            *frames,
                        int                   n_frames,
                        int                   ref_idx,
@@ -27,7 +22,10 @@ DsoError pipeline_run(FrameInfo            *frames,
         return DSO_ERR_CUDA;
 #endif
 
-    /* AUTO: preserve legacy CPU override first. */
+    /*
+     * AUTO: preserve legacy behavior for backward compatibility.
+     * Historically use_gpu_lanczos==0 selected the full CPU pipeline.
+     */
     if (!config->use_gpu_lanczos)
         return pipeline_run_cpu(frames, n_frames, ref_idx, config);
 
