@@ -152,6 +152,46 @@ jobs:
             artifact/*.dll
 
   # ==================================================================
+  # macOS (Apple Silicon): Metal scaffold build + focused CPU tests
+  # ==================================================================
+  macos-metal:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Homebrew dependencies
+        run: |
+          brew update
+          brew install cfitsio libtiff libpng pkg-config libomp
+
+      - name: Configure CMake (Metal scaffold, CUDA off)
+        run: |
+          BREW_PREFIX="$(brew --prefix)"
+          LIBOMP_PREFIX="$(brew --prefix libomp)"
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDSO_ENABLE_CUDA=OFF \
+            -DDSO_ENABLE_METAL=ON \
+            -DCMAKE_PREFIX_PATH="${BREW_PREFIX}" \
+            -DOpenMP_ROOT="${LIBOMP_PREFIX}" \
+            -DCMAKE_INSTALL_PREFIX=install
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run focused tests
+        run: cd build && ctest --output-on-failure -V -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
+
+      - name: Install
+        run: cmake --install build
+
+      - name: Upload CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dso-stacker-macos-arm64
+          path: install/bin/dso_stacker
+
+  # ==================================================================
   # GUI package (Linux) — PyInstaller bundle with CLI binary
   # ==================================================================
   gui-linux:
