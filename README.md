@@ -1,10 +1,10 @@
 # gpu-dso-stacker
 
-[![CI](https://github.com/youruser/gpu-dso-stacker/actions/workflows/ci.yml/badge.svg)](https://github.com/youruser/gpu-dso-stacker/actions/workflows/ci.yml)
+[![CI](https://github.com/gs18113/gpu-dso-stacker/actions/workflows/ci.yml/badge.svg)](https://github.com/youruser/gpu-dso-stacker/actions/workflows/ci.yml)
 
 > A high-performance DSO (Deep Sky Object) stacker with CUDA (Linux/Windows) and Metal scaffolding (Apple Silicon) backends
 
-**Pre-built binaries** (CLI + GUI) for Linux and Windows are available on the [Releases](https://github.com/youruser/gpu-dso-stacker/releases) page.
+**Pre-built binaries** (CLI + GUI) for Linux and Windows are available on the [Releases](https://github.com/gs18113/gpu-dso-stacker/releases) page.
 
 ---
 
@@ -385,7 +385,7 @@ GPU mini-batch vs single-pass CPU kappa-sigma, slight homography differences fro
 
 A PySide6 desktop application wrapping the CLI. Provides drag-and-drop frame management, all stacking options with conditional visibility, and YAML project save/load.
 
-Pre-built GUI bundles (Linux and Windows) are available on the [Releases](https://github.com/youruser/gpu-dso-stacker/releases) page — no Python installation required.
+Pre-built GUI bundles are available on the [Releases](https://github.com/gs18113/gpu-dso-stacker/releases) page — no Python installation required.
 
 ### Install (from source)
 
