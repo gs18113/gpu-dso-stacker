@@ -8,7 +8,6 @@ on:
       version:
         description: 'Release version (without v prefix, e.g. 1.0.0)'
         required: true
-        default: '1.0.0'
 
 permissions:
   contents: write
@@ -211,6 +210,27 @@ jobs:
     runs-on: ubuntu-22.04
     needs: [linux, windows, gui-linux, gui-windows]
     steps:
+      - name: Validate manual release tag is new
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG_NAME: v${{ github.event.inputs.version }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          code=$(curl -s -o /tmp/tag.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/git/ref/tags/${TAG_NAME}")
+          if [ "$code" = "200" ]; then
+            echo "Tag ${TAG_NAME} already exists. Re-run the tag-triggered release or choose a new version."
+            exit 1
+          fi
+          if [ "$code" != "404" ]; then
+            echo "Failed to validate tag availability. GitHub API returned HTTP ${code}."
+            cat /tmp/tag.json
+            exit 1
+          fi
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
@@ -225,7 +245,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
-          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: |
             dso-stacker-cli-linux-x86_64.tar.gz
