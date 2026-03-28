@@ -156,8 +156,16 @@ class StackingOptionsTab(QWidget):
 
     # --- Section builders ---
 
+    @staticmethod
+    def _style_groupbox(box: QGroupBox) -> None:
+        box.setStyleSheet(
+            "QGroupBox { font-weight: bold; margin-top: 6px; padding-top: 8px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 0px; padding: 0 4px; }"
+        )
+
     def _build_io_group(self) -> QGroupBox:
         box = QGroupBox("I / O")
+        self._style_groupbox(box)
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
@@ -180,6 +188,7 @@ class StackingOptionsTab(QWidget):
 
     def _build_execution_group(self) -> QGroupBox:
         box = QGroupBox("Execution")
+        self._style_groupbox(box)
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -195,6 +204,7 @@ class StackingOptionsTab(QWidget):
 
     def _build_integration_group(self) -> QGroupBox:
         box = QGroupBox("Integration")
+        self._style_groupbox(box)
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -214,6 +224,7 @@ class StackingOptionsTab(QWidget):
 
     def _build_star_detect_group(self) -> QGroupBox:
         box = QGroupBox("Star Detection")
+        self._style_groupbox(box)
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -232,6 +243,7 @@ class StackingOptionsTab(QWidget):
 
     def _build_ransac_group(self) -> QGroupBox:
         box = QGroupBox("Triangle Matching Alignment")
+        self._style_groupbox(box)
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -250,6 +262,7 @@ class StackingOptionsTab(QWidget):
 
     def _build_sensor_group(self) -> QGroupBox:
         box = QGroupBox("Sensor")
+        self._style_groupbox(box)
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -265,6 +278,7 @@ class StackingOptionsTab(QWidget):
 
     def _build_output_format_group(self) -> QGroupBox:
         box = QGroupBox("Output Format")
+        self._style_groupbox(box)
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -302,6 +316,7 @@ class StackingOptionsTab(QWidget):
 
     def _build_calibration_group(self) -> QGroupBox:
         box = QGroupBox("Calibration")
+        self._style_groupbox(box)
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)

@@ -79,9 +79,9 @@ class FrameTableWidget(QWidget):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         self._btn_add = QPushButton("Add Files…")
-        self._btn_add.setFixedHeight(28)
+        self._btn_add.setFixedHeight(32)
         self._btn_remove = QPushButton("Remove Selected")
-        self._btn_remove.setFixedHeight(28)
+        self._btn_remove.setFixedHeight(32)
         toolbar.addWidget(self._btn_add)
         toolbar.addWidget(self._btn_remove)
         toolbar.addStretch()
@@ -100,6 +100,7 @@ class FrameTableWidget(QWidget):
         hdr.setSectionResizeMode(COL_PATH,        QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(COL_SIZE,        QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(COL_DIMENSIONS,  QHeaderView.ResizeMode.ResizeToContents)
+        self._table.setStyleSheet("QTableWidget { gridline-color: #3a3a3a; }")
         layout.addWidget(self._table)
 
         # Connect signals

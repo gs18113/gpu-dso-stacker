@@ -52,6 +52,23 @@ def _apply_dark_palette(app: QApplication) -> None:
     palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(128, 128, 128))
 
     app.setPalette(palette)
+    app.setStyleSheet(
+        "QMainWindow, QWidget { background-color: #2a2a2a; color: #dcdcdc; }"
+        "QMenuBar, QMenu { background-color: #303030; color: #dcdcdc; }"
+        "QMenu::item:selected { background-color: #4287f5; color: #ffffff; }"
+        "QTabWidget::pane { border: 1px solid #4a4a4a; }"
+        "QTabBar::tab { background: #3a3a3a; color: #dcdcdc; border: 1px solid #4a4a4a; "
+        "padding: 6px 12px; margin-right: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px; }"
+        "QTabBar::tab:selected { background: #474747; }"
+        "QTabBar::tab:hover:!selected { background: #444444; }"
+        "QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background-color: #1f1f1f; "
+        "border: 1px solid #565656; border-radius: 4px; padding: 4px 6px; }"
+        "QGroupBox { border: 1px solid #4a4a4a; border-radius: 6px; margin-top: 10px; padding: 8px; }"
+        "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }"
+        "QHeaderView::section { background-color: #333333; color: #dcdcdc; border: 1px solid #4a4a4a; padding: 4px; }"
+        "QTableWidget { background-color: #1e1e1e; alternate-background-color: #252525; "
+        "gridline-color: #3a3a3a; color: #dcdcdc; border: 1px solid #4a4a4a; }"
+    )
 
 
 def main() -> None:

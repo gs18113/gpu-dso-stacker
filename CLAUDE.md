@@ -745,6 +745,7 @@ src/GUI/
 - **Bit depth combo item disabling**: uses `QStandardItemModel` — items are disabled (not removed) based on output format. Snaps to nearest valid selection automatically.
 - **Binary path resolution**: `utils._binary_path()` resolves `<repo>/build/dso_stacker` relative to `utils.py`. Raises `FileNotFoundError` with a helpful build instruction if absent.
 - **Dark theme**: Fusion style + custom `QPalette` applied in `main.py`. No external theme library required.
+- **GUI styling split**: `main.py` now applies an app-wide Qt stylesheet (tabs, tables, inputs, menus, group boxes) on top of the dark `QPalette`, while `main_window.py` keeps control-specific Run/Abort/Log styling.
 
 ### YAML project schema
 
