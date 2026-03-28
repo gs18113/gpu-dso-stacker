@@ -39,7 +39,7 @@ _DENSITY_PRESETS: dict[str, UiDensity] = {
         input_padding_v=2, input_padding_h=5,
         group_margin_top=8, group_padding=6, header_padding=3,
         main_margin=4, main_spacing=4, toolbar_spacing=6,
-        action_button_h=30, table_button_h=28,
+        action_button_h=30, table_button_h=30,
         log_font_size=12, log_padding=3,
         options_spacing=8, options_margin=8,
     ),

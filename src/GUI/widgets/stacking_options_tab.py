@@ -161,6 +161,8 @@ class StackingOptionsTab(QWidget):
     @staticmethod
     def _style_groupbox(box: QGroupBox) -> None:
         density = get_ui_density()
+        # Keep this local override to align stacked options sections with the
+        # selected density preset; app-wide defaults are shared across widgets.
         box.setStyleSheet(
             f"QGroupBox {{ font-weight: bold; margin-top: {density.group_margin_top}px; padding-top: {density.group_padding}px; }}"
             "QGroupBox::title { subcontrol-origin: margin; left: 0px; padding: 0 4px; }"
