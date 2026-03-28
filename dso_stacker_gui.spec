@@ -4,12 +4,12 @@ PyInstaller spec for the DSO Stacker GUI.
 
 Produces a one-dir bundle at dist/DSOStacker/ containing:
   - DSOStacker[.exe]            GUI executable
-  - bin/dso_stacker[.exe]       CLI binary (+ DLLs on Windows)
+  - bin/dso_stacker*[.exe]      CLI binary (+ DLLs on Windows)
 
 Usage (CI or local):
   1. Place the pre-built CLI binary in bundled_bin/ :
-       bundled_bin/dso_stacker        (Linux)
-       bundled_bin/dso_stacker.exe    (Windows, plus any .dll files)
+       bundled_bin/dso_stacker[-cpu|-gpu|-metal]        (Linux/macOS)
+       bundled_bin/dso_stacker[-cpu|-gpu|-metal].exe    (Windows, plus any .dll files)
   2. Run:  pyinstaller dso_stacker_gui.spec
 """
 
@@ -20,16 +20,18 @@ import platform
 cli_binaries = []
 bundled = 'bundled_bin'
 if platform.system() == 'Windows':
-    exe = os.path.join(bundled, 'dso_stacker.exe')
-    if os.path.isfile(exe):
-        cli_binaries.append((exe, 'bin'))
+    exe_names = ['dso_stacker.exe', 'dso_stacker-cpu.exe', 'dso_stacker-gpu.exe', 'dso_stacker-metal.exe']
+else:
+    exe_names = ['dso_stacker', 'dso_stacker-cpu', 'dso_stacker-gpu', 'dso_stacker-metal']
+
+exe = next((os.path.join(bundled, name) for name in exe_names if os.path.isfile(os.path.join(bundled, name))), None)
+if exe:
+    cli_binaries.append((exe, 'bin'))
+
+if platform.system() == 'Windows':
     for f in os.listdir(bundled):
         if f.lower().endswith('.dll'):
             cli_binaries.append((os.path.join(bundled, f), 'bin'))
-else:
-    exe = os.path.join(bundled, 'dso_stacker')
-    if os.path.isfile(exe):
-        cli_binaries.append((exe, 'bin'))
 
 a = Analysis(
     ['src/GUI/main.py'],

@@ -445,10 +445,18 @@ Release artifacts:
 
 | Archive | Contents |
 |---|---|
-| `dso-stacker-cli-linux-x86_64.tar.gz` | CLI binary |
-| `dso-stacker-gui-linux-x86_64.tar.gz` | GUI bundle (includes CLI) |
-| `dso-stacker-cli-windows-x86_64.zip` | CLI .exe + DLLs |
-| `dso-stacker-gui-windows-x86_64.zip` | GUI bundle (includes CLI) |
+| `dso-stacker-cli-linux-x86_64-cpu.tar.gz` | CPU-only CLI binary |
+| `dso-stacker-cli-linux-x86_64-gpu.tar.gz` | GPU-selectable CLI binary |
+| `dso-stacker-cli-macos-arm64-cpu.tar.gz` | CPU-only CLI binary |
+| `dso-stacker-cli-macos-arm64-metal.tar.gz` | Metal-enabled CLI binary |
+| `dso-stacker-gui-linux-x86_64-cpu.tar.gz` | GUI bundle with CPU-only CLI (`bin/dso_stacker`) |
+| `dso-stacker-gui-linux-x86_64-gpu.tar.gz` | GUI bundle with GPU-selectable CLI (`bin/dso_stacker`) |
+| `dso-stacker-gui-macos-arm64-cpu.tar.gz` | GUI bundle with CPU-only CLI (`bin/dso_stacker`) |
+| `dso-stacker-gui-macos-arm64-metal.tar.gz` | GUI bundle with Metal-enabled CLI (`bin/dso_stacker`) |
+| `dso-stacker-cli-windows-x86_64-cpu.zip` | CPU-only CLI .exe + DLLs |
+| `dso-stacker-cli-windows-x86_64-gpu.zip` | GPU-selectable CLI .exe + DLLs |
+| `dso-stacker-gui-windows-x86_64-cpu.zip` | GUI bundle with CPU-only CLI (`bin/dso_stacker.exe`) |
+| `dso-stacker-gui-windows-x86_64-gpu.zip` | GUI bundle with GPU-selectable CLI (`bin/dso_stacker.exe`) |
 
 ---
 
