@@ -1,6 +1,6 @@
 # gpu-dso-stacker
 
-[![CI](https://github.com/gs18113/gpu-dso-stacker/actions/workflows/ci.yml/badge.svg)](https://github.com/youruser/gpu-dso-stacker/actions/workflows/ci.yml)
+ [![CI](https://github.com/gs18113/gpu-dso-stacker/actions/workflows/ci.yml/badge.svg)](https://github.com/gs18113/gpu-dso-stacker/actions/workflows/ci.yml)
 
 > A high-performance DSO (Deep Sky Object) stacker with CUDA (Linux/Windows) and Metal scaffolding (Apple Silicon) backends
 
