@@ -1,6 +1,24 @@
 THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 =============================================
 
+GPLv3 compatibility summary (informational, not legal advice)
+-------------------------------------------------------------
+
+This project is licensed under GPLv3. Based on the license terms of the
+dependencies listed below:
+
+- CFITSIO, libtiff, libpng, PyYAML, and getopt_port use permissive licenses
+  that are compatible with GPLv3 distribution.
+- PySide6/Qt for Python is under LGPLv3, which is compatible with GPLv3.
+- CUDA/NPP components are under the NVIDIA CUDA EULA (non-open-source). They
+  are optional and only required for GPU-selectable builds/runs. Redistributors
+  of GPU artifacts must comply with the NVIDIA CUDA EULA in addition to GPLv3.
+
+As distributed by this repository:
+- CPU-only artifacts avoid CUDA/NPP runtime dependency.
+- GPU-selectable artifacts dynamically link CUDA/NPP and therefore carry the
+  additional CUDA EULA compliance obligation for redistributors/users.
+
 This project incorporates components from the projects listed below. The
 original copyright notices and license terms are reproduced below. Changes
 may have been made to the original software as part of integrating it into
