@@ -12,7 +12,10 @@
 
 ## Runtime Requirements
 
-Pre-built binaries require an NVIDIA GPU and the CUDA 12.x runtime libraries installed on your system. The `--cpu` flag works without a GPU but the CUDA shared libraries must still be present.
+Runtime requirements depend on which release artifact you use:
+
+- **CPU-only builds** (`*-cpu` archives) do **not** require an NVIDIA GPU or CUDA runtime.
+- **GPU-selectable builds** (`*-gpu` archives) require an NVIDIA GPU and CUDA 12.x runtime libraries.
 
 ### Linux
 
@@ -480,11 +483,12 @@ python3 python/stacker.py -f data/transform_mat.csv -o ref.fits
 
 This project is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
 
-This software dynamically links the NVIDIA CUDA Toolkit and NVIDIA
-Performance Primitives (NPP). Users must have the CUDA runtime
-installed on their system. Both libraries are covered under the single
-[NVIDIA CUDA EULA](https://docs.nvidia.com/cuda/eula/), which users
-accept when installing the CUDA Toolkit.
+The GPU-selectable binaries dynamically link the NVIDIA CUDA Toolkit and
+NVIDIA Performance Primitives (NPP). If you use a GPU-selectable build,
+you must have the CUDA runtime installed on your system. CPU-only builds
+do not depend on CUDA runtime libraries. CUDA and NPP are covered under
+the single [NVIDIA CUDA EULA](https://docs.nvidia.com/cuda/eula/), which
+users accept when installing the CUDA Toolkit.
 
 Third-party open-source components (CFITSIO, libtiff, libpng, PySide6,
 PyYAML, getopt\_port) are used under their respective permissive or
