@@ -51,7 +51,8 @@ During installation, select **Custom** and enable at minimum:
 - **NPP** (NVIDIA Performance Primitives)
 - **Display Driver** (if not already installed)
 
-This places `cudart64_12.dll`, `nppc64_12.dll`, and `nppig64_12.dll` in `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.x\bin`, which the installer adds to `PATH`.
+This places `cudart64_12.dll`, `nppc64_12.dll`, and `nppig64_12.dll` in `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.x\bin`.
+Recent CUDA installers may set `CUDA_PATH` without updating `PATH`; the GUI launcher now prepends `%CUDA_PATH%\bin` to `PATH` for the CLI subprocess, so GPU runs continue to work in that setup.
 
 For unattended / silent installation:
 

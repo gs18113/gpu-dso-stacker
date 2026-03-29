@@ -742,6 +742,7 @@ src/GUI/
 - **Bias / Darkflat mutual exclusion**: `QTabWidget.setTabEnabled(False)` grays out and disables the opposing tab; `setTabToolTip` explains why. Checked again at run time.
 - **Conditional visibility**: single `_update_visibility()` slot in `StackingOptionsTab` connected to all relevant widget change signals (integration combo, CPU checkbox, output path, bit depth).
 - **Triangle-matching device in GUI**: `StackingOptionsTab` exposes `match_device` (`auto|cpu|gpu`) and `utils.build_command()` emits `--match-device` when GPU mode is active and the value is not `auto`.
+- **Windows CUDA runtime PATH fallback in GUI**: `SubprocessRunner` now builds a subprocess env via `_build_subprocess_env()`; on Windows, if `CUDA_PATH` exists and `%CUDA_PATH%\bin` is missing from `PATH`, it prepends that directory before launching `dso_stacker`. This covers newer CUDA installers that set `CUDA_PATH` but don't update `PATH`.
 - **Bit depth combo item disabling**: uses `QStandardItemModel` — items are disabled (not removed) based on output format. Snaps to nearest valid selection automatically.
 - **Binary path resolution**: `utils._binary_path()` resolves `<repo>/build/dso_stacker` relative to `utils.py`. Raises `FileNotFoundError` with a helpful build instruction if absent.
 - **Dark theme**: Fusion style + custom `QPalette` applied in `main.py`. No external theme library required.
