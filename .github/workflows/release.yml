@@ -91,9 +91,9 @@ jobs:
           path: install-cpu/bin/dso_stacker
 
   # ==================================================================
-  # Windows: build GPU-selectable + CPU-only CLI binaries
+  # Windows (GPU-selectable CLI binary)
   # ==================================================================
-  windows:
+  windows-gpu:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -143,6 +143,36 @@ jobs:
             [ -f "$dll" ] && cp "$dll" artifact-gpu/
           done
 
+      - name: Upload GPU-selectable CLI binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: dso-stacker-windows-x86_64-gpu
+          path: artifact-gpu/
+
+  # ==================================================================
+  # Windows (CPU-only CLI binary)
+  # ==================================================================
+  windows-cpu:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup vcpkg
+        id: setup-vcpkg-1
+        continue-on-error: true
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Retry setup vcpkg on transient failure
+        if: steps.setup-vcpkg-1.outcome == 'failure'
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgJsonGlob: 'vcpkg.json'
+
+      - name: Install vcpkg dependencies
+        run: vcpkg install --triplet x64-windows
+
       - name: Build (CPU-only)
         run: |
           cmake -B build-cpu -G "Visual Studio 17 2022" -A x64 `
@@ -162,12 +192,6 @@ jobs:
           for dll in build-cpu/Release/*.dll; do
             [ -f "$dll" ] && cp "$dll" artifact-cpu/
           done
-
-      - name: Upload GPU-selectable CLI binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: dso-stacker-windows-x86_64-gpu
-          path: artifact-gpu/
 
       - name: Upload CPU-only CLI binary
         uses: actions/upload-artifact@v4
@@ -315,7 +339,7 @@ jobs:
   # ==================================================================
   gui-windows-cpu:
     runs-on: windows-2022
-    needs: windows
+    needs: windows-cpu
     steps:
       - uses: actions/checkout@v4
 
@@ -348,7 +372,7 @@ jobs:
   # ==================================================================
   gui-windows-gpu:
     runs-on: windows-2022
-    needs: windows
+    needs: windows-gpu
     steps:
       - uses: actions/checkout@v4
 
@@ -459,7 +483,7 @@ jobs:
   # ==================================================================
   create-release:
     runs-on: ubuntu-22.04
-    needs: [linux, windows, macos-metal, gui-linux-cpu, gui-linux-gpu, gui-windows-cpu, gui-windows-gpu, gui-macos-cpu, gui-macos-metal]
+    needs: [linux, windows-gpu, windows-cpu, macos-metal, gui-linux-cpu, gui-linux-gpu, gui-windows-cpu, gui-windows-gpu, gui-macos-cpu, gui-macos-metal]
     steps:
       - name: Validate manual release tag is new
         if: github.event_name == 'workflow_dispatch'
