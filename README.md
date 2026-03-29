@@ -490,6 +490,12 @@ do not depend on CUDA runtime libraries. CUDA and NPP are covered under
 the single [NVIDIA CUDA EULA](https://docs.nvidia.com/cuda/eula/), which
 users accept when installing the CUDA Toolkit.
 
+From a redistribution perspective, the bundled/used third-party licenses in
+this repository are generally GPLv3-compatible (permissive and LGPLv3
+components). CUDA/NPP remains optional but is governed by the NVIDIA CUDA EULA,
+so redistributors of GPU artifacts must satisfy both GPLv3 obligations for this
+project and CUDA EULA terms for NVIDIA runtime components.
+
 Third-party open-source components (CFITSIO, libtiff, libpng, PySide6,
 PyYAML, getopt\_port) are used under their respective permissive or
 LGPL licenses. See [THIRD\_PARTY\_LICENSES](THIRD_PARTY_LICENSES) for
