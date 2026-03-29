@@ -82,6 +82,7 @@ class FrameTableWidget(QWidget):
         self._btn_add.setFixedHeight(28)
         self._btn_remove = QPushButton("Remove Selected")
         self._btn_remove.setFixedHeight(28)
+        self._btn_remove.setEnabled(False)
         toolbar.addWidget(self._btn_add)
         toolbar.addWidget(self._btn_remove)
         toolbar.addStretch()
@@ -106,6 +107,7 @@ class FrameTableWidget(QWidget):
         self._btn_add.clicked.connect(self._on_add_clicked)
         self._btn_remove.clicked.connect(self.remove_selected)
         self._table.files_dropped.connect(self.add_files)
+        self._table.itemSelectionChanged.connect(self._update_remove_enabled)
 
     # ------------------------------------------------------------------ #
     # Public API                                                           #
@@ -118,6 +120,7 @@ class FrameTableWidget(QWidget):
             return
         for path in new_paths:
             self._add_row(path)
+        self._update_remove_enabled()
         self.files_changed.emit()
 
     def remove_selected(self) -> None:
@@ -131,6 +134,7 @@ class FrameTableWidget(QWidget):
             if path_item:
                 self._loaded_paths.discard(path_item.text())
             self._table.removeRow(row)
+        self._update_remove_enabled()
         if rows:
             self.files_changed.emit()
 
@@ -147,6 +151,7 @@ class FrameTableWidget(QWidget):
         """Remove every row from the table."""
         self._table.setRowCount(0)
         self._loaded_paths.clear()
+        self._update_remove_enabled()
         self.files_changed.emit()
 
     def table(self) -> QTableWidget:
@@ -204,6 +209,9 @@ class FrameTableWidget(QWidget):
         )
         if paths:
             self.add_files(paths)
+
+    def _update_remove_enabled(self) -> None:
+        self._btn_remove.setEnabled(bool(self._table.selectedIndexes()))
 
 
 # ------------------------------------------------------------------ #

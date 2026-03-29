@@ -71,8 +71,8 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
 
         # ---- Tab widget ----
         self._tabs = QTabWidget()
@@ -101,35 +101,23 @@ class MainWindow(QMainWindow):
         toolbar.setSpacing(8)
 
         self._run_btn   = QPushButton("▶  Stack")
+        self._run_btn.setObjectName("runButton")
         self._run_btn.setFixedHeight(34)
         self._run_btn.setMinimumWidth(120)
-        self._run_btn.setStyleSheet(
-            "QPushButton { font-weight: bold; background-color: #2e7d32; color: white; "
-            "border-radius: 4px; padding: 0 16px; }"
-            "QPushButton:hover { background-color: #388e3c; }"
-            "QPushButton:disabled { background-color: #555; color: #aaa; }"
-        )
 
         self._abort_btn = QPushButton("■  Abort")
+        self._abort_btn.setObjectName("abortButton")
         self._abort_btn.setFixedHeight(34)
         self._abort_btn.setMinimumWidth(100)
         self._abort_btn.setEnabled(False)
-        self._abort_btn.setStyleSheet(
-            "QPushButton { font-weight: bold; background-color: #c62828; color: white; "
-            "border-radius: 4px; padding: 0 16px; }"
-            "QPushButton:hover { background-color: #d32f2f; }"
-            "QPushButton:disabled { background-color: #555; color: #aaa; }"
-        )
 
         self._log_toggle_btn = QPushButton("▼  Log")
         self._log_toggle_btn.setFixedHeight(34)
         self._log_toggle_btn.setCheckable(True)
         self._log_toggle_btn.setChecked(True)
-        self._log_toggle_btn.setStyleSheet(
-            "QPushButton { border-radius: 4px; padding: 0 12px; }"
-        )
 
         self._status_lbl = QLabel("Ready")
+        self._status_lbl.setObjectName("statusLabel")
         self._status_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         toolbar.addWidget(self._run_btn)
@@ -145,11 +133,6 @@ class MainWindow(QMainWindow):
         self._log.setMaximumBlockCount(5000)
         self._log.setMinimumHeight(120)
         self._log.setMaximumHeight(300)
-        self._log.setStyleSheet(
-            "QPlainTextEdit { font-family: monospace; font-size: 12px; "
-            "background: #1e1e1e; color: #d4d4d4; border: 1px solid #444; "
-            "border-radius: 4px; }"
-        )
 
         # ---- Splitter: tabs / log ----
         splitter = QSplitter(Qt.Orientation.Vertical)
