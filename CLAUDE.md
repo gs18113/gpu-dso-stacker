@@ -43,7 +43,8 @@ The CSV input is always 2-column (`filepath, is_reference`). Star detection + al
 
 ```
 gpu-dso-stacker/
-├── LICENSE                      ← Proprietary license
+├── LICENSE                      ← GNU General Public License v3.0 (GPLv3)
+├── README.ko.md                 ← Korean README translation (README.md remains default)
 ├── THIRD_PARTY_LICENSES         ← Third-party license texts and attribution notices
 ├── CMakeLists.txt               ← CMake build definition
 ├── main.cpp                     ← CLI entry point (getopt_long)
@@ -654,7 +655,7 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 
 ## Licensing
 
-- **Project license**: Proprietary — see `LICENSE`.
+- **Project license**: GNU General Public License v3.0 (GPLv3) — see `LICENSE`.
 - **NVIDIA CUDA Toolkit + NPP**: Both covered under the single [NVIDIA CUDA EULA](https://docs.nvidia.com/cuda/eula/). NPP does not require any additional license beyond the CUDA EULA. Dynamically linked — users must have the CUDA runtime installed; they accept the NVIDIA EULA when installing the CUDA Toolkit.
 - **Third-party components**: CFITSIO (U.S. Government permissive), libtiff (BSD-style), libpng (libpng-2.0), PySide6 (LGPL v3), PyYAML (MIT), getopt\_port (BSD-2-Clause). Full texts in `THIRD_PARTY_LICENSES`.
 

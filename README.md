@@ -1,5 +1,7 @@
 # gpu-dso-stacker
 
+[English](README.md) | [한국어](README.ko.md)
+
 [![CI](https://github.com/gs18113/gpu-dso-stacker/actions/workflows/ci.yml/badge.svg)](https://github.com/gs18113/gpu-dso-stacker/actions/workflows/ci.yml)
 
 > A high-performance DSO (Deep Sky Object) stacker with CUDA (Linux/Windows) and Metal scaffolding (Apple Silicon) backends
@@ -476,7 +478,7 @@ python3 python/stacker.py -f data/transform_mat.csv -o ref.fits
 
 ## License
 
-This software is **proprietary**. See [LICENSE](LICENSE) for terms.
+This project is licensed under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
 
 This software dynamically links the NVIDIA CUDA Toolkit and NVIDIA
 Performance Primitives (NPP). Users must have the CUDA runtime
