@@ -478,10 +478,10 @@ GitHub Actions build and test on every push to `main` and every PR.
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | Push / PR to `main` | Build + test (Linux & Windows), package GUI bundles |
+| `ci.yml` | Push / PR to `main` | Build + test (Linux, Windows, macOS), package GUI bundles |
 | `release.yml` | Tag push `v*` | Same as CI, then creates a GitHub Release with archives |
 
-**Linux** builds inside `nvidia/cuda:12.6.3-devel-ubuntu22.04`; **Windows** uses `Jimver/cuda-toolkit` + vcpkg. GPU tests auto-skip (exit code 77) on runners without a GPU. GUI packaging uses PyInstaller.
+**Linux** builds inside `nvidia/cuda:12.6.2-devel-ubuntu22.04`; **Windows** uses `Jimver/cuda-toolkit` + vcpkg (parallel `windows-gpu` and `windows-cpu` jobs); **macOS** builds on `macos-14` (Apple Silicon) with Metal-enabled and CPU-only variants, bundling required dylibs. GPU tests auto-skip (exit code 77) on runners without a GPU. GUI packaging uses PyInstaller.
 
 Release artifacts:
 

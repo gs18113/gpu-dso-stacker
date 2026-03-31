@@ -105,8 +105,10 @@ gpu-dso-stacker/
 │   └── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
 ├── test/
 │   └── star_detect_overlay.cpp  ← Standalone CLI helper that runs CPU/GPU star detection and writes PNG overlays with detected-star circles
+├── docs/
+│   └── index.html               ← GitHub Pages landing page (starfield animation + project overview)
 ├── .github/workflows/
-│   ├── ci.yml                   ← CI: build + test on push/PR (Linux + Windows)
+│   ├── ci.yml                   ← CI: build + test on push/PR (Linux + Windows + macOS)
 │   └── release.yml              ← Release: build + package + GitHub Release on tag v*
 ├── vcpkg.json                   ← vcpkg dependency manifest (Windows builds)
 ├── dso_stacker_gui.spec         ← PyInstaller spec for GUI packaging
@@ -551,6 +553,7 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - **Moffat constant memory cap**: max kernel radius is 15 (alpha ≤ 5 → R = ceil(3·alpha) ≤ 15, diameter 31, 961 floats × 4 = ~3.8 KB within 64 KB constant limit).
 - **Single-pass pipeline**: each frame is loaded from disk exactly once. Star detection, RANSAC, and warp all run in the same pass before the next frame is loaded. No separate Phase 1 / Phase 2; no 11-column pre-computed transform path. The only CSV format is 2-column (`filepath, is_reference`).
 - **Triangle-matching mismatch policy**: non-reference frames that fail alignment are skipped (not fatal). Both CPU and GPU pipelines print a final summary: `successful frames: X/Y (skipped: Z)`. Reference-frame alignment failure still aborts.
+- **`--min-stars` propagates to RANSAC**: `main.cpp` sets `cfg.ransac.min_inliers = cfg.min_stars` after argument parsing so the RANSAC inlier acceptance threshold is consistent with the star detection minimum. Previously `min_inliers` was hardcoded at 4.
 - **CPU vs GPU output agreement**: not bit-identical due to different Moffat conv precision (→ slightly different homographies), different Lanczos implementations (nppi vs hand-coded), and different integration paths. Empirical PSNR ≈ 44.6 dB; mean relative error ≈ 0.25% in the interior on 10 × 4656×3520 frames.
 - **`lanczos_transform_cpu` identity fast path**: if H is identity and src/dst dimensions match, falls back to `memcpy` before entering the warp loop.
 - **`lanczos_transform_cpu` weight precomputation**: `wx_arr[6]` and `wy_arr[6]` are computed once before the 6×6 tap loop, reducing `lanczos_weight` calls from 42 to 12 per destination pixel.
@@ -606,12 +609,14 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 
 | File | Trigger | Jobs |
 |---|---|---|
-| `.github/workflows/ci.yml` | Push / PR to `main` | `linux`, `windows`, `gui-linux`, `gui-windows` |
-| `.github/workflows/release.yml` | Tag push `v*` or manual dispatch (`workflow_dispatch`) | Same 4 build jobs + `create-release` |
+| `.github/workflows/ci.yml` | Push / PR to `main` | `linux`, `windows-gpu`, `windows-cpu`, `macos-metal`, `gui-linux-cpu`, `gui-linux-gpu`, `gui-windows-cpu`, `gui-windows-gpu`, `gui-macos-cpu`, `gui-macos-metal` |
+| `.github/workflows/release.yml` | Tag push `v*` or manual dispatch (`workflow_dispatch`) | Same build jobs + `create-release` |
+
+Both workflows declare least-privilege `permissions: contents: read` at the top level (CI) or `contents: write` (release, for creating GitHub Releases).
 
 ### Linux CI
 
-- Container: `nvidia/cuda:12.6.3-devel-ubuntu22.04` (includes nvcc, NPP, CUDA headers)
+- Container: `nvidia/cuda:12.6.2-devel-ubuntu22.04` (includes nvcc, NPP, CUDA headers)
 - CFITSIO 4.6.3 built from source and cached at `/opt/cfitsio`
 - libtiff, libpng via `apt-get`
 - CUDA architectures: `61;70;75;80;86;89` (Pascal GTX 10xx through Ada Lovelace RTX 40xx)
@@ -624,8 +629,16 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - CUDA via `Jimver/cuda-toolkit@v0.2.19` with sub-packages: `nvcc, cudart, npp, npp_dev, visual_studio_integration`
 - C libraries via vcpkg (manifest: `vcpkg.json`): cfitsio, tiff, libpng
 - CMake generator: `Visual Studio 17 2022` with vcpkg toolchain file
-- Builds **two** CLI variants on Windows: CUDA-enabled (`dso-stacker-windows-x86_64-gpu`) and CPU-only (`dso-stacker-windows-x86_64-cpu`)
+- Builds **two** CLI variants in separate parallel jobs (`windows-gpu`, `windows-cpu`): CUDA-enabled (`dso-stacker-windows-x86_64-gpu`) and CPU-only (`dso-stacker-windows-x86_64-cpu`)
 - GPU tests auto-skip
+
+### macOS CI
+
+- Runner: `macos-14` (Apple Silicon)
+- Builds **two** CLI variants in one job (`macos-metal`): Metal-enabled (`-DDSO_ENABLE_METAL=ON`) and CPU-only (`-DDSO_ENABLE_METAL=OFF`)
+- Bundled dylibs: stages `*.dylib` from `install-*/lib/` into artifacts
+- Execute permissions: `chmod +x` applied to binaries before artifact upload
+- No CUDA on macOS — all builds use `-DDSO_ENABLE_CUDA=OFF`
 
 ### GUI Packaging
 

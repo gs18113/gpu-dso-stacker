@@ -6,13 +6,16 @@
 
 > CUDA(Linux/Windows) 및 Metal 스캐폴딩(Apple Silicon) 백엔드를 지원하는 고성능 DSO(Deep Sky Object) 스태커
 
-Linux/Windows용 **사전 빌드 바이너리**(CLI + GUI)는 [Releases](https://github.com/gs18113/gpu-dso-stacker/releases)에서 받을 수 있습니다.
+Linux, macOS, Windows용 **사전 빌드 바이너리**(CLI + GUI)는 [Releases](https://github.com/gs18113/gpu-dso-stacker/releases)에서 받을 수 있습니다.
 
 ---
 
 ## 런타임 요구사항
 
-사전 빌드 바이너리는 NVIDIA GPU와 CUDA 12.x 런타임 라이브러리가 필요합니다. `--cpu` 플래그를 사용하면 GPU 없이 실행할 수 있지만 CUDA 공유 라이브러리는 여전히 시스템에 있어야 합니다.
+런타임 요구사항은 릴리스 아티팩트 유형에 따라 다릅니다:
+
+- **CPU 전용 빌드** (`*-cpu` 아카이브): NVIDIA GPU나 CUDA 런타임이 **필요 없습니다**.
+- **GPU 선택 빌드** (`*-gpu` 아카이브): NVIDIA GPU와 CUDA 12.x 런타임 라이브러리가 필요합니다.
 
 ### Linux
 
