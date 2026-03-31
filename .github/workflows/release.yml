@@ -91,20 +91,30 @@ jobs:
           path: install-cpu/bin/dso_stacker
 
   # ==================================================================
-  # Windows (GPU-selectable CLI binary)
+  # Windows: build GPU-selectable + CPU-only CLI binaries
   # ==================================================================
-  windows-gpu:
+  windows:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup MSVC dev environment
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install CUDA Toolkit
         uses: Jimver/cuda-toolkit@v0.2.19
         id: cuda-toolkit
         with:
           cuda: '12.6.2'
-          method: 'network'
+          method: 'local'
           sub-packages: '["nvcc", "cudart", "npp", "npp_dev", "visual_studio_integration"]'
+
+      - name: Export GitHub Actions cache variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Setup vcpkg
         id: setup-vcpkg-1
@@ -121,26 +131,50 @@ jobs:
 
       - name: Install vcpkg dependencies
         run: vcpkg install --triplet x64-windows
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
       - name: Build (GPU-selectable)
         run: |
-          cmake -B build-gpu -G "Visual Studio 17 2022" -A x64 `
+          cmake -B build-gpu -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DCMAKE_CUDA_COMPILER="${{ steps.cuda-toolkit.outputs.CUDA_PATH }}/bin/nvcc.exe" `
             -DDSO_CUDA_ARCHITECTURES="61;70;75;80;86;89" `
             -DCMAKE_INSTALL_PREFIX=install-gpu
-          cmake --build build-gpu --config Release --parallel
+          cmake --build build-gpu --parallel
 
       - name: Run tests (GPU-selectable)
-        run: cd build-gpu && ctest --output-on-failure -V -C Release
+        run: cd build-gpu && ctest --output-on-failure -V
+
+      - name: Build (CPU-only)
+        run: |
+          cmake -B build-cpu -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DDSO_ENABLE_CUDA=OFF `
+            -DCMAKE_INSTALL_PREFIX=install-cpu
+          cmake --build build-cpu --parallel
+
+      - name: Run focused tests (CPU-only)
+        run: cd build-cpu && ctest --output-on-failure -V -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
 
       - name: Collect GPU-selectable binaries and DLLs
         shell: bash
         run: |
           mkdir -p artifact-gpu
-          cp build-gpu/Release/dso_stacker.exe artifact-gpu/
-          for dll in build-gpu/Release/*.dll; do
+          cp build-gpu/dso_stacker.exe artifact-gpu/
+          for dll in build-gpu/*.dll; do
             [ -f "$dll" ] && cp "$dll" artifact-gpu/
+          done
+
+      - name: Collect CPU-only binaries and DLLs
+        shell: bash
+        run: |
+          mkdir -p artifact-cpu
+          cp build-cpu/dso_stacker.exe artifact-cpu/
+          for dll in build-cpu/*.dll; do
+            [ -f "$dll" ] && cp "$dll" artifact-cpu/
           done
 
       - name: Upload GPU-selectable CLI binary
@@ -148,50 +182,6 @@ jobs:
         with:
           name: dso-stacker-windows-x86_64-gpu
           path: artifact-gpu/
-
-  # ==================================================================
-  # Windows (CPU-only CLI binary)
-  # ==================================================================
-  windows-cpu:
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup vcpkg
-        id: setup-vcpkg-1
-        continue-on-error: true
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgJsonGlob: 'vcpkg.json'
-
-      - name: Retry setup vcpkg on transient failure
-        if: steps.setup-vcpkg-1.outcome == 'failure'
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgJsonGlob: 'vcpkg.json'
-
-      - name: Install vcpkg dependencies
-        run: vcpkg install --triplet x64-windows
-
-      - name: Build (CPU-only)
-        run: |
-          cmake -B build-cpu -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-            -DDSO_ENABLE_CUDA=OFF `
-            -DCMAKE_INSTALL_PREFIX=install-cpu
-          cmake --build build-cpu --config Release --parallel
-
-      - name: Run focused tests (CPU-only)
-        run: cd build-cpu && ctest --output-on-failure -V -C Release -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
-
-      - name: Collect CPU-only binaries and DLLs
-        shell: bash
-        run: |
-          mkdir -p artifact-cpu
-          cp build-cpu/Release/dso_stacker.exe artifact-cpu/
-          for dll in build-cpu/Release/*.dll; do
-            [ -f "$dll" ] && cp "$dll" artifact-cpu/
-          done
 
       - name: Upload CPU-only CLI binary
         uses: actions/upload-artifact@v4
@@ -357,7 +347,7 @@ jobs:
   # ==================================================================
   gui-windows-cpu:
     runs-on: windows-2022
-    needs: windows-cpu
+    needs: windows
     steps:
       - uses: actions/checkout@v4
 
@@ -390,7 +380,7 @@ jobs:
   # ==================================================================
   gui-windows-gpu:
     runs-on: windows-2022
-    needs: windows-gpu
+    needs: windows
     steps:
       - uses: actions/checkout@v4
 
@@ -501,7 +491,7 @@ jobs:
   # ==================================================================
   create-release:
     runs-on: ubuntu-22.04
-    needs: [linux, windows-gpu, windows-cpu, macos-metal, gui-linux-cpu, gui-linux-gpu, gui-windows-cpu, gui-windows-gpu, gui-macos-cpu, gui-macos-metal]
+    needs: [linux, windows, macos-metal, gui-linux-cpu, gui-linux-gpu, gui-windows-cpu, gui-windows-gpu, gui-macos-cpu, gui-macos-metal]
     steps:
       - name: Validate manual release tag is new
         if: github.event_name == 'workflow_dispatch'
