@@ -827,9 +827,6 @@
         <span class="callout-icon">📦</span>
         <div>Download the archive for your platform from the <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases page</a>. GPU builds require an NVIDIA GPU and CUDA 12.x runtime. CPU builds have no GPU dependency.</div>
       </div>
-      <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:1.5rem 0 .75rem">CUDA Runtime Setup (GPU builds only)</h3>
-      <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">GPU builds require the NVIDIA CUDA 12.x runtime. CPU builds skip this entirely. Any CUDA 12.x minor version works.</p>
-
       <div class="tabs" style="margin-bottom:1rem">
         <button class="tab-btn active" data-tab="cuda-linux">Linux</button>
         <button class="tab-btn" data-tab="cuda-windows">Windows</button>
@@ -837,6 +834,8 @@
       </div>
 
       <div class="tab-panel active" id="tab-cuda-linux">
+        <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:0 0 .75rem">CUDA Runtime Setup (GPU builds only)</h3>
+        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">GPU builds require the NVIDIA CUDA 12.x runtime. CPU builds skip this entirely. Any CUDA 12.x minor version works.</p>
         <div class="code-block reveal">
           <button class="copy-btn" data-target="code-cuda-linux">Copy</button>
           <pre id="code-cuda-linux"><span class="comment"># 1. Install the cuda-keyring package (sets up the NVIDIA apt repository)</span>
@@ -863,6 +862,7 @@ sudo dnf install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
       </div>
 
       <div class="tab-panel" id="tab-cuda-windows">
+        <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:0 0 .75rem">CUDA Runtime Setup (GPU builds only)</h3>
         <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">Download the CUDA Toolkit 12.x installer from <a href="https://developer.nvidia.com/cuda-downloads" style="color:var(--accent)" target="_blank">developer.nvidia.com/cuda-downloads</a> (or the <a href="https://developer.nvidia.com/cuda-toolkit-archive" style="color:var(--accent)" target="_blank">archive</a> for a specific version).</p>
         <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:.5rem;line-height:1.65">During installation, select <strong style="color:#fff">Custom</strong> and enable at minimum:</p>
         <ul style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;padding-left:1.5rem;line-height:1.8">
@@ -879,7 +879,8 @@ cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
       </div>
 
       <div class="tab-panel" id="tab-cuda-macos">
-        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">macOS builds do not use CUDA. Download, extract, and clear Gatekeeper quarantine in one shot:</p>
+        <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:0 0 .75rem">Gatekeeper Workaround</h3>
+        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">Download, extract, and clear quarantine in one shot:</p>
         <div class="code-block reveal">
           <button class="copy-btn" data-target="code-macos-gk">Copy</button>
           <pre id="code-macos-gk">mkdir -p ~/DSOStacker && curl -fL \
