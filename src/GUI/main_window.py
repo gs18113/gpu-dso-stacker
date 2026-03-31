@@ -96,6 +96,9 @@ class MainWindow(QMainWindow):
         self._bias_tab.files_changed.connect(self._update_calib_exclusion)
         self._darkflat_tab.files_changed.connect(self._update_calib_exclusion)
 
+        # Global calibration method → push to all CalibTabs
+        self._options_tab.calib_method_changed.connect(self._on_global_calib_method)
+
         # ---- Bottom toolbar ----
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
@@ -232,6 +235,12 @@ class MainWindow(QMainWindow):
         else:
             self._tabs.setTabEnabled(darkflat_idx, True)
             self._tabs.setTabToolTip(darkflat_idx, "")
+
+    def _on_global_calib_method(self, method: str) -> None:
+        """Push the global calibration method to all CalibTabs."""
+        for tab in (self._dark_tab, self._flat_tab,
+                    self._bias_tab, self._darkflat_tab):
+            tab.method = method
 
     # ------------------------------------------------------------------ #
     # Run / Abort                                                          #

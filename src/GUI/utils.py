@@ -10,6 +10,7 @@ Provides:
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import platform
 from pathlib import Path
@@ -89,6 +90,47 @@ def _binary_path() -> Path:
     )
 
 
+_cached_backends: list[str] | None = None
+
+
+def query_backends() -> list[str]:
+    """Query the dso_stacker binary for compiled-in backends.
+
+    Calls ``dso_stacker --list-backends`` and parses the one-per-line
+    output.  Falls back to ``["auto", "cpu"]`` if the binary is not
+    found or the query fails (e.g. old binary without the flag).
+    The result is cached for the lifetime of the process.
+    """
+    global _cached_backends
+    if _cached_backends is not None:
+        return _cached_backends
+
+    fallback = ["auto", "cpu"]
+    try:
+        binary = str(_binary_path())
+    except FileNotFoundError:
+        _cached_backends = fallback
+        return fallback
+
+    try:
+        result = subprocess.run(
+            [binary, "--list-backends"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            backends = result.stdout.strip().splitlines()
+            if "auto" in backends and "cpu" in backends:
+                _cached_backends = backends
+                return backends
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+    _cached_backends = fallback
+    return fallback
+
+
 def build_command(
     project: "ProjectState",
     csv_path: str,
@@ -114,15 +156,16 @@ def build_command(
     argv: list[str] = [binary, "-f", csv_path, "-o", opts["output_path"]]
 
     # --- execution ---
-    if opts.get("use_cpu"):
-        argv.append("--cpu")
+    backend = opts.get("backend", "auto")
+    if backend != "auto":
+        argv += ["--backend", backend]
 
     # --- integration ---
     argv += ["--integration", opts["integration"]]
     if opts["integration"] == "kappa-sigma":
         argv += ["--kappa", str(opts["kappa"])]
         argv += ["--iterations", str(opts["iterations"])]
-    if not opts.get("use_cpu"):
+    if backend != "cpu":
         argv += ["--batch-size", str(opts["batch_size"])]
 
     # --- star detection (always used with the GUI's 2-column CSV) ---
@@ -137,7 +180,7 @@ def build_command(
     argv += ["--triangle-thresh", str(opts["triangle_thresh"])]
     argv += ["--match-radius",  str(opts["match_radius"])]
     argv += ["--min-inliers",   str(opts["min_inliers"])]
-    if not opts.get("use_cpu") and opts.get("match_device", "auto") != "auto":
+    if backend != "cpu" and opts.get("match_device", "auto") != "auto":
         argv += ["--match-device", opts["match_device"]]
 
     # --- calibration ---
@@ -148,20 +191,21 @@ def build_command(
             argv += [flag, p]
 
     argv += ["--save-master-frames", opts["save_master_dir"]]
-    argv += ["--wsor-clip", str(opts["wsor_clip"])]
+    calib_methods = [opts.get(k, "kappa-sigma")
+                     for k in ("dark_method", "bias_method",
+                               "flat_method", "darkflat_method")]
     for key, flag in (
         ("dark_method",     "--dark-method"),
         ("bias_method",     "--bias-method"),
         ("flat_method",     "--flat-method"),
         ("darkflat_method", "--darkflat-method"),
     ):
-        if opts.get(key, "winsorized-mean") != "winsorized-mean":
+        if opts.get(key, "kappa-sigma") != "winsorized-mean":
             argv += [flag, opts[key]]
 
-    # Emit calib-kappa / calib-iterations when any calibration uses kappa-sigma
-    calib_methods = [opts.get(k, "winsorized-mean")
-                     for k in ("dark_method", "bias_method",
-                               "flat_method", "darkflat_method")]
+    # Emit method-specific parameters only when relevant
+    if "winsorized-mean" in calib_methods:
+        argv += ["--wsor-clip", str(opts.get("wsor_clip", 0.1))]
     if "kappa-sigma" in calib_methods:
         argv += ["--calib-kappa", str(opts.get("calib_kappa", 2.5))]
         argv += ["--calib-iterations", str(opts.get("calib_iterations", 5))]

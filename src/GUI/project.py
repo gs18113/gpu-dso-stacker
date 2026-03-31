@@ -18,7 +18,7 @@ import yaml
 # Default option values — mirror CLI defaults exactly.
 _DEFAULT_OPTIONS: dict = {
     "output_path": "output.fits",
-    "use_cpu": False,
+    "backend": "auto",
     "integration": "kappa-sigma",
     "kappa": 3.0,
     "iterations": 3,
@@ -39,13 +39,14 @@ _DEFAULT_OPTIONS: dict = {
     "stretch_min": None,
     "stretch_max": None,
     "save_master_dir": "./master",
+    "calib_method": "kappa-sigma",
     "wsor_clip": 0.1,
     "calib_kappa": 2.5,
     "calib_iterations": 5,
-    "dark_method": "winsorized-mean",
-    "bias_method": "winsorized-mean",
-    "flat_method": "winsorized-mean",
-    "darkflat_method": "winsorized-mean",
+    "dark_method": "kappa-sigma",
+    "bias_method": "kappa-sigma",
+    "flat_method": "kappa-sigma",
+    "darkflat_method": "kappa-sigma",
 }
 
 
@@ -108,6 +109,9 @@ class ProjectState:
 
         opts = copy.deepcopy(_DEFAULT_OPTIONS)
         saved_opts = d.get("options", {})
+        # Migration: use_cpu → backend
+        if "backend" not in saved_opts and saved_opts.get("use_cpu"):
+            saved_opts["backend"] = "cpu"
         if "triangle_iters" not in saved_opts and "ransac_iters" in saved_opts:
             saved_opts["triangle_iters"] = saved_opts["ransac_iters"]
         if "triangle_thresh" not in saved_opts and "ransac_thresh" in saved_opts:

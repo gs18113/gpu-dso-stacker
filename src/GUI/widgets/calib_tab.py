@@ -24,13 +24,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from widgets.frame_table import FrameTableWidget
 
 
-_METHODS = ["winsorized-mean", "median", "kappa-sigma"]
+_METHODS = ["kappa-sigma", "winsorized-mean", "median"]
 
 
 class CalibTab(QWidget):
     """Calibration frame tab: file list + stacking method selector."""
 
     files_changed = Signal()
+    method_changed = Signal(str)
 
     def __init__(self, tab_name: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -81,3 +82,5 @@ class CalibTab(QWidget):
         method_row.addWidget(self._method_combo)
         method_row.addStretch()
         layout.addLayout(method_row)
+
+        self._method_combo.currentTextChanged.connect(self.method_changed.emit)

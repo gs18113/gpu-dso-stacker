@@ -109,6 +109,8 @@ enum {
     OPT_TIFF_COMPRESSION,
     OPT_STRETCH_MIN,
     OPT_STRETCH_MAX,
+    /* Query */
+    OPT_LIST_BACKENDS,
 };
 
 static void usage(const char *prog)
@@ -142,7 +144,14 @@ static void usage(const char *prog)
         "      --match-radius <float>     Star matching radius px (default: 30.0)\n"
         "      --min-inliers <int>        Minimum RANSAC inliers for acceptance (default: 10)\n"
         "      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)\n"
-        "      --backend <backend>        auto | cpu | cuda | metal (default: auto)\n"
+        "      --backend <backend>        auto | cpu"
+#if defined(DSO_HAS_CUDA) && DSO_HAS_CUDA
+        " | cuda"
+#endif
+#if defined(DSO_HAS_METAL) && DSO_HAS_METAL
+        " | metal"
+#endif
+        " (default: auto)\n"
         "\n"
         "Calibration:\n"
         "      --dark <path>              Master dark FITS or text list of dark FITS paths\n"
@@ -224,6 +233,7 @@ int main(int argc, char **argv)
     bool        use_cpu     = false;
     const char *integ_str   = "kappa-sigma";
     bool        backend_explicit = false;
+    bool        list_backends    = false;
 
     /* Pipeline config defaults */
     PipelineConfig cfg = {};
@@ -302,6 +312,7 @@ int main(int argc, char **argv)
         {"tiff-compression",  required_argument, nullptr, OPT_TIFF_COMPRESSION},
         {"stretch-min",       required_argument, nullptr, OPT_STRETCH_MIN},
         {"stretch-max",       required_argument, nullptr, OPT_STRETCH_MAX},
+        {"list-backends",     no_argument,       nullptr, OPT_LIST_BACKENDS},
         {nullptr, 0, nullptr, 0}
     };
 
@@ -459,8 +470,22 @@ int main(int argc, char **argv)
         case OPT_STRETCH_MIN: cfg.save_opts.stretch_min = strtof(optarg, nullptr); break;
         case OPT_STRETCH_MAX: cfg.save_opts.stretch_max = strtof(optarg, nullptr); break;
 
+        case OPT_LIST_BACKENDS: list_backends = true; break;
+
         default: usage(argv[0]); return 1;
         }
+    }
+
+    /* --list-backends: print available backends and exit (no -f required) */
+    if (list_backends) {
+        printf("auto\ncpu\n");
+#if defined(DSO_HAS_CUDA) && DSO_HAS_CUDA
+        printf("cuda\n");
+#endif
+#if defined(DSO_HAS_METAL) && DSO_HAS_METAL
+        printf("metal\n");
+#endif
+        return 0;
     }
 
     if (!csv_file) {
@@ -554,6 +579,35 @@ int main(int argc, char **argv)
         return 1;
     }
     if (use_cpu) cfg.backend = DSO_BACKEND_CPU;
+
+    /* Reject backends not compiled into this build */
+#if !defined(DSO_HAS_CUDA) || !DSO_HAS_CUDA
+    if (cfg.backend == DSO_BACKEND_CUDA) {
+        fprintf(stderr,
+                "Error: --backend cuda is not available in this build "
+                "(compiled without CUDA support).\n"
+                "  Available backends: auto, cpu"
+#if defined(DSO_HAS_METAL) && DSO_HAS_METAL
+                ", metal"
+#endif
+                "\n");
+        return 1;
+    }
+#endif
+#if !defined(DSO_HAS_METAL) || !DSO_HAS_METAL
+    if (cfg.backend == DSO_BACKEND_METAL) {
+        fprintf(stderr,
+                "Error: --backend metal is not available in this build "
+                "(compiled without Metal support).\n"
+                "  Available backends: auto, cpu"
+#if defined(DSO_HAS_CUDA) && DSO_HAS_CUDA
+                ", cuda"
+#endif
+                "\n");
+        return 1;
+    }
+#endif
+
     if (cfg.backend == DSO_BACKEND_AUTO) {
         if (!cfg.use_gpu_lanczos) cfg.backend = DSO_BACKEND_CPU;
 #if defined(DSO_HAS_CUDA) && DSO_HAS_CUDA

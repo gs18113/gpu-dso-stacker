@@ -25,7 +25,6 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -45,7 +44,7 @@ from PySide6.QtWidgets import (
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from utils import detect_output_format
+from utils import detect_output_format, query_backends
 
 
 class StackingOptionsTab(QWidget):
@@ -53,6 +52,9 @@ class StackingOptionsTab(QWidget):
 
     # Emitted whenever the output path text changes (so MainWindow can sync).
     output_path_changed = Signal(str)
+    # Emitted when the global calibration method changes (so MainWindow can
+    # push the selection to all CalibTabs).
+    calib_method_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -67,7 +69,7 @@ class StackingOptionsTab(QWidget):
         """Return the current widget values as a dict matching ProjectState.options."""
         opts = {
             "output_path":      self._output_edit.text().strip() or "output.fits",
-            "use_cpu":          self._cpu_cb.isChecked(),
+            "backend":          self._backend_combo.currentText(),
             "integration":      self._integration_combo.currentText(),
             "kappa":            self._kappa_spin.value(),
             "iterations":       self._iterations_spin.value(),
@@ -88,22 +90,25 @@ class StackingOptionsTab(QWidget):
             "stretch_min":      self._parse_stretch(self._stretch_min_edit.text()),
             "stretch_max":      self._parse_stretch(self._stretch_max_edit.text()),
             "save_master_dir":  self._save_master_edit.text().strip() or "./master",
+            "calib_method":     self._calib_method_combo.currentText(),
             "wsor_clip":        self._wsor_clip_spin.value(),
             "calib_kappa":      self._calib_kappa_spin.value(),
             "calib_iterations": self._calib_iterations_spin.value(),
             # Per-tab methods are managed by CalibTab; these keys may also
             # live here for completeness (overridden by CalibTab on run).
-            "dark_method":      "winsorized-mean",
-            "bias_method":      "winsorized-mean",
-            "flat_method":      "winsorized-mean",
-            "darkflat_method":  "winsorized-mean",
+            "dark_method":      "kappa-sigma",
+            "bias_method":      "kappa-sigma",
+            "flat_method":      "kappa-sigma",
+            "darkflat_method":  "kappa-sigma",
         }
         return opts
 
     def set_options(self, opts: dict) -> None:
         """Restore widget values from a dict (e.g. loaded from YAML)."""
         self._set_text(self._output_edit,      opts.get("output_path", "output.fits"))
-        self._cpu_cb.setChecked(               opts.get("use_cpu", False))
+        # Backward compat: use_cpu → backend
+        backend = opts.get("backend", "cpu" if opts.get("use_cpu") else "auto")
+        self._set_combo(self._backend_combo,   backend)
         self._set_combo(self._integration_combo, opts.get("integration", "kappa-sigma"))
         self._kappa_spin.setValue(             opts.get("kappa", 3.0))
         self._iterations_spin.setValue(        opts.get("iterations", 3))
@@ -126,6 +131,7 @@ class StackingOptionsTab(QWidget):
         smax = opts.get("stretch_max")
         self._stretch_max_edit.setText("" if smax is None else str(smax))
         self._set_text(self._save_master_edit, opts.get("save_master_dir", "./master"))
+        self._set_combo(self._calib_method_combo, opts.get("calib_method", "kappa-sigma"))
         self._wsor_clip_spin.setValue(         opts.get("wsor_clip", 0.1))
         self._calib_kappa_spin.setValue(      opts.get("calib_kappa", 2.5))
         self._calib_iterations_spin.setValue( opts.get("calib_iterations", 5))
@@ -189,14 +195,21 @@ class StackingOptionsTab(QWidget):
         form = QFormLayout(box)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self._cpu_cb = QCheckBox("Use CPU (no GPU required)")
-        form.addRow("", self._cpu_cb)
+        self._backend_combo = QComboBox()
+        self._backend_combo.addItems(query_backends())
+        self._backend_combo.setToolTip(
+            "auto: prefer GPU if available, fall back to CPU\n"
+            "cpu: run all stages on CPU (OpenMP-accelerated)\n"
+            "cuda: require NVIDIA CUDA GPU\n"
+            "metal: require Apple Metal GPU"
+        )
+        form.addRow("Backend:", self._backend_combo)
 
         self._batch_spin = _int_spin(1, 64, 16)
         self._batch_lbl  = QLabel("GPU batch size:")
         form.addRow(self._batch_lbl, self._batch_spin)
 
-        self._cpu_cb.toggled.connect(self._update_visibility)
+        self._backend_combo.currentTextChanged.connect(self._update_visibility)
         return box
 
     def _build_integration_group(self) -> QGroupBox:
@@ -314,6 +327,15 @@ class StackingOptionsTab(QWidget):
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
+        self._calib_method_combo = QComboBox()
+        self._calib_method_combo.addItems(["kappa-sigma", "winsorized-mean", "median"])
+        self._calib_method_combo.setToolTip(
+            "Stacking method for generating master calibration frames.\n"
+            "Applied to all calibration tabs (Dark, Flat, Bias, Darkflat).\n"
+            "Individual tabs can override this selection."
+        )
+        form.addRow("Method:", self._calib_method_combo)
+
         master_w = QWidget()
         master_h = QHBoxLayout(master_w)
         master_h.setContentsMargins(0, 0, 0, 0)
@@ -331,32 +353,36 @@ class StackingOptionsTab(QWidget):
             "Winsorized-mean clipping fraction per side.\n"
             "Valid range: [0.0, 0.49]. Default: 0.1."
         )
-        form.addRow("Wsor clip fraction:", self._wsor_clip_spin)
+        self._wsor_clip_lbl = QLabel("Wsor clip fraction:")
+        form.addRow(self._wsor_clip_lbl, self._wsor_clip_spin)
 
         self._calib_kappa_spin = _dbl_spin(0.1, 20.0, 2.5, 1, 0.1)
         self._calib_kappa_spin.setToolTip(
             "Kappa-sigma rejection threshold for calibration frame stacking.\n"
             "Values further than kappa*sigma from the mean are rejected.\n"
-            "Only used when a calibration tab's method is kappa-sigma.\n"
             "Default: 2.5"
         )
-        form.addRow("Calib kappa:", self._calib_kappa_spin)
+        self._calib_kappa_lbl = QLabel("Calib kappa:")
+        form.addRow(self._calib_kappa_lbl, self._calib_kappa_spin)
 
         self._calib_iterations_spin = _int_spin(1, 20, 5)
         self._calib_iterations_spin.setToolTip(
             "Maximum clipping iterations for calibration kappa-sigma stacking.\n"
-            "Only used when a calibration tab's method is kappa-sigma.\n"
             "Default: 5"
         )
-        form.addRow("Calib iterations:", self._calib_iterations_spin)
+        self._calib_iterations_lbl = QLabel("Calib iterations:")
+        form.addRow(self._calib_iterations_lbl, self._calib_iterations_spin)
 
         note = QLabel(
-            "<i>Stacking method (winsorized-mean / median / kappa-sigma) is set "
-            "per frame type in the Dark, Flat, Bias, and Darkflat tabs.</i>"
+            "<i>Individual calibration tabs (Dark, Flat, Bias, Darkflat) can "
+            "override this method independently.</i>"
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: gray; font-size: 11px;")
         form.addRow("", note)
+
+        self._calib_method_combo.currentTextChanged.connect(self._update_visibility)
+        self._calib_method_combo.currentTextChanged.connect(self.calib_method_changed.emit)
         return box
 
     # ------------------------------------------------------------------ #
@@ -366,23 +392,25 @@ class StackingOptionsTab(QWidget):
     def _update_visibility(self) -> None:
         """Show/hide widgets based on the current selection state."""
         integ    = self._integration_combo.currentText()
-        use_cpu  = self._cpu_cb.isChecked()
+        backend  = self._backend_combo.currentText()
         out_path = self._output_edit.text()
         fmt      = detect_output_format(out_path)
         bd       = self._bit_depth_combo.currentText()
+        cm       = self._calib_method_combo.currentText()
 
-        # Kappa / iterations: only for kappa-sigma
+        # Kappa / iterations: only for kappa-sigma integration
         is_ks = (integ == "kappa-sigma")
         self._kappa_lbl.setVisible(is_ks)
         self._kappa_spin.setVisible(is_ks)
         self._iterations_lbl.setVisible(is_ks)
         self._iterations_spin.setVisible(is_ks)
 
-        # Batch size: only in GPU mode
-        self._batch_lbl.setVisible(not use_cpu)
-        self._batch_spin.setVisible(not use_cpu)
-        self._match_device_lbl.setVisible(not use_cpu)
-        self._match_device_combo.setVisible(not use_cpu)
+        # Batch size / match device: only when backend is not CPU
+        is_cpu = (backend == "cpu")
+        self._batch_lbl.setVisible(not is_cpu)
+        self._batch_spin.setVisible(not is_cpu)
+        self._match_device_lbl.setVisible(not is_cpu)
+        self._match_device_combo.setVisible(not is_cpu)
 
         # TIFF compression: only for TIFF output
         is_tiff = (fmt == "tiff")
@@ -398,6 +426,14 @@ class StackingOptionsTab(QWidget):
 
         # Bit depth combo: enable/disable items based on output format
         self._update_bit_depth_items(fmt)
+
+        # Calibration parameters: show only what's relevant to the method
+        self._wsor_clip_lbl.setVisible(cm == "winsorized-mean")
+        self._wsor_clip_spin.setVisible(cm == "winsorized-mean")
+        self._calib_kappa_lbl.setVisible(cm == "kappa-sigma")
+        self._calib_kappa_spin.setVisible(cm == "kappa-sigma")
+        self._calib_iterations_lbl.setVisible(cm == "kappa-sigma")
+        self._calib_iterations_spin.setVisible(cm == "kappa-sigma")
 
     def _update_bit_depth_items(self, fmt: str) -> None:
         """Enable/disable bit-depth combo items according to output format.
