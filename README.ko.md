@@ -19,7 +19,9 @@ Linux, macOS, Windows용 **사전 빌드 바이너리**(CLI + GUI)는 [Releases]
 
 ### Linux
 
-NVIDIA 저장소에서 CUDA 12 런타임 패키지를 설치하세요:
+NVIDIA 저장소에서 CUDA 12 런타임 패키지를 설치하세요.
+
+**Debian / Ubuntu:**
 
 ```bash
 # 1. cuda-keyring 패키지 설치 (NVIDIA apt 저장소 설정)
@@ -34,7 +36,7 @@ sudo apt-get install cuda-cudart-12-9 libnpp-12-9
 
 `libcudart.so.12`, `libnppc.so.12`, `libnppig.so.12`가 설치됩니다.
 
-RHEL / Fedora 계열:
+**RHEL / Fedora:**
 
 ```bash
 sudo dnf config-manager --add-repo \

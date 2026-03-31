@@ -19,7 +19,9 @@ Runtime requirements depend on which release artifact you use:
 
 ### Linux
 
-Install the CUDA 12 runtime packages from the NVIDIA repository:
+Install the CUDA 12 runtime packages from the NVIDIA repository.
+
+**Debian / Ubuntu:**
 
 ```bash
 # 1. Install the cuda-keyring package (sets up the NVIDIA apt repository)
@@ -34,7 +36,7 @@ sudo apt-get install cuda-cudart-12-9 libnpp-12-9
 
 This installs `libcudart.so.12`, `libnppc.so.12`, and `libnppig.so.12`.
 
-For RHEL / Fedora:
+**RHEL / Fedora:**
 
 ```bash
 sudo dnf config-manager --add-repo \

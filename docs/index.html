@@ -836,6 +836,7 @@
       <div class="tab-panel active" id="tab-cuda-linux">
         <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:0 0 .75rem">CUDA Runtime Setup (GPU builds only)</h3>
         <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">GPU builds require the NVIDIA CUDA 12.x runtime. CPU builds skip this entirely. Any CUDA 12.x minor version works.</p>
+        <p style="font-size:.88rem;font-weight:600;color:#fff;margin-bottom:.5rem">Debian / Ubuntu</p>
         <div class="code-block reveal">
           <button class="copy-btn" data-target="code-cuda-linux">Copy</button>
           <pre id="code-cuda-linux"><span class="comment"># 1. Install the cuda-keyring package (sets up the NVIDIA apt repository)</span>
@@ -848,10 +849,10 @@ sudo apt-get update
 sudo apt-get install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
         </div>
         <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">This installs <code>libcudart.so.12</code>, <code>libnppc.so.12</code>, and <code>libnppig.so.12</code>.</p>
+        <p style="font-size:.88rem;font-weight:600;color:#fff;margin-bottom:.5rem">RHEL / Fedora</p>
         <div class="code-block reveal">
           <button class="copy-btn" data-target="code-cuda-linux-rhel">Copy</button>
-          <pre id="code-cuda-linux-rhel"><span class="comment"># RHEL / Fedora</span>
-sudo dnf config-manager --add-repo \
+          <pre id="code-cuda-linux-rhel">sudo dnf config-manager --add-repo \
   https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-<span class="str">&lt;distro&gt;</span>.repo
 sudo dnf install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
         </div>
