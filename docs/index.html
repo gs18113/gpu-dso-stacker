@@ -828,57 +828,67 @@
         <div>Download the archive for your platform from the <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases page</a>. GPU builds require an NVIDIA GPU and CUDA 12.x runtime. CPU builds have no GPU dependency.</div>
       </div>
       <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:1.5rem 0 .75rem">CUDA Runtime Setup (GPU builds only)</h3>
-      <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">GPU builds require the NVIDIA CUDA 12.x runtime. CPU builds skip this entirely.</p>
+      <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">GPU builds require the NVIDIA CUDA 12.x runtime. CPU builds skip this entirely. Any CUDA 12.x minor version works.</p>
 
       <div class="tabs" style="margin-bottom:1rem">
         <button class="tab-btn active" data-tab="cuda-linux">Linux</button>
         <button class="tab-btn" data-tab="cuda-windows">Windows</button>
+        <button class="tab-btn" data-tab="cuda-macos">macOS</button>
       </div>
 
       <div class="tab-panel active" id="tab-cuda-linux">
         <div class="code-block reveal">
           <button class="copy-btn" data-target="code-cuda-linux">Copy</button>
-          <pre id="code-cuda-linux"><span class="comment"># Option 1 — NVIDIA's official repo (recommended, latest 12.x)</span>
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          <pre id="code-cuda-linux"><span class="comment"># 1. Install the cuda-keyring package (sets up the NVIDIA apt repository)</span>
+<span class="comment">#    Replace &lt;distro&gt; with: ubuntu2404, ubuntu2204, debian12, etc.</span>
+wget https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-keyring_1.1-1_all.deb
 sudo dpkg -i cuda-keyring_1.1-1_all.deb
 sudo apt-get update
-sudo apt-get install -y <span class="flag">cuda-toolkit-12-6</span>
 
-<span class="comment"># Option 2 — distro package (may be older)</span>
-<span class="comment"># Ubuntu / Debian</span>
-sudo apt-get install -y nvidia-cuda-toolkit
-
-<span class="comment"># Fedora / RHEL</span>
-sudo dnf install -y cuda-toolkit
-
-<span class="comment"># Verify installation</span>
-nvcc --version   <span class="comment"># should print CUDA 12.x</span></pre>
+<span class="comment"># 2. Install the runtime libraries (no compiler or dev headers needed)</span>
+sudo apt-get install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
+        </div>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">This installs <code>libcudart.so.12</code>, <code>libnppc.so.12</code>, and <code>libnppig.so.12</code>.</p>
+        <div class="code-block reveal">
+          <button class="copy-btn" data-target="code-cuda-linux-rhel">Copy</button>
+          <pre id="code-cuda-linux-rhel"><span class="comment"># RHEL / Fedora</span>
+sudo dnf config-manager --add-repo \
+  https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-<span class="str">&lt;distro&gt;</span>.repo
+sudo dnf install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
         </div>
         <div class="callout callout-info" style="margin-bottom:1.25rem">
           <span class="callout-icon">ℹ️</span>
-          <div>For other distributions or custom install paths, see <a href="https://developer.nvidia.com/cuda-downloads" style="color:var(--accent)" target="_blank">NVIDIA CUDA Downloads</a>. Make sure you have a compatible NVIDIA driver installed first (<code>nvidia-smi</code> should show your GPU).</div>
+          <div>Any CUDA 12.x minor version will work (e.g. <code>cuda-cudart-12-6 libnpp-12-6</code>). The packages provide the <code>*.so.12</code> symlinks that the binary needs. Replace <code>&lt;distro&gt;</code> with <code>rhel8</code>, <code>rhel9</code>, <code>fedora42</code>, etc.</div>
         </div>
       </div>
 
       <div class="tab-panel" id="tab-cuda-windows">
+        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">Download the CUDA Toolkit 12.x installer from <a href="https://developer.nvidia.com/cuda-downloads" style="color:var(--accent)" target="_blank">developer.nvidia.com/cuda-downloads</a> (or the <a href="https://developer.nvidia.com/cuda-toolkit-archive" style="color:var(--accent)" target="_blank">archive</a> for a specific version).</p>
+        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:.5rem;line-height:1.65">During installation, select <strong style="color:#fff">Custom</strong> and enable at minimum:</p>
+        <ul style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;padding-left:1.5rem;line-height:1.8">
+          <li><strong style="color:#fff">CUDA Runtime</strong> (<code>cudart</code>)</li>
+          <li><strong style="color:#fff">NPP</strong> (NVIDIA Performance Primitives)</li>
+          <li><strong style="color:#fff">Display Driver</strong> (if not already installed)</li>
+        </ul>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">This places <code>cudart64_12.dll</code>, <code>nppc64_12.dll</code>, and <code>nppig64_12.dll</code> in <code>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.x\bin</code>. Recent CUDA installers may set <code>CUDA_PATH</code> without updating <code>PATH</code>; the GUI launcher prepends <code>%CUDA_PATH%\bin</code> automatically.</p>
         <div class="code-block reveal">
           <button class="copy-btn" data-target="code-cuda-windows">Copy</button>
-          <pre id="code-cuda-windows"><span class="comment"># 1. Download the CUDA 12.x installer from NVIDIA</span>
-<span class="comment">#    https://developer.nvidia.com/cuda-downloads</span>
-<span class="comment">#    Select: Windows → x86_64 → your Windows version → exe (local)</span>
-
-<span class="comment"># 2. Run the installer — "Express" install is fine for runtime use</span>
-
-<span class="comment"># 3. Verify from PowerShell or Command Prompt</span>
-nvcc --version   <span class="comment"># should print CUDA 12.x</span>
-
-<span class="comment"># If nvcc is not found, add CUDA to your PATH:</span>
-$env:PATH += <span class="str">";C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin"</span></pre>
+          <pre id="code-cuda-windows"><span class="comment"># Unattended / silent installation (PowerShell)</span>
+cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
         </div>
-        <div class="callout callout-warn" style="margin-bottom:1.25rem">
-          <span class="callout-icon">⚠️</span>
-          <div><strong>Driver first.</strong> Install the latest <a href="https://www.nvidia.com/drivers" style="color:var(--accent)" target="_blank">NVIDIA Game Ready / Studio driver</a> before the CUDA Toolkit. The CUDA installer can also install a driver, but using a standalone driver update is recommended.</div>
+      </div>
+
+      <div class="tab-panel" id="tab-cuda-macos">
+        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">macOS builds do not use CUDA. Download, extract, and clear Gatekeeper quarantine in one shot:</p>
+        <div class="code-block reveal">
+          <button class="copy-btn" data-target="code-macos-gk">Copy</button>
+          <pre id="code-macos-gk">mkdir -p ~/DSOStacker && curl -fL \
+  https://github.com/gs18113/gpu-dso-stacker/releases/latest/download/dso-stacker-gui-macos-arm64-metal.tar.gz \
+  | tar xz -C ~/DSOStacker \
+  && xattr -cr ~/DSOStacker \
+  && chmod +x ~/DSOStacker/DSOStacker ~/DSOStacker/_internal/bin/dso_stacker</pre>
         </div>
+        <p style="font-size:.85rem;color:var(--text-dim)">Replace <code>metal</code> with <code>cpu</code> in the URL if you don't need Metal acceleration.</p>
       </div>
 
       <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:2rem 0 .75rem">Download</h3>
@@ -960,29 +970,21 @@ cmake --build build --config Release --parallel</pre>
     </div>
 
     <div class="tab-panel" id="tab-macos">
-      <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">One command installs all dependencies via Homebrew and builds from source.</p>
       <div class="code-block reveal">
         <button class="copy-btn" data-target="code-macos">Copy</button>
-        <pre id="code-macos"><span class="comment"># One-shot: install deps + clone + build (Apple Silicon)</span>
-brew install cmake cfitsio libtiff libpng libraw
-
-git clone https://github.com/gs18113/gpu-dso-stacker.git
-cd gpu-dso-stacker
-
+        <pre id="code-macos"><span class="comment"># Apple Silicon — Metal scaffold backend</span>
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       <span class="flag">-DDSO_ENABLE_CUDA=OFF</span> \
-      <span class="flag">-DDSO_ENABLE_METAL=ON</span> \
-      <span class="flag">-DDSO_ENABLE_LIBRAW=ON</span>
-cmake --build build --parallel $(sysctl -n hw.ncpu)
+      <span class="flag">-DDSO_ENABLE_METAL=ON</span>
+cmake --build build --parallel
 
-<span class="comment"># Run with Metal backend</span>
+<span class="comment"># Select Metal backend at runtime</span>
 ./build/dso_stacker -f frames.csv -o stacked.fits <span class="flag">--backend metal</span></pre>
       </div>
       <div class="callout callout-warn">
         <span class="callout-icon">🔨</span>
-        <div><strong>Metal backend is scaffolded.</strong> Phase-1 wires backend selection and falls back to the CPU pipeline while Metal kernels are ported incrementally. CPU-only build: omit <code>-DDSO_ENABLE_METAL=ON</code>.</div>
+        <div><strong>Metal backend is scaffolded.</strong> Phase-1 wires backend selection and falls back to the CPU pipeline while Metal kernels are ported incrementally.</div>
       </div>
-      <p style="font-size:.85rem;color:var(--text-dim)">Prerequisites: <a href="https://brew.sh" style="color:var(--accent)" target="_blank">Homebrew</a> · Xcode Command Line Tools (<code>xcode-select --install</code>)</p>
     </div>
   </div>
 </section>
