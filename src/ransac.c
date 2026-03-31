@@ -827,25 +827,7 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
         goto cleanup;
     }
 
-    err = dlt_homography(ref_pts, src_pts, n_corr, H_out);
-    if (err != DSO_OK) {
-        n_corr = nearest_neighbor_pairs(ref_list, src_list, p->match_radius, ref_pts, src_pts);
-        if (n_corr < 4) n_corr = index_pairs(ref_list, src_list, ref_pts, src_pts);
-        if (n_corr < 4 || dlt_homography(ref_pts, src_pts, n_corr, H_out) != DSO_OK) {
-            int ok = translate_only_model(ref_list, src_list, H_out, &n_corr, p->match_radius);
-            if (!ok) { err = DSO_ERR_RANSAC; goto cleanup; }
-            n_inliers = n_corr;
-            if (n_inliers_out) *n_inliers_out = n_inliers;
-            err = DSO_OK;
-            goto cleanup;
-        }
-    }
-
-    if (fabs(homography_det(H_out)) < 1e-12) {
-        err = DSO_ERR_INVALID_ARG;
-        goto cleanup;
-    }
-
+    /* --- RANSAC over triangle-matched correspondences --- */
     thresh_sq = (double)p->inlier_thresh * (double)p->inlier_thresh;
     in_ref = (StarPos *)malloc((size_t)max_corr * sizeof(StarPos));
     in_src = (StarPos *)malloc((size_t)max_corr * sizeof(StarPos));
@@ -854,67 +836,85 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
         goto cleanup;
     }
 
-    n_inliers = 0;
-    for (i = 0; i < n_corr; i++) {
-        double e2 = reproj_err_sq(H_out,
-                                  ref_pts[i].x, ref_pts[i].y,
-                                  src_pts[i].x, src_pts[i].y);
-        if (e2 <= thresh_sq) {
-            in_ref[n_inliers] = ref_pts[i];
-            in_src[n_inliers] = src_pts[i];
-            n_inliers++;
-        }
-    }
+    {
+        static int ransac_ctr = 0;
+        unsigned int seed = (unsigned int)(time(NULL) ^ clock() ^ ransac_ctr++);
+        Homography best_H;
+        int best_inliers = 0;
+        int adaptive_max = p->max_iters;
 
-    if (n_inliers < p->min_inliers || n_inliers < 4) {
+        memset(&best_H, 0, sizeof(best_H));
+
+        for (int iter = 0; iter < adaptive_max; iter++) {
+            int idx[4];
+            int used[4] = {-1, -1, -1, -1};
+            StarPos sref[4], ssrc[4];
+            Homography H_cand;
+            int count;
+
+            /* sample 4 distinct correspondences */
+            for (int k = 0; k < 4;) {
+                int j = rand_r(&seed) % n_corr;
+                int dup = 0;
+                for (int m = 0; m < k; m++) if (used[m] == j) { dup = 1; break; }
+                if (!dup) { used[k] = j; idx[k] = j; k++; }
+            }
+            for (int k = 0; k < 4; k++) {
+                sref[k] = ref_pts[idx[k]];
+                ssrc[k] = src_pts[idx[k]];
+            }
+
+            if (dlt_homography(sref, ssrc, 4, &H_cand) != DSO_OK) continue;
+            if (fabs(homography_det(&H_cand)) < 1e-12) continue;
+
+            /* count inliers */
+            count = 0;
+            for (int mi = 0; mi < n_corr; mi++) {
+                double e2 = reproj_err_sq(&H_cand,
+                                          ref_pts[mi].x, ref_pts[mi].y,
+                                          src_pts[mi].x, src_pts[mi].y);
+                if (e2 < thresh_sq) count++;
+            }
+            if (count > best_inliers) {
+                best_inliers = count;
+                best_H = H_cand;
+                /* adaptive termination */
+                double inlier_ratio = (double)count / n_corr;
+                if (inlier_ratio > 0.999) inlier_ratio = 0.999;
+                if (inlier_ratio > 0.001) {
+                    double p4 = inlier_ratio * inlier_ratio * inlier_ratio * inlier_ratio;
+                    double n_needed = log(1.0 - p->confidence) / log(1.0 - p4);
+                    int ni = (int)ceil(n_needed);
+                    if (ni < adaptive_max) adaptive_max = ni;
+                    if (adaptive_max < 4) adaptive_max = 4;
+                }
+            }
+        }
+
+        if (best_inliers < p->min_inliers || best_inliers < 4) {
+            err = DSO_ERR_RANSAC;
+            goto cleanup;
+        }
+
+        /* collect inliers of best model */
         n_inliers = 0;
         for (i = 0; i < n_corr; i++) {
-            in_ref[n_inliers] = ref_pts[i];
-            in_src[n_inliers] = src_pts[i];
-            n_inliers++;
-        }
-    }
-
-    if (n_inliers < p->min_inliers || n_inliers < 4) {
-        int n_alt = nearest_neighbor_pairs(ref_list, src_list, p->match_radius, ref_pts, src_pts);
-        if (n_alt < 4) n_alt = index_pairs(ref_list, src_list, ref_pts, src_pts);
-        if (n_alt >= 4 && dlt_homography(ref_pts, src_pts, n_alt, H_out) == DSO_OK &&
-            fabs(homography_det(H_out)) >= 1e-12) {
-            n_inliers = 0;
-            for (i = 0; i < n_alt; i++) {
-                double e2 = reproj_err_sq(H_out,
-                                          ref_pts[i].x, ref_pts[i].y,
-                                          src_pts[i].x, src_pts[i].y);
-                if (e2 <= thresh_sq) {
-                    in_ref[n_inliers] = ref_pts[i];
-                    in_src[n_inliers] = src_pts[i];
-                    n_inliers++;
-                }
-            }
-            if (n_inliers >= p->min_inliers && n_inliers >= 4) {
-                if (dlt_homography(in_ref, in_src, n_inliers, H_out) != DSO_OK ||
-                    fabs(homography_det(H_out)) < 1e-12) {
-                    err = DSO_ERR_RANSAC;
-                    goto cleanup;
-                }
-                if (n_inliers_out) *n_inliers_out = n_inliers;
-                err = DSO_OK;
-                goto cleanup;
+            double e2 = reproj_err_sq(&best_H,
+                                      ref_pts[i].x, ref_pts[i].y,
+                                      src_pts[i].x, src_pts[i].y);
+            if (e2 < thresh_sq) {
+                in_ref[n_inliers] = ref_pts[i];
+                in_src[n_inliers] = src_pts[i];
+                n_inliers++;
             }
         }
-        err = DSO_ERR_RANSAC;
-        goto cleanup;
-    }
 
-    err = dlt_homography(in_ref, in_src, n_inliers, H_out);
-    if (err != DSO_OK) {
-        err = DSO_ERR_RANSAC;
-        goto cleanup;
-    }
-
-    if (fabs(homography_det(H_out)) < 1e-12) {
-        err = DSO_ERR_INVALID_ARG;
-        goto cleanup;
+        /* refine with DLT on inliers */
+        err = dlt_homography(in_ref, in_src, n_inliers, H_out);
+        if (err != DSO_OK || fabs(homography_det(H_out)) < 1e-12) {
+            err = DSO_ERR_RANSAC;
+            goto cleanup;
+        }
     }
 
     if (n_inliers_out) *n_inliers_out = n_inliers;

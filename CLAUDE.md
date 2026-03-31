@@ -442,7 +442,7 @@ DsoError ransac_compute_homography(const StarList *ref_list, const StarList *frm
                                     Homography *H_out, int *n_inliers_out);
 ```
 
-DLT via Jacobi eigendecomposition of A^T·A (9×9); point normalization for numerical stability. Nearest-neighbour star matching with Lowe ratio test (d1/d2 < 0.8). Adaptive RANSAC termination. Produces **backward homography (ref → src)** directly — no inversion needed. Uses `rand_r(&seed)` with a per-call seed `time(NULL) ^ clock() ^ call_counter++` (static counter) for thread-safe, per-call independent random sequences.
+DLT via Jacobi eigendecomposition of A^T·A (9×9); point normalization for numerical stability. `ransac_compute_homography` uses a two-phase approach: (1) triangle voting to extract correspondences, then (2) RANSAC over those correspondences (sample 4, DLT + degenerate check, inlier counting, adaptive iteration termination, final refinement on best inliers). If the primary RANSAC fails, falls back to `fallback_ransac_compute` which uses nearest-neighbour star matching with Lowe ratio test (d1/d2 < 0.8). Produces **backward homography (ref → src)** directly — no inversion needed. Uses `rand_r(&seed)` with per-call seeds derived from `time(NULL) ^ clock() ^ counter++` (static counters) for thread-safe, per-call independent random sequences.
 
 ### `integration_gpu.h`
 
