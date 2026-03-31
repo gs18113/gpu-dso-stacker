@@ -64,6 +64,7 @@ class FrameTableWidget(QWidget):
         super().__init__(parent)
         self._loaded_paths: set[str] = set()
         self._pool = QThreadPool.globalInstance()
+        self._col_offset = 0  # LightTab sets to 1 after inserting the Ref column
         self._setup_ui()
 
     # ------------------------------------------------------------------ #
@@ -127,7 +128,7 @@ class FrameTableWidget(QWidget):
             reverse=True,
         )
         for row in rows:
-            path_item = self._table.item(row, COL_PATH)
+            path_item = self._table.item(row, COL_PATH + self._col_offset)
             if path_item:
                 self._loaded_paths.discard(path_item.text())
             self._table.removeRow(row)
@@ -138,7 +139,7 @@ class FrameTableWidget(QWidget):
         """Return file paths in current row order."""
         result = []
         for row in range(self._table.rowCount()):
-            item = self._table.item(row, COL_PATH)
+            item = self._table.item(row, COL_PATH + self._col_offset)
             if item:
                 result.append(item.text())
         return result
@@ -161,21 +162,22 @@ class FrameTableWidget(QWidget):
         self._loaded_paths.add(path)
         row = self._table.rowCount()
         self._table.insertRow(row)
+        off = self._col_offset
 
         # Filename
-        self._table.setItem(row, COL_FILENAME, _make_item(Path(path).name))
+        self._table.setItem(row, COL_FILENAME + off, _make_item(Path(path).name))
         # Full path (tooltip shows it in full when column is too narrow)
         path_item = _make_item(path)
         path_item.setToolTip(path)
-        self._table.setItem(row, COL_PATH, path_item)
+        self._table.setItem(row, COL_PATH + off, path_item)
         # Size
         try:
             sz = format_size(os.path.getsize(path))
         except OSError:
             sz = "?"
-        self._table.setItem(row, COL_SIZE, _make_item(sz))
+        self._table.setItem(row, COL_SIZE + off, _make_item(sz))
         # Dimensions (filled asynchronously)
-        self._table.setItem(row, COL_DIMENSIONS, _make_item("…"))
+        self._table.setItem(row, COL_DIMENSIONS + off, _make_item("…"))
 
         # Launch background header read
         worker = FitsMetaWorker(row, path)
@@ -191,7 +193,7 @@ class FrameTableWidget(QWidget):
             text = f"{w}×{h}"
         else:
             text = "N/A"
-        item = self._table.item(row, COL_DIMENSIONS)
+        item = self._table.item(row, COL_DIMENSIONS + self._col_offset)
         if item:
             item.setText(text)
 

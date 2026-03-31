@@ -50,7 +50,9 @@ class LightTab(QWidget):
         self._table = self._frame_widget.table()
 
         # Insert the "Ref" column at position 0 in the underlying table.
+        # This shifts all base columns right by 1, so tell FrameTableWidget.
         self._table.insertColumn(COL_REF)
+        self._frame_widget._col_offset = 1
         self._table.setHorizontalHeaderItem(
             COL_REF,
             QTableWidgetItem("Ref"),
