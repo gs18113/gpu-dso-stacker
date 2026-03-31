@@ -36,7 +36,8 @@ if platform.system() == 'Windows':
 elif platform.system() == 'Darwin':
     for f in os.listdir(bundled):
         if f.lower().endswith('.dylib'):
-            # Place next to _internal/bin so @loader_path/.. resolves correctly.
+            # Place at bundle root ("_internal") so dso_stacker in "_internal/bin"
+            # can resolve @loader_path/../lib*.dylib.
             cli_binaries.append((os.path.join(bundled, f), '.'))
 
 a = Analysis(

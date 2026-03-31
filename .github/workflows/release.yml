@@ -248,7 +248,7 @@ jobs:
       - name: Run focused tests (CPU-only)
         run: cd build-cpu && ctest --output-on-failure -V -R "test_pipeline_backend|test_cpu|test_star_detect|test_debayer_cpu|test_color|test_image_io"
 
-      - name: Upload Metal-enabled CLI binary
+      - name: Stage Metal-enabled CLI binary and libraries
         run: |
           mkdir -p artifact-metal
           cp install-metal/bin/dso_stacker artifact-metal/
@@ -259,7 +259,7 @@ jobs:
           name: dso-stacker-macos-arm64-metal
           path: artifact-metal/
 
-      - name: Upload CPU-only CLI binary
+      - name: Stage CPU-only CLI binary and libraries
         run: |
           mkdir -p artifact-cpu
           cp install-cpu/bin/dso_stacker artifact-cpu/
