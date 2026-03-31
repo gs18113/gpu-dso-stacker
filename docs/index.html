@@ -685,7 +685,7 @@
         </div>
 
         <div class="speed-badge">
-          <span class="speed-num">4×</span>
+          <span class="speed-num">4.4×</span>
           <span class="speed-desc">faster than CPU on 10 × 4656×3520 frames</span>
         </div>
       </div>
@@ -1022,12 +1022,12 @@ cmake --build build --parallel
     <div class="bench-grid reveal">
       <div class="bench-card">
         <div class="bench-label">GPU (CUDA)</div>
-        <div class="bench-value" style="color:var(--accent)">~4.1s</div>
+        <div class="bench-value" style="color:var(--accent)">~2.6s</div>
         <div class="bench-sub">Double-buffered CUDA stream overlap</div>
       </div>
       <div class="bench-card">
         <div class="bench-label">CPU (OpenMP)</div>
-        <div class="bench-value" style="color:var(--text-dim)">~16.4s</div>
+        <div class="bench-value" style="color:var(--text-dim)">~11.5s</div>
         <div class="bench-sub">All stages parallelized · full OpenMP</div>
       </div>
     </div>
@@ -1035,20 +1035,20 @@ cmake --build build --parallel
     <div class="bar-wrap reveal">
       <div class="bar-row">
         <span class="bar-name">GPU</span>
-        <div class="bar-track"><div class="bar-fill" style="width:25%;background:var(--accent)"></div></div>
-        <span class="bar-time">4.1 s</span>
+        <div class="bar-track"><div class="bar-fill" style="width:23%;background:var(--accent)"></div></div>
+        <span class="bar-time">2.6 s</span>
       </div>
       <div class="bar-row">
         <span class="bar-name">CPU</span>
         <div class="bar-track"><div class="bar-fill" style="width:100%;background:var(--text-dim)"></div></div>
-        <span class="bar-time">16.4 s</span>
+        <span class="bar-time">11.5 s</span>
       </div>
     </div>
 
     <div class="callout callout-info reveal" style="margin-top:1.5rem">
       <span class="callout-icon">📊</span>
       <div>
-        <strong>Output agreement:</strong> PSNR ≈ 44.6 dB · Mean relative error ≈ 0.25% in image interior.
+        <strong>Output agreement:</strong> PSNR ≈ 82.4 dB · Mean relative error ≈ 0.02% in image interior.
         Differences arise from distinct floating-point paths (NPPI Lanczos vs hand-coded CPU, GPU mini-batch vs single-pass kappa-sigma, slight homography differences from Moffat conv precision).
       </div>
     </div>

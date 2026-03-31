@@ -387,11 +387,11 @@ Measured on 10 × 4656×3520 frames (star detection mode):
 
 | Path | Wall time | Notes |
 |---|---|---|
-| GPU | ~4.1 s | Double-buffered CUDA stream overlap |
-| CPU (OpenMP) | ~16.4 s | All stages parallelized |
-| Speedup | **~4×** | |
+| GPU | ~2.6 s | Double-buffered CUDA stream overlap |
+| CPU (OpenMP) | ~11.5 s | All stages parallelized |
+| Speedup | **~4.4×** | |
 
-Output agreement: PSNR ≈ 44.6 dB, mean relative error ≈ 0.25% in the image interior.
+Output agreement: PSNR ≈ 82.4 dB, mean relative error ≈ 0.02% in the image interior.
 Differences arise from distinct floating-point paths (GPU nppi Lanczos vs hand-coded CPU,
 GPU mini-batch vs single-pass CPU kappa-sigma, slight homography differences from Moffat conv precision).
 
