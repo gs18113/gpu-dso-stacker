@@ -511,6 +511,14 @@ jobs:
 
       - name: Create archives
         run: |
+          # Ensure executable bits are set in macOS artifacts before archiving.
+          [ -f dso-stacker-macos-arm64-cpu/dso_stacker ] && chmod +x dso-stacker-macos-arm64-cpu/dso_stacker
+          [ -f dso-stacker-macos-arm64-metal/dso_stacker ] && chmod +x dso-stacker-macos-arm64-metal/dso_stacker
+          [ -f dso-stacker-gui-macos-arm64-cpu/DSOStacker ] && chmod +x dso-stacker-gui-macos-arm64-cpu/DSOStacker
+          [ -f dso-stacker-gui-macos-arm64-cpu/bin/dso_stacker ] && chmod +x dso-stacker-gui-macos-arm64-cpu/bin/dso_stacker
+          [ -f dso-stacker-gui-macos-arm64-metal/DSOStacker ] && chmod +x dso-stacker-gui-macos-arm64-metal/DSOStacker
+          [ -f dso-stacker-gui-macos-arm64-metal/bin/dso_stacker ] && chmod +x dso-stacker-gui-macos-arm64-metal/bin/dso_stacker
+
           tar czf dso-stacker-cli-linux-x86_64-cpu.tar.gz   -C dso-stacker-linux-x86_64-cpu .
           tar czf dso-stacker-cli-linux-x86_64-gpu.tar.gz   -C dso-stacker-linux-x86_64-gpu .
           tar czf dso-stacker-cli-macos-arm64-cpu.tar.gz    -C dso-stacker-macos-arm64-cpu .
