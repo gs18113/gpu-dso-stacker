@@ -289,9 +289,9 @@ jobs:
 
       - name: Stage Metal-enabled CLI binary and libraries
         run: |
+          shopt -s nullglob
           mkdir -p artifact-metal
           cp install-metal/bin/dso_stacker artifact-metal/
-          shopt -s nullglob
           dylibs=(install-metal/lib/*.dylib)
           if [ ${#dylibs[@]} -gt 0 ]; then
             cp "${dylibs[@]}" artifact-metal/
@@ -304,9 +304,9 @@ jobs:
 
       - name: Stage CPU-only CLI binary and libraries
         run: |
+          shopt -s nullglob
           mkdir -p artifact-cpu
           cp install-cpu/bin/dso_stacker artifact-cpu/
-          shopt -s nullglob
           dylibs=(install-cpu/lib/*.dylib)
           if [ ${#dylibs[@]} -gt 0 ]; then
             cp "${dylibs[@]}" artifact-cpu/
