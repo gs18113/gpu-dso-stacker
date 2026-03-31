@@ -15,7 +15,7 @@ Sections
   Triangle Matching  triangle_iters, triangle_thresh, match_radius, match_device
   Sensor           Bayer pattern override
   Output Format    bit depth, TIFF compression, stretch bounds
-  Calibration      save_master_dir, wsor_clip
+  Calibration      save_master_dir, wsor_clip, calib_kappa, calib_iterations
 """
 
 from __future__ import annotations
@@ -77,6 +77,7 @@ class StackingOptionsTab(QWidget):
             "moffat_beta":      self._moffat_beta_spin.value(),
             "top_stars":        self._top_stars_spin.value(),
             "min_stars":        self._min_stars_spin.value(),
+            "min_inliers":      self._min_inliers_spin.value(),
             "triangle_iters":   self._triangle_iters_spin.value(),
             "triangle_thresh":  self._triangle_thresh_spin.value(),
             "match_radius":     self._match_radius_spin.value(),
@@ -88,6 +89,8 @@ class StackingOptionsTab(QWidget):
             "stretch_max":      self._parse_stretch(self._stretch_max_edit.text()),
             "save_master_dir":  self._save_master_edit.text().strip() or "./master",
             "wsor_clip":        self._wsor_clip_spin.value(),
+            "calib_kappa":      self._calib_kappa_spin.value(),
+            "calib_iterations": self._calib_iterations_spin.value(),
             # Per-tab methods are managed by CalibTab; these keys may also
             # live here for completeness (overridden by CalibTab on run).
             "dark_method":      "winsorized-mean",
@@ -110,6 +113,7 @@ class StackingOptionsTab(QWidget):
         self._moffat_beta_spin.setValue(       opts.get("moffat_beta", 2.0))
         self._top_stars_spin.setValue(         opts.get("top_stars", 50))
         self._min_stars_spin.setValue(         opts.get("min_stars", 6))
+        self._min_inliers_spin.setValue(      opts.get("min_inliers", 4))
         self._triangle_iters_spin.setValue(    opts.get("triangle_iters", opts.get("ransac_iters", 1000)))
         self._triangle_thresh_spin.setValue(   opts.get("triangle_thresh", opts.get("ransac_thresh", 2.0)))
         self._match_radius_spin.setValue(      opts.get("match_radius", 30.0))
@@ -123,6 +127,8 @@ class StackingOptionsTab(QWidget):
         self._stretch_max_edit.setText("" if smax is None else str(smax))
         self._set_text(self._save_master_edit, opts.get("save_master_dir", "./master"))
         self._wsor_clip_spin.setValue(         opts.get("wsor_clip", 0.1))
+        self._calib_kappa_spin.setValue(      opts.get("calib_kappa", 2.5))
+        self._calib_iterations_spin.setValue( opts.get("calib_iterations", 5))
         self._update_visibility()
 
     # ------------------------------------------------------------------ #
@@ -227,7 +233,7 @@ class StackingOptionsTab(QWidget):
         form.addRow("Moffat alpha:",      self._moffat_alpha_spin)
         form.addRow("Moffat beta:",       self._moffat_beta_spin)
         form.addRow("Top-K stars:",       self._top_stars_spin)
-        form.addRow("Min stars (triangle matching):", self._min_stars_spin)
+        form.addRow("Min stars (detection gate):", self._min_stars_spin)
         return box
 
     def _build_ransac_group(self) -> QGroupBox:
@@ -238,6 +244,7 @@ class StackingOptionsTab(QWidget):
         self._triangle_iters_spin  = _int_spin(10, 10000, 1000)
         self._triangle_thresh_spin = _dbl_spin(0.1, 50.0, 2.0, 1, 0.1)
         self._match_radius_spin  = _dbl_spin(1.0, 500.0, 30.0, 1, 1.0)
+        self._min_inliers_spin   = _int_spin(3, 100, 4)
         self._match_device_combo = QComboBox()
         self._match_device_combo.addItems(["auto", "cpu", "gpu"])
         self._match_device_lbl = QLabel("Match device:")
@@ -245,6 +252,7 @@ class StackingOptionsTab(QWidget):
         form.addRow("Max iterations:",       self._triangle_iters_spin)
         form.addRow("Inlier threshold (px):", self._triangle_thresh_spin)
         form.addRow("Match radius (px):",     self._match_radius_spin)
+        form.addRow("Min inliers (RANSAC):",  self._min_inliers_spin)
         form.addRow(self._match_device_lbl,   self._match_device_combo)
         return box
 
@@ -325,9 +333,26 @@ class StackingOptionsTab(QWidget):
         )
         form.addRow("Wsor clip fraction:", self._wsor_clip_spin)
 
+        self._calib_kappa_spin = _dbl_spin(0.1, 20.0, 2.5, 1, 0.1)
+        self._calib_kappa_spin.setToolTip(
+            "Kappa-sigma rejection threshold for calibration frame stacking.\n"
+            "Values further than kappa*sigma from the mean are rejected.\n"
+            "Only used when a calibration tab's method is kappa-sigma.\n"
+            "Default: 2.5"
+        )
+        form.addRow("Calib kappa:", self._calib_kappa_spin)
+
+        self._calib_iterations_spin = _int_spin(1, 20, 5)
+        self._calib_iterations_spin.setToolTip(
+            "Maximum clipping iterations for calibration kappa-sigma stacking.\n"
+            "Only used when a calibration tab's method is kappa-sigma.\n"
+            "Default: 5"
+        )
+        form.addRow("Calib iterations:", self._calib_iterations_spin)
+
         note = QLabel(
-            "<i>Stacking method (winsorized-mean / median) is set per frame type "
-            "in the Dark, Flat, Bias, and Darkflat tabs.</i>"
+            "<i>Stacking method (winsorized-mean / median / kappa-sigma) is set "
+            "per frame type in the Dark, Flat, Bias, and Darkflat tabs.</i>"
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: gray; font-size: 11px;")

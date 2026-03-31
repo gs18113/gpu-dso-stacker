@@ -136,6 +136,7 @@ def build_command(
     argv += ["--triangle-iters",  str(opts["triangle_iters"])]
     argv += ["--triangle-thresh", str(opts["triangle_thresh"])]
     argv += ["--match-radius",  str(opts["match_radius"])]
+    argv += ["--min-inliers",   str(opts["min_inliers"])]
     if not opts.get("use_cpu") and opts.get("match_device", "auto") != "auto":
         argv += ["--match-device", opts["match_device"]]
 
@@ -156,6 +157,14 @@ def build_command(
     ):
         if opts.get(key, "winsorized-mean") != "winsorized-mean":
             argv += [flag, opts[key]]
+
+    # Emit calib-kappa / calib-iterations when any calibration uses kappa-sigma
+    calib_methods = [opts.get(k, "winsorized-mean")
+                     for k in ("dark_method", "bias_method",
+                               "flat_method", "darkflat_method")]
+    if "kappa-sigma" in calib_methods:
+        argv += ["--calib-kappa", str(opts.get("calib_kappa", 2.5))]
+        argv += ["--calib-iterations", str(opts.get("calib_iterations", 5))]
 
     # --- sensor ---
     if opts.get("bayer", "auto") != "auto":

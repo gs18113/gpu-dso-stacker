@@ -99,7 +99,7 @@ gpu-dso-stacker/
 │   ├── test_ransac.c            ← 13 tests: DLT + RANSAC
 │   ├── test_debayer_cpu.c       ← 10 tests: VNG debayer CPU (all patterns + edge cases)
 │   ├── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
-│   ├── test_calibration.c       ← 26 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, bias sub, flat normalization)
+│   ├── test_calibration.c       ← 29 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, kappa-sigma, bias sub, flat normalization)
 │   ├── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
 │   ├── test_color.c             ← 33 tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
 │   └── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
@@ -226,7 +226,7 @@ Star detection (2-column CSV only):
       --moffat-alpha <float>     Moffat PSF alpha / FWHM (default: 2.5)
       --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
       --top-stars <int>          Top-K stars for matching (default: 50)
-      --min-stars <int>          Minimum stars for triangle matching (default: 6)
+      --min-stars <int>          Minimum detected stars to attempt alignment (default: 6)
 
 Triangle matching (2-column CSV only):
       --triangle-iters <int>     Max triangle-matching iterations (default: 1000)
@@ -234,6 +234,7 @@ Triangle matching (2-column CSV only):
       --ransac-iters <int>       Deprecated alias of --triangle-iters
       --ransac-thresh <float>    Deprecated alias of --triangle-thresh
       --match-radius <float>     Star matching search radius px (default: 30.0)
+      --min-inliers <int>        Minimum RANSAC inliers for acceptance (default: 4)
       --match-device <device>    auto | cpu | gpu (default: auto = stacking device)
 
 Sensor:
@@ -245,12 +246,16 @@ Calibration (applied before debayering; bias and darkflat are mutually exclusive
       --flat <path>              Master flat FITS or text list of flat FITS paths
       --darkflat <path>          Master darkflat FITS or text list of darkflat FITS paths
       --save-master-frames <dir> Directory to save generated masters (default: ./master)
-      --dark-method <method>     winsorized-mean | median (default: winsorized-mean)
-      --bias-method <method>     winsorized-mean | median (default: winsorized-mean)
-      --flat-method <method>     winsorized-mean | median (default: winsorized-mean)
-      --darkflat-method <method> winsorized-mean | median (default: winsorized-mean)
+      --dark-method <method>     winsorized-mean | median | kappa-sigma (default: winsorized-mean)
+      --bias-method <method>     winsorized-mean | median | kappa-sigma (default: winsorized-mean)
+      --flat-method <method>     winsorized-mean | median | kappa-sigma (default: winsorized-mean)
+      --darkflat-method <method> winsorized-mean | median | kappa-sigma (default: winsorized-mean)
       --wsor-clip <float>        Winsorized mean clipping fraction per side (default: 0.1)
                                  Valid range: [0.0, 0.49]
+      --calib-kappa <float>      Kappa-sigma rejection threshold for calibration
+                                 stacking (default: 2.5)
+      --calib-iterations <int>   Max kappa-sigma clipping passes for calibration
+                                 stacking (default: 5)
 ```
 
 ### Input CSV Format
@@ -464,7 +469,7 @@ DsoError integration_gpu_finalize(IntegrationGpuCtx *ctx, int n_frames,
 ### `calibration.h`
 
 ```c
-typedef enum { CALIB_WINSORIZED_MEAN = 0, CALIB_MEDIAN } CalibMethod;
+typedef enum { CALIB_WINSORIZED_MEAN = 0, CALIB_MEDIAN, CALIB_KAPPA_SIGMA } CalibMethod;
 
 typedef struct CalibFrames {
     Image dark;    /* master dark (bias-subtracted if bias was provided) */
@@ -479,7 +484,9 @@ DsoError calib_load_or_generate(
     const char *flat_path,    CalibMethod flat_method,
     const char *darkflat_path, CalibMethod darkflat_method,
     const char *save_dir,
-    float        wsor_clip,   /* clipping fraction per side [0.0, 0.49], default 0.1 */
+    float        wsor_clip,          /* clipping fraction per side [0.0, 0.49], default 0.1 */
+    float        calib_kappa,        /* kappa-sigma rejection threshold, default 2.5 */
+    int          calib_iterations,   /* kappa-sigma max iterations, default 5 */
     CalibFrames *calib_out);
 
 DsoError calib_apply_cpu(Image *img, const CalibFrames *calib);
@@ -553,7 +560,7 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - **Moffat constant memory cap**: max kernel radius is 15 (alpha ≤ 5 → R = ceil(3·alpha) ≤ 15, diameter 31, 961 floats × 4 = ~3.8 KB within 64 KB constant limit).
 - **Single-pass pipeline**: each frame is loaded from disk exactly once. Star detection, RANSAC, and warp all run in the same pass before the next frame is loaded. No separate Phase 1 / Phase 2; no 11-column pre-computed transform path. The only CSV format is 2-column (`filepath, is_reference`).
 - **Triangle-matching mismatch policy**: non-reference frames that fail alignment are skipped (not fatal). Both CPU and GPU pipelines print a final summary: `successful frames: X/Y (skipped: Z)`. Reference-frame alignment failure still aborts.
-- **`--min-stars` propagates to RANSAC**: `main.cpp` sets `cfg.ransac.min_inliers = cfg.min_stars` after argument parsing so the RANSAC inlier acceptance threshold is consistent with the star detection minimum. Previously `min_inliers` was hardcoded at 4.
+- **`--min-stars` and `--min-inliers` are independent**: `--min-stars` (default 6) gates the pre-RANSAC star-count check in both pipeline paths (skip frames with too few detected stars); `--min-inliers` (default 4) sets `RansacParams.min_inliers` for RANSAC acceptance. They are no longer coupled.
 - **CPU vs GPU output agreement**: not bit-identical due to different Moffat conv precision (→ slightly different homographies), different Lanczos implementations (nppi vs hand-coded), and different integration paths. Empirical PSNR ≈ 44.6 dB; mean relative error ≈ 0.25% in the interior on 10 × 4656×3520 frames.
 - **`lanczos_transform_cpu` identity fast path**: if H is identity and src/dst dimensions match, falls back to `memcpy` before entering the warp loop.
 - **`lanczos_transform_cpu` weight precomputation**: `wx_arr[6]` and `wy_arr[6]` are computed once before the 6×6 tap loop, reducing `lanczos_weight` calls from 42 to 12 per destination pixel.
@@ -563,6 +570,7 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - **Synthetic RANSAC stress tests**: `test/star_coords_generator.{h,c}` generates deterministic synthetic star lists (shared inlier transform + independent outliers); `tests/test_ransac.c` uses it for seed sweeps and high-outlier scenarios, and `test_ransac` target links the generator directly in `CMakeLists.txt`.
 - **Calibration formula**: `light_cal = (light - dark_master) / flat_master`. Applied before debayering. With bias: `dark_master = stack(dark_raw - bias)`, `flat_master = stack(normalize(flat_raw - bias))`. With darkflat: `dark_master = stack(dark_raw)`, `flat_master = stack(normalize(flat_raw - darkflat))`. Bias and darkflat are mutually exclusive.
 - **Winsorized mean (γ=0.1)**: Sort N pixel values per pixel; replace bottom `g = floor(0.1·N)` values with `vals[g]` and top g with `vals[N-1-g]`; compute mean using `double` accumulator to prevent overflow for N·(65535)² accumulations. Insertion sort used for per-pixel sort (N typically < 100).
+- **Calibration kappa-sigma clipping**: Iterative sigma clipping for calibration master frame generation. Per pixel: compute mean and Bessel-corrected stddev of active values; reject those further than `calib_kappa * sigma` from the mean; repeat up to `calib_iterations` times. Falls back to unclipped mean if all values are rejected. Does not handle NaN (calibration frames have no OOB sentinels). Controlled by `--calib-kappa` (default 2.5) and `--calib-iterations` (default 5). Insertion sort is skipped for this method.
 - **Flat normalization**: Each flat frame is divided by its own (double-precision) mean before stacking. The stacked master flat has mean ≈ 1.0 and is used directly as a divisor. Flat inputs must be **raw ADU** — `calibration.c` subtracts bias first, then normalises. Pre-normalised flat frames (mean≈1.0) produce `flat_raw − bias ≈ −249`, triggering "near-zero mean, skipping normalisation" and an inverted/invalid master flat.
 - **Dead-pixel guard**: Flat pixels below `1e-6f` → output 0 (not divide). Both CPU and GPU paths apply this guard.
 - **Calibration dimension validation**: `calib_apply_cpu` and `calib_gpu_apply_d2d` return `DSO_ERR_INVALID_ARG` if the frame dimensions do not match the master frame dimensions.
@@ -778,10 +786,11 @@ options:
   output_path: output.fits     use_cpu: false
   integration: kappa-sigma     kappa: 3.0     iterations: 3     batch_size: 16
   star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
-  top_stars: 50     min_stars: 6
+  top_stars: 50     min_stars: 6     min_inliers: 4
   triangle_iters: 1000     triangle_thresh: 2.0     match_radius: 30.0     match_device: auto
   bayer: auto     bit_depth: f32     tiff_compression: none
   stretch_min: null     stretch_max: null
   save_master_dir: ./master     wsor_clip: 0.1
+  calib_kappa: 2.5     calib_iterations: 5
   dark_method: winsorized-mean     ...
 ```

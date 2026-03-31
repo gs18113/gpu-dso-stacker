@@ -38,6 +38,13 @@
  *   Sort the N values per pixel, return the middle element (or the average
  *   of the two middle elements when N is even).
  *
+ * CALIB_KAPPA_SIGMA
+ *   Iterative sigma clipping.  Per pixel: compute mean and Bessel-corrected
+ *   stddev of active values; reject those further than kappa*sigma from the
+ *   mean; repeat up to calib_iterations times (or until no rejections).
+ *   Output is the mean of surviving values.  Falls back to unclipped mean
+ *   if all values are rejected.
+ *
  * Flat normalization
  * ------------------
  * Before stacking, each flat frame is divided by its own mean so that all
@@ -62,7 +69,8 @@ extern "C" {
  * ------------------------------------------------------------------------- */
 typedef enum {
     CALIB_WINSORIZED_MEAN = 0,
-    CALIB_MEDIAN
+    CALIB_MEDIAN,
+    CALIB_KAPPA_SIGMA
 } CalibMethod;
 
 /* -------------------------------------------------------------------------
@@ -94,6 +102,13 @@ typedef struct CalibFrames {
  *   Valid range: [0.0, 0.49].  Values outside this range are clamped.
  *   Only used when method == CALIB_WINSORIZED_MEAN.
  *
+ * calib_kappa : kappa-sigma rejection threshold (default 2.5).
+ *   Values further than kappa*sigma from the mean are rejected.
+ *   Must be > 0.  Only used when method == CALIB_KAPPA_SIGMA.
+ *
+ * calib_iterations : max kappa-sigma clipping passes (default 5).
+ *   Must be >= 1.  Only used when method == CALIB_KAPPA_SIGMA.
+ *
  * Generated master frames are saved to:
  *   <save_dir>/master_dark.fits
  *   <save_dir>/master_flat.fits
@@ -107,6 +122,8 @@ DsoError calib_load_or_generate(
     const char *darkflat_path, CalibMethod darkflat_method,
     const char *save_dir,
     float        wsor_clip,
+    float        calib_kappa,
+    int          calib_iterations,
     CalibFrames *calib_out);
 
 /* -------------------------------------------------------------------------

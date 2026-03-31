@@ -86,6 +86,7 @@ enum {
     OPT_RANSAC_ITERS,
     OPT_RANSAC_THRESH,
     OPT_MATCH_RADIUS,
+    OPT_MIN_INLIERS,
     OPT_MATCH_DEVICE,
     OPT_BACKEND,
     OPT_BATCH_SIZE,
@@ -101,6 +102,8 @@ enum {
     OPT_FLAT_METHOD,
     OPT_DARKFLAT_METHOD,
     OPT_WSOR_CLIP,
+    OPT_CALIB_KAPPA,
+    OPT_CALIB_ITERATIONS,
     /* Output format options */
     OPT_BIT_DEPTH,
     OPT_TIFF_COMPRESSION,
@@ -129,7 +132,7 @@ static void usage(const char *prog)
         "      --moffat-alpha <float>     Moffat PSF alpha / FWHM (default: 2.5)\n"
         "      --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)\n"
         "      --top-stars <int>          Top-K stars for matching (default: 50)\n"
-        "      --min-stars <int>          Minimum stars for triangle matching (default: 6)\n"
+        "      --min-stars <int>          Minimum detected stars to attempt alignment (default: 6)\n"
         "\n"
         "Triangle matching alignment (used only for 2-column CSV input):\n"
         "      --triangle-iters <int>     Max triangle-matching iterations (default: 1000)\n"
@@ -137,6 +140,7 @@ static void usage(const char *prog)
         "      --ransac-iters <int>       Deprecated alias of --triangle-iters\n"
         "      --ransac-thresh <float>    Deprecated alias of --triangle-thresh\n"
         "      --match-radius <float>     Star matching radius px (default: 30.0)\n"
+        "      --min-inliers <int>        Minimum RANSAC inliers for acceptance (default: 4)\n"
         "      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)\n"
         "      --backend <backend>        auto | cpu | cuda | metal (default: auto)\n"
         "\n"
@@ -149,12 +153,20 @@ static void usage(const char *prog)
         "                                 (mutually exclusive with --bias)\n"
         "      --save-master-frames <dir> Directory to save generated master frames\n"
         "                                 (default: ./master)\n"
-        "      --dark-method <method>     winsorized-mean | median (default: winsorized-mean)\n"
-        "      --bias-method <method>     winsorized-mean | median (default: winsorized-mean)\n"
-        "      --flat-method <method>     winsorized-mean | median (default: winsorized-mean)\n"
-        "      --darkflat-method <method> winsorized-mean | median (default: winsorized-mean)\n"
+        "      --dark-method <method>     winsorized-mean | median | kappa-sigma\n"
+        "                                 (default: winsorized-mean)\n"
+        "      --bias-method <method>     winsorized-mean | median | kappa-sigma\n"
+        "                                 (default: winsorized-mean)\n"
+        "      --flat-method <method>     winsorized-mean | median | kappa-sigma\n"
+        "                                 (default: winsorized-mean)\n"
+        "      --darkflat-method <method> winsorized-mean | median | kappa-sigma\n"
+        "                                 (default: winsorized-mean)\n"
         "      --wsor-clip <float>        Winsorized mean clipping fraction per side\n"
         "                                 Valid range: [0.0, 0.49] (default: 0.1)\n"
+        "      --calib-kappa <float>      Kappa-sigma rejection threshold for calibration\n"
+        "                                 stacking (default: 2.5)\n"
+        "      --calib-iterations <int>   Max kappa-sigma clipping passes for calibration\n"
+        "                                 stacking (default: 5)\n"
         "\n"
         "Sensor:\n"
         "      --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg\n"
@@ -185,6 +197,7 @@ static int parse_calib_method(const char *s, CalibMethod *out)
 {
     if (strcmp(s, "winsorized-mean") == 0) { *out = CALIB_WINSORIZED_MEAN; return 0; }
     if (strcmp(s, "median")          == 0) { *out = CALIB_MEDIAN;          return 0; }
+    if (strcmp(s, "kappa-sigma")     == 0) { *out = CALIB_KAPPA_SIGMA;     return 0; }
     return -1;
 }
 
@@ -246,6 +259,8 @@ int main(int argc, char **argv)
     CalibMethod flat_method      = CALIB_WINSORIZED_MEAN;
     CalibMethod darkflat_method  = CALIB_WINSORIZED_MEAN;
     float       wsor_clip        = 0.1f;
+    float       calib_kappa      = 2.5f;
+    int         calib_iterations = 5;
 
     static struct option long_opts[] = {
         {"file",              required_argument, nullptr, 'f'},
@@ -264,6 +279,7 @@ int main(int argc, char **argv)
         {"ransac-iters",      required_argument, nullptr, OPT_RANSAC_ITERS},  /* deprecated alias */
         {"ransac-thresh",     required_argument, nullptr, OPT_RANSAC_THRESH}, /* deprecated alias */
         {"match-radius",      required_argument, nullptr, OPT_MATCH_RADIUS},
+        {"min-inliers",       required_argument, nullptr, OPT_MIN_INLIERS},
         {"match-device",      required_argument, nullptr, OPT_MATCH_DEVICE},
         {"backend",           required_argument, nullptr, OPT_BACKEND},
         {"batch-size",        required_argument, nullptr, OPT_BATCH_SIZE},
@@ -279,6 +295,8 @@ int main(int argc, char **argv)
         {"flat-method",       required_argument, nullptr, OPT_FLAT_METHOD},
         {"darkflat-method",   required_argument, nullptr, OPT_DARKFLAT_METHOD},
         {"wsor-clip",         required_argument, nullptr, OPT_WSOR_CLIP},
+        {"calib-kappa",       required_argument, nullptr, OPT_CALIB_KAPPA},
+        {"calib-iterations",  required_argument, nullptr, OPT_CALIB_ITERATIONS},
         /* Output format */
         {"bit-depth",         required_argument, nullptr, OPT_BIT_DEPTH},
         {"tiff-compression",  required_argument, nullptr, OPT_TIFF_COMPRESSION},
@@ -307,6 +325,7 @@ int main(int argc, char **argv)
         case OPT_RANSAC_ITERS:  cfg.ransac.max_iters     = atoi(optarg);             break;
         case OPT_RANSAC_THRESH: cfg.ransac.inlier_thresh  = strtof(optarg, nullptr); break;
         case OPT_MATCH_RADIUS:  cfg.ransac.match_radius   = strtof(optarg, nullptr); break;
+        case OPT_MIN_INLIERS:  cfg.ransac.min_inliers    = atoi(optarg);             break;
         case OPT_MATCH_DEVICE:
             if (strcmp(optarg, "auto") == 0) {
                 cfg.use_gpu_ransac = -1;
@@ -393,6 +412,25 @@ int main(int argc, char **argv)
             }
             break;
 
+        case OPT_CALIB_KAPPA:
+            calib_kappa = strtof(optarg, nullptr);
+            if (calib_kappa <= 0.0f) {
+                fprintf(stderr,
+                        "Error: --calib-kappa must be > 0 (got %.4f)\n",
+                        (double)calib_kappa);
+                return 1;
+            }
+            break;
+        case OPT_CALIB_ITERATIONS:
+            calib_iterations = atoi(optarg);
+            if (calib_iterations < 1) {
+                fprintf(stderr,
+                        "Error: --calib-iterations must be >= 1 (got %d)\n",
+                        calib_iterations);
+                return 1;
+            }
+            break;
+
         case OPT_BIT_DEPTH:
             if      (strcmp(optarg, "8")   == 0) cfg.save_opts.bit_depth = OUT_BITS_INT8;
             else if (strcmp(optarg, "16")  == 0) cfg.save_opts.bit_depth = OUT_BITS_INT16;
@@ -424,12 +462,6 @@ int main(int argc, char **argv)
         default: usage(argv[0]); return 1;
         }
     }
-
-    /* min_stars drives both the pre-RANSAC star-count guard and the RANSAC
-       inlier acceptance threshold.  Without this, --min-stars N only skips
-       frames with fewer than N detected stars but RANSAC still accepts matches
-       with as few as 4 inliers (its hardcoded default). */
-    cfg.ransac.min_inliers = cfg.min_stars;
 
     if (!csv_file) {
         fprintf(stderr, "Error: --file is required\n\n");
@@ -557,6 +589,8 @@ int main(int argc, char **argv)
                   darkflat_path, darkflat_method,
                   save_master_dir,
                   wsor_clip,
+                  calib_kappa,
+                  calib_iterations,
                   &calib),
               "calib_load_or_generate");
         cfg.calib = &calib;

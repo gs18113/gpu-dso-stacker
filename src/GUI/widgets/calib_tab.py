@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from widgets.frame_table import FrameTableWidget
 
 
-_METHODS = ["winsorized-mean", "median"]
+_METHODS = ["winsorized-mean", "median", "kappa-sigma"]
 
 
 class CalibTab(QWidget):

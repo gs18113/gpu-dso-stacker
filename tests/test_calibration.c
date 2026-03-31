@@ -7,7 +7,7 @@
  *   - calib_load_or_generate: FITS master loading, frame-list stacking,
  *     bias subtraction from darks, bias/darkflat subtraction from flats,
  *     flat per-frame normalization, winsorized-mean outlier rejection,
- *     median stacking, save-dir output
+ *     median stacking, kappa-sigma clipping, save-dir output
  *   - calib_free: safe on zero-init and populated structs
  *
  * Design for failure detection
@@ -313,7 +313,7 @@ static int test_load_fits_master_dark(void)
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
     ASSERT_EQ(c.has_dark, 1);
     ASSERT_EQ(c.has_flat, 0);
     ASSERT_EQ(c.dark.width,  4);
@@ -333,7 +333,7 @@ static int test_load_fits_master_flat(void)
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      tmp,  CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
     ASSERT_EQ(c.has_dark, 0);
     ASSERT_EQ(c.has_flat, 1);
     ASSERT_NEAR(c.flat.data[0], 1.5f, 1e-4f);
@@ -363,7 +363,7 @@ static int test_generate_dark_constant_frames(void)
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
     ASSERT_EQ(c.has_dark, 1);
     ASSERT_NEAR(c.dark.data[0], 30.f, 1e-3f);
     calib_free(&c);
@@ -397,7 +397,7 @@ static int test_winsorized_mean_clips_outlier(void)
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
     ASSERT_EQ(c.has_dark, 1);
     /* Winsorized mean must be close to 5, not the plain-mean 54.5 */
     ASSERT_NEAR(c.dark.data[0], 5.f, 1.0f);   /* tol=1 to be safe */
@@ -431,7 +431,7 @@ static int test_median_method(void)
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
     ASSERT_EQ(c.has_dark, 1);
     ASSERT_NEAR(c.dark.data[0], 3.f, 0.5f);
     /* Must not be the plain mean (61.2) */
@@ -462,7 +462,7 @@ static int test_bias_subtracted_from_dark(void)
                                      bias_fits,   CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
     ASSERT_EQ(c.has_dark, 1);
     /* dark_master should be dark - bias = 30 - 10 = 20 */
     ASSERT_NEAR(c.dark.data[0], 20.f, 1e-3f);
@@ -504,7 +504,7 @@ static int test_flat_per_frame_normalization(void)
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      flst, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
     ASSERT_EQ(c.has_flat, 1);
     /* Master flat should be ≈ 1.0 (normalized frames stacked) */
     ASSERT_NEAR(c.flat.data[0], 1.f, 0.05f);
@@ -551,7 +551,7 @@ static int test_bias_subtracted_from_flat(void)
                                      bias_fits, CALIB_WINSORIZED_MEAN,
                                      flat_lst,  CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
     ASSERT_EQ(c.has_flat, 1);
     /* Expected: (2000/1500) ≈ 1.333 */
     ASSERT_NEAR(c.flat.data[0], 2000.f / 1500.f, 0.01f);
@@ -587,7 +587,7 @@ static int test_darkflat_subtracted_from_flat(void)
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      flat_lst, CALIB_WINSORIZED_MEAN,
                                      df_fits,  CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
     ASSERT_EQ(c.has_flat, 1);
     /* flat_cal = [2000, 1000], mean = 1500 → normalized [1.333, 0.667] */
     ASSERT_NEAR(c.flat.data[0], 2000.f / 1500.f, 0.01f);
@@ -615,7 +615,7 @@ static int test_end_to_end_dark_and_flat(void)
                                      NULL, CALIB_WINSORIZED_MEAN,
                                      flat_fits, CALIB_WINSORIZED_MEAN,
                                      NULL, CALIB_WINSORIZED_MEAN,
-                                     NULL, 0.1f, &c));
+                                     NULL, 0.1f, 2.5f, 5, &c));
 
     float data[4] = {2100.f, 2100.f, 2100.f, 2100.f};
     Image img = {data, 2, 2};
@@ -650,6 +650,99 @@ static int test_end_to_end_dead_pixels_zeroed(void)
     ASSERT_NEAR(data[1], 50.f, 1e-4f);
     ASSERT_NEAR(data[2], 50.f, 1e-4f);
     ASSERT_NEAR(data[3], 50.f, 1e-4f);
+    return 0;
+}
+
+/* =========================================================================
+ * calib_load_or_generate — kappa-sigma clipping
+ * ========================================================================= */
+
+static int test_kappa_sigma_clips_outlier(void)
+{
+    /* 10 dark frames: 9 with value 5.0, 1 outlier at 500.0.
+     * Kappa-sigma (kappa=2.5) should reject the outlier → result ≈ 5.0.
+     * Plain mean (wrong): (9*5 + 500) / 10 = 54.5 */
+    #define KS_N 10
+    char kspaths[KS_N][64];
+    const char *kspptrs[KS_N];
+    for (int i = 0; i < KS_N; i++) {
+        snprintf(kspaths[i], sizeof(kspaths[i]),
+                 "%s/dso_ks_dark_%d.fits", test_tmpdir(), i);
+        float val = (i == KS_N - 1) ? 500.f : 5.f;
+        ASSERT_OK(make_fits_const(kspaths[i], 1, 1, val));
+        kspptrs[i] = kspaths[i];
+    }
+    char kslst[512]; TEST_TMPPATH(kslst, "dso_ks_dark_list.txt");
+    ASSERT_OK(write_framelist(kslst, kspptrs, KS_N));
+
+    CalibFrames c = {0};
+    ASSERT_OK(calib_load_or_generate(kslst, CALIB_KAPPA_SIGMA,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, 0.1f, 2.5f, 5, &c));
+    ASSERT_EQ(c.has_dark, 1);
+    /* Kappa-sigma must be close to 5, not the plain mean 54.5 */
+    ASSERT_NEAR(c.dark.data[0], 5.f, 1.0f);
+    ASSERT(fabsf(c.dark.data[0] - 54.5f) > 10.f);
+    calib_free(&c);
+    return 0;
+}
+
+static int test_kappa_sigma_all_rejected_fallback(void)
+{
+    /* With an extremely low kappa (0.01), nearly all values get rejected.
+     * The fallback should be the unclipped mean, not 0 or crash.
+     * Values: [10, 20, 30] → unclipped mean = 20. */
+    char f1[512]; TEST_TMPPATH(f1, "dso_ksfall1.fits");
+    char f2[512]; TEST_TMPPATH(f2, "dso_ksfall2.fits");
+    char f3[512]; TEST_TMPPATH(f3, "dso_ksfall3.fits");
+    char lst[512]; TEST_TMPPATH(lst, "dso_ksfall_list.txt");
+    ASSERT_OK(make_fits_const(f1, 1, 1, 10.f));
+    ASSERT_OK(make_fits_const(f2, 1, 1, 20.f));
+    ASSERT_OK(make_fits_const(f3, 1, 1, 30.f));
+    const char *paths[] = {f1, f2, f3};
+    ASSERT_OK(write_framelist(lst, paths, 3));
+
+    CalibFrames c = {0};
+    /* kappa=0.01, iterations=10 → should clip everything, then fallback */
+    ASSERT_OK(calib_load_or_generate(lst, CALIB_KAPPA_SIGMA,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, 0.1f, 0.01f, 10, &c));
+    ASSERT_EQ(c.has_dark, 1);
+    /* Fallback to unclipped mean = 20 */
+    ASSERT_NEAR(c.dark.data[0], 20.f, 0.5f);
+    calib_free(&c);
+    return 0;
+}
+
+static int test_kappa_sigma_identical_frames(void)
+{
+    /* 5 frames all with value 42.0.  stddev = 0 → no clipping.
+     * Result should be exactly 42.0. */
+    #define KS_IDENT_N 5
+    char ksi_paths[KS_IDENT_N][64];
+    const char *ksi_pptrs[KS_IDENT_N];
+    for (int i = 0; i < KS_IDENT_N; i++) {
+        snprintf(ksi_paths[i], sizeof(ksi_paths[i]),
+                 "%s/dso_ks_ident_%d.fits", test_tmpdir(), i);
+        ASSERT_OK(make_fits_const(ksi_paths[i], 1, 1, 42.f));
+        ksi_pptrs[i] = ksi_paths[i];
+    }
+    char ksi_lst[512]; TEST_TMPPATH(ksi_lst, "dso_ks_ident_list.txt");
+    ASSERT_OK(write_framelist(ksi_lst, ksi_pptrs, KS_IDENT_N));
+
+    CalibFrames c = {0};
+    ASSERT_OK(calib_load_or_generate(ksi_lst, CALIB_KAPPA_SIGMA,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, 0.1f, 2.5f, 5, &c));
+    ASSERT_EQ(c.has_dark, 1);
+    ASSERT_NEAR(c.dark.data[0], 42.f, 1e-4f);
+    calib_free(&c);
     return 0;
 }
 
@@ -692,6 +785,11 @@ int main(void)
     RUN(test_generate_dark_constant_frames);
     RUN(test_winsorized_mean_clips_outlier);
     RUN(test_median_method);
+
+    SUITE("calib_load_or_generate — kappa-sigma clipping");
+    RUN(test_kappa_sigma_clips_outlier);
+    RUN(test_kappa_sigma_all_rejected_fallback);
+    RUN(test_kappa_sigma_identical_frames);
 
     SUITE("calib_load_or_generate — bias/darkflat subtraction");
     RUN(test_bias_subtracted_from_dark);

@@ -4,7 +4,7 @@
  * Implements:
  *   - FITS vs. text-list detection
  *   - Frame list parsing
- *   - Per-pixel stacking with winsorized mean or median
+ *   - Per-pixel stacking with winsorized mean, median, or kappa-sigma
  *   - Master frame generation: bias, darkflat, dark, flat
  *   - CPU in-place application of master frames to raw light data
  *
@@ -25,10 +25,18 @@
  *   vals[N-g..N-1]     = vals[N-1-g]  (clamp top)
  *   result = mean(vals) using double accumulation
  *
+ * Kappa-sigma clipping
+ * --------------------
+ * Iterative sigma clipping controlled by calib_kappa (default 2.5) and
+ * calib_iterations (default 5).  Per pixel: compute mean and Bessel-
+ * corrected stddev of active values; reject those further than
+ * kappa*sigma from the mean; repeat until convergence or iteration limit.
+ * Falls back to unclipped mean if all values are rejected.
+ *
  * OpenMP
  * ------
  * Per-pixel loops use schedule(dynamic, 64) because the per-pixel work
- * is variable (insertion sort on N elements).
+ * is variable (insertion sort on N elements, or iterative clipping).
  */
 
 #define _POSIX_C_SOURCE 200809L   /* for strdup */
@@ -46,6 +54,7 @@
 #include <sys/stat.h>  /* mkdir (POSIX) */
 #endif
 #include <errno.h>
+#include <math.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -147,6 +156,8 @@ static DsoError stack_frames(const char **paths, int n,
                               const float *subtract_buf,
                               int normalize,
                               float wsor_clip,
+                              float calib_kappa,
+                              int   calib_iterations,
                               Image *master_out)
 {
     if (n <= 0) return DSO_ERR_INVALID_ARG;
@@ -154,6 +165,7 @@ static DsoError stack_frames(const char **paths, int n,
     DsoError  err      = DSO_OK;
     float   **bufs     = NULL;
     float    *all_vals = NULL;
+    int      *all_actv = NULL;
     int       W = 0, H = 0, npix = 0;
 
     bufs = (float **)calloc((size_t)n, sizeof(float *));
@@ -224,6 +236,11 @@ static DsoError stack_frames(const char **paths, int n,
     all_vals = (float *)malloc((size_t)max_threads * n * sizeof(float));
     if (!all_vals) { err = DSO_ERR_ALLOC; goto cleanup; }
 
+    if (method == CALIB_KAPPA_SIGMA) {
+        all_actv = (int *)malloc((size_t)max_threads * n * sizeof(int));
+        if (!all_actv) { err = DSO_ERR_ALLOC; goto cleanup; }
+    }
+
     /* Per-pixel stacking (parallelised across pixels) */
     int p;
 #pragma omp parallel for schedule(dynamic, 64)
@@ -237,38 +254,87 @@ static DsoError stack_frames(const char **paths, int n,
         for (int i = 0; i < n; i++)
             vals[i] = bufs[i][p];
 
-        /* Insertion sort (n typically < 100; fast for small arrays) */
-        for (int j = 1; j < n; j++) {
-            float tmp = vals[j];
-            int   k   = j - 1;
-            while (k >= 0 && vals[k] > tmp) {
-                vals[k + 1] = vals[k];
-                k--;
-            }
-            vals[k + 1] = tmp;
-        }
+        if (method == CALIB_KAPPA_SIGMA) {
+            /* Iterative sigma clipping (no sort needed) */
+            int *actv = &all_actv[tid * n];
+            for (int i = 0; i < n; i++) actv[i] = 1;
+            int n_active = n;
 
-        if (method == CALIB_MEDIAN) {
-            if (n & 1)
-                master[p] = vals[n / 2];
-            else
-                master[p] = 0.5f * (vals[n / 2 - 1] + vals[n / 2]);
-        } else {
-            /* Winsorized mean: clamp outer floor(wsor_clip*n) on each side */
-            int g = (int)(wsor_clip * n);
-            if (g > 0) {
-                float lo = vals[g];
-                float hi = vals[n - 1 - g];
-                for (int j = 0;     j < g; j++) vals[j]     = lo;
-                for (int j = n - g; j < n; j++) vals[j]     = hi;
+            for (int iter = 0; iter < calib_iterations; iter++) {
+                if (n_active < 2) break;
+
+                double sum = 0.0;
+                for (int i = 0; i < n; i++)
+                    if (actv[i]) sum += vals[i];
+                double mean = sum / n_active;
+
+                double sq_sum = 0.0;
+                for (int i = 0; i < n; i++) {
+                    if (actv[i]) {
+                        double d = vals[i] - mean;
+                        sq_sum += d * d;
+                    }
+                }
+                double stddev    = sqrt(sq_sum / (n_active - 1));
+                double threshold = calib_kappa * stddev;
+
+                int n_rejected = 0;
+                for (int i = 0; i < n; i++) {
+                    if (actv[i] && fabs(vals[i] - mean) > threshold) {
+                        actv[i] = 0;
+                        n_rejected++;
+                    }
+                }
+                n_active -= n_rejected;
+                if (n_rejected == 0) break;
             }
-            double sum = 0.0;
-            for (int j = 0; j < n; j++) sum += (double)vals[j];
-            master[p] = (float)(sum / n);
+
+            if (n_active > 0) {
+                double sum = 0.0;
+                for (int i = 0; i < n; i++)
+                    if (actv[i]) sum += vals[i];
+                master[p] = (float)(sum / n_active);
+            } else {
+                /* All-clipped fallback: unclipped mean */
+                double sum = 0.0;
+                for (int i = 0; i < n; i++) sum += vals[i];
+                master[p] = (float)(sum / n);
+            }
+        } else {
+            /* Insertion sort (n typically < 100; fast for small arrays) */
+            for (int j = 1; j < n; j++) {
+                float tmp = vals[j];
+                int   k   = j - 1;
+                while (k >= 0 && vals[k] > tmp) {
+                    vals[k + 1] = vals[k];
+                    k--;
+                }
+                vals[k + 1] = tmp;
+            }
+
+            if (method == CALIB_MEDIAN) {
+                if (n & 1)
+                    master[p] = vals[n / 2];
+                else
+                    master[p] = 0.5f * (vals[n / 2 - 1] + vals[n / 2]);
+            } else {
+                /* Winsorized mean: clamp outer floor(wsor_clip*n) on each side */
+                int g = (int)(wsor_clip * n);
+                if (g > 0) {
+                    float lo = vals[g];
+                    float hi = vals[n - 1 - g];
+                    for (int j = 0;     j < g; j++) vals[j]     = lo;
+                    for (int j = n - g; j < n; j++) vals[j]     = hi;
+                }
+                double sum = 0.0;
+                for (int j = 0; j < n; j++) sum += (double)vals[j];
+                master[p] = (float)(sum / n);
+            }
         }
     }
 
 cleanup:
+    free(all_actv);
     free(all_vals);
     for (int i = 0; i < n; i++) free(bufs[i]);
     free(bufs);
@@ -287,6 +353,7 @@ cleanup:
 static DsoError load_or_generate_one(const char *path, CalibMethod method,
                                      const float *subtract_buf, int normalize,
                                      float wsor_clip,
+                                     float calib_kappa, int calib_iterations,
                                      Image *out, int *was_generated)
 {
     *was_generated = 0;
@@ -311,7 +378,8 @@ static DsoError load_or_generate_one(const char *path, CalibMethod method,
     printf("calib: generating master from %d frame(s) in '%s'\n", n, path);
 
     err = stack_frames((const char **)paths, n, method,
-                       subtract_buf, normalize, wsor_clip, out);
+                       subtract_buf, normalize, wsor_clip,
+                       calib_kappa, calib_iterations, out);
 
     for (int i = 0; i < n; i++) free(paths[i]);
     free(paths);
@@ -343,6 +411,8 @@ DsoError calib_load_or_generate(
     const char *darkflat_path, CalibMethod darkflat_method,
     const char *save_dir,
     float        wsor_clip,
+    float        calib_kappa,
+    int          calib_iterations,
     CalibFrames *calib_out)
 {
     if (!calib_out) return DSO_ERR_INVALID_ARG;
@@ -364,7 +434,8 @@ DsoError calib_load_or_generate(
         printf("calib: processing bias frames...\n");
         err = load_or_generate_one(bias_path, bias_method,
                                    /*subtract_buf=*/NULL, /*normalize=*/0,
-                                   wsor_clip, &bias, &bias_gen);
+                                   wsor_clip, calib_kappa, calib_iterations,
+                                   &bias, &bias_gen);
         if (err != DSO_OK) goto cleanup;
         printf("calib: master bias ready (%d×%d)\n", bias.width, bias.height);
 
@@ -388,7 +459,8 @@ DsoError calib_load_or_generate(
         printf("calib: processing darkflat frames...\n");
         err = load_or_generate_one(darkflat_path, darkflat_method,
                                    /*subtract_buf=*/NULL, /*normalize=*/0,
-                                   wsor_clip, &darkflat, &df_gen);
+                                   wsor_clip, calib_kappa, calib_iterations,
+                                   &darkflat, &df_gen);
         if (err != DSO_OK) goto cleanup;
         printf("calib: master darkflat ready (%d×%d)\n",
                darkflat.width, darkflat.height);
@@ -415,7 +487,8 @@ DsoError calib_load_or_generate(
         const float *sub = bias.data;   /* NULL if no bias loaded */
         err = load_or_generate_one(dark_path, dark_method,
                                    sub, /*normalize=*/0,
-                                   wsor_clip, &calib_out->dark, &dark_gen);
+                                   wsor_clip, calib_kappa, calib_iterations,
+                                   &calib_out->dark, &dark_gen);
         if (err != DSO_OK) goto cleanup;
         calib_out->has_dark = 1;
         printf("calib: master dark ready (%d×%d)\n",
@@ -445,7 +518,8 @@ DsoError calib_load_or_generate(
         const float *flat_sub = darkflat.data ? darkflat.data : bias.data;
         err = load_or_generate_one(flat_path, flat_method,
                                    flat_sub, /*normalize=*/1,
-                                   wsor_clip, &calib_out->flat, &flat_gen);
+                                   wsor_clip, calib_kappa, calib_iterations,
+                                   &calib_out->flat, &flat_gen);
         if (err != DSO_OK) goto cleanup;
         calib_out->has_flat = 1;
         printf("calib: master flat ready (%d×%d)\n",
