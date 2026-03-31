@@ -252,13 +252,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dso-stacker-macos-arm64-metal
-          path: install-metal/bin/dso_stacker
+          path: |
+            install-metal/bin/dso_stacker
+            install-metal/lib/*.dylib
 
       - name: Upload CPU-only CLI binary
         uses: actions/upload-artifact@v4
         with:
           name: dso-stacker-macos-arm64-cpu
-          path: install-cpu/bin/dso_stacker
+          path: |
+            install-cpu/bin/dso_stacker
+            install-cpu/lib/*.dylib
 
   # ==================================================================
   # GUI package (Linux CPU-only)

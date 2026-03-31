@@ -10,7 +10,8 @@ Usage (CI or local):
   1. Place the pre-built CLI binary in bundled_bin/ :
        bundled_bin/dso_stacker[-cpu|-gpu|-metal]        (Linux/macOS)
        bundled_bin/dso_stacker[-cpu|-gpu|-metal].exe    (Windows, plus any .dll files)
-  2. Run:  pyinstaller dso_stacker_gui.spec
+  2. For macOS bundles, place required .dylib runtime deps in bundled_bin/ too.
+  3. Run:  pyinstaller dso_stacker_gui.spec
 """
 
 import os
@@ -32,6 +33,11 @@ if platform.system() == 'Windows':
     for f in os.listdir(bundled):
         if f.lower().endswith('.dll'):
             cli_binaries.append((os.path.join(bundled, f), 'bin'))
+elif platform.system() == 'Darwin':
+    for f in os.listdir(bundled):
+        if f.lower().endswith('.dylib'):
+            # Place next to _internal/bin so @loader_path/.. resolves correctly.
+            cli_binaries.append((os.path.join(bundled, f), '.'))
 
 a = Analysis(
     ['src/GUI/main.py'],
