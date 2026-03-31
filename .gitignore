@@ -97,3 +97,6 @@ bundled_bin/
 
 # Plan files
 plan-*.md
+
+.env
+.mcp.json
