@@ -16,6 +16,11 @@
  *          c. Break early if nothing was rejected or fewer than 2 remain.
  *     3. Output = mean of surviving values.
  *        If all values were rejected (degenerate), fall back to unclipped mean.
+ *
+ * NaN sentinel:
+ *   Warped frames use NAN to mark out-of-bounds pixels.  Both integration
+ *   routines skip NaN values so that OOB regions do not contaminate the
+ *   stacked result.  If every frame is NaN at a pixel, the output is NAN.
  */
 
 #include "integration.h"
@@ -48,16 +53,19 @@ DsoError integrate_mean(const Image **frames, int n, Image *out)
     out->height = H;
 
     long  npix  = (long)W * H;
-    float inv_n = 1.f / (float)n;
     long  p;
 
-    /* Pixel-outer loop: each pixel is independent → safe to parallelise. */
+    /* Pixel-outer loop: each pixel is independent → safe to parallelise.
+     * NaN-valued pixels (OOB sentinel from Lanczos warp) are skipped. */
 #pragma omp parallel for schedule(static)
     for (p = 0; p < npix; p++) {
         float sum = 0.f;
-        for (int i = 0; i < n; i++)
-            sum += frames[i]->data[p];
-        out->data[p] = sum * inv_n;
+        int   valid = 0;
+        for (int i = 0; i < n; i++) {
+            float v = frames[i]->data[p];
+            if (!isnan(v)) { sum += v; valid++; }
+        }
+        out->data[p] = (valid > 0) ? sum / (float)valid : NAN;
     }
 
     return DSO_OK;
@@ -117,12 +125,23 @@ DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
         float *vals = &all_vals[tid * n];
         int   *actv = &all_actv[tid * n];
 
+        int n_valid = 0;
         for (int i = 0; i < n; i++) {
-            vals[i] = frames[i]->data[p];
-            actv[i] = 1;
+            float v = frames[i]->data[p];
+            if (isnan(v)) {
+                vals[i] = 0.f;
+                actv[i] = 0;
+            } else {
+                vals[i] = v;
+                actv[i] = 1;
+                n_valid++;
+            }
         }
 
-        int n_active = n;
+        /* If no frames have valid data at this pixel, output NAN (OOB) */
+        if (n_valid == 0) { out->data[p] = NAN; continue; }
+
+        int n_active = n_valid;
 
         for (int iter = 0; iter < iterations; iter++) {
             if (n_active < 2) break;
@@ -160,9 +179,11 @@ DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
                 if (actv[i]) sum += vals[i];
             out->data[p] = (float)(sum / n_active);
         } else {
+            /* All-clipped fallback: unclipped mean of valid (non-NaN) values */
             double sum = 0.0;
-            for (int i = 0; i < n; i++) sum += vals[i];
-            out->data[p] = (float)(sum / n);
+            for (int i = 0; i < n; i++)
+                if (!isnan(frames[i]->data[p])) sum += vals[i];
+            out->data[p] = (float)(sum / n_valid);
         }
     }
 

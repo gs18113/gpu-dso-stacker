@@ -28,6 +28,16 @@ static NppStreamContext g_nppCtx;
 static cudaStream_t     g_stream = 0;
 
 /* -------------------------------------------------------------------------- */
+/* Utility kernel: fill a float buffer with NAN (OOB sentinel)                 */
+/* -------------------------------------------------------------------------- */
+
+__global__ static void fill_nan_kernel(float *buf, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) buf[i] = NAN;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Coord-map kernel                                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -41,7 +51,8 @@ static cudaStream_t     g_stream = 0;
  *
  * H is the backward (ref → src) map and is used directly without inversion.
  * Pixels where sw is near zero are mapped to (−1, −1), which nppiRemap
- * treats as out-of-bounds and leaves as 0 (destination is zero-initialised).
+ * treats as out-of-bounds and leaves unwritten (destination is NAN-initialised
+ * so that integration stages can distinguish OOB from real dark pixels).
  */
 __global__ static void build_coord_maps(
     float *xmap, float *ymap, int W, int H,
@@ -178,8 +189,14 @@ DsoError lanczos_transform_gpu(const Image *src, Image *dst, const Homography *H
     CHECK_CUDA(cudaMemcpyAsync(d_src, src->data, src_bytes,
                                cudaMemcpyHostToDevice, g_stream));
 
-    /* Zero destination buffer — nppiRemap leaves out-of-bounds pixels as-is */
-    CHECK_CUDA(cudaMemsetAsync(d_dst, 0, dst_bytes, g_stream));
+    /* NAN-fill destination buffer — nppiRemap leaves out-of-bounds pixels
+     * unwritten, so they retain NAN as the OOB sentinel for integration. */
+    {
+        dim3 fb(256);
+        dim3 fg((DW * DH + 255) / 256);
+        fill_nan_kernel<<<fg, fb, 0, g_stream>>>(d_dst, DW * DH);
+        CHECK_CUDA(cudaGetLastError());
+    }
 
     /* Build the (xmap, ymap) coordinate lookup tables on device */
     build_coord_maps<<<grid, block, 0, g_stream>>>(

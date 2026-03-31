@@ -86,28 +86,40 @@ __global__ static void kappa_sigma_batch_kernel(
     float         *d_combined_sum,
     int           *d_combined_count,
     float         *d_rawsum,
+    int           *d_rawcount,
     int            npix)
 {
     int px = blockIdx.x * blockDim.x + threadIdx.x;
     if (px >= npix) return;
 
-    /* Load M values into registers; accumulate raw sum for fallback */
+    /* Load M values into registers; skip NaN (OOB sentinel from Lanczos warp) */
     float vals[INTEGRATION_GPU_MAX_BATCH];
     char  active[INTEGRATION_GPU_MAX_BATCH];   /* 1 = not yet clipped */
     float raw_total = 0.f;
+    int   n_valid   = 0;
 
     for (int i = 0; i < M; i++) {
         float v = d_frame_ptrs[i][px];
-        vals[i]   = v;
-        active[i] = 1;
-        raw_total += v;
+        if (isnan(v)) {
+            vals[i]   = 0.f;
+            active[i] = 0;
+        } else {
+            vals[i]   = v;
+            active[i] = 1;
+            raw_total += v;
+            n_valid++;
+        }
     }
 
-    /* Accumulate raw sum across batches for the all-clipped fallback */
-    d_rawsum[px] += raw_total;
+    /* Accumulate raw sum and count across batches for the all-clipped fallback */
+    d_rawsum[px]   += raw_total;
+    d_rawcount[px] += n_valid;
+
+    /* If no frames have valid data at this pixel in this batch, skip */
+    if (n_valid == 0) return;
 
     /* Iterative kappa-sigma clipping (mirrors integrate_kappa_sigma in integration.c) */
-    int n_active = M;
+    int n_active = n_valid;
 
     for (int iter = 0; iter < iterations; iter++) {
         if (n_active < 2) break;  /* need ≥ 2 samples for Bessel-corrected stddev */
@@ -169,11 +181,17 @@ __global__ static void mean_batch_kernel(
     if (px >= npix) return;
 
     float sum = 0.f;
-    for (int i = 0; i < M; i++) sum += d_frame_ptrs[i][px];
+    int   valid = 0;
+    for (int i = 0; i < M; i++) {
+        float v = d_frame_ptrs[i][px];
+        if (!isnan(v)) { sum += v; valid++; }
+    }
 
-    d_combined_sum[px]   += sum;
-    d_combined_count[px] += M;
-    d_rawsum[px]         += sum;
+    if (valid > 0) {
+        d_combined_sum[px]   += sum;
+        d_combined_count[px] += valid;
+    }
+    d_rawsum[px] += sum;
 }
 
 /*
@@ -186,8 +204,8 @@ __global__ static void finalize_kernel(
     const float *d_combined_sum,
     const int   *d_combined_count,
     const float *d_rawsum,
+    const int   *d_rawcount,
     float       *d_out,
-    int          n_frames,
     int          npix)
 {
     int px = blockIdx.x * blockDim.x + threadIdx.x;
@@ -198,8 +216,10 @@ __global__ static void finalize_kernel(
         d_out[px] = d_combined_sum[px] / (float)c;
     } else {
         /* Degenerate: every value was clipped in every batch — fall back to
-         * the unclipped mean (same behaviour as the CPU implementation). */
-        d_out[px] = (n_frames > 0) ? d_rawsum[px] / (float)n_frames : 0.f;
+         * the unclipped mean of valid (non-NaN) frames.  If no frames
+         * contributed valid data (all OOB), output NAN. */
+        int rc = d_rawcount[px];
+        d_out[px] = (rc > 0) ? d_rawsum[px] / (float)rc : NAN;
     }
 }
 
@@ -230,9 +250,11 @@ DsoError integration_gpu_init(int W, int H, int batch_size,
     if ((cerr = cudaMalloc(&ctx->d_combined_sum,   npix_f)) != cudaSuccess) goto oom_cuda;
     if ((cerr = cudaMalloc(&ctx->d_combined_count, npix_i)) != cudaSuccess) goto oom_cuda;
     if ((cerr = cudaMalloc(&ctx->d_rawsum,         npix_f)) != cudaSuccess) goto oom_cuda;
+    if ((cerr = cudaMalloc(&ctx->d_rawcount,       npix_i)) != cudaSuccess) goto oom_cuda;
     cudaMemset(ctx->d_combined_sum,   0, npix_f);
     cudaMemset(ctx->d_combined_count, 0, npix_i);
     cudaMemset(ctx->d_rawsum,         0, npix_f);
+    cudaMemset(ctx->d_rawcount,       0, npix_i);
 
     /* Finalize staging output buffer */
     if ((cerr = cudaMalloc(&ctx->d_out, npix_f)) != cudaSuccess) goto oom_cuda;
@@ -269,6 +291,7 @@ void integration_gpu_cleanup(IntegrationGpuCtx *ctx)
     cudaFree(ctx->d_combined_sum);
     cudaFree(ctx->d_combined_count);
     cudaFree(ctx->d_rawsum);
+    cudaFree(ctx->d_rawcount);
     cudaFree(ctx->d_out);
     cudaFree(ctx->d_xmap);
     cudaFree(ctx->d_ymap);
@@ -310,7 +333,8 @@ DsoError integration_gpu_process_batch(IntegrationGpuCtx *ctx,
 
     kappa_sigma_batch_kernel<<<grid, block, 0, stream>>>(
         ctx->d_frame_ptrs, M, kappa, iterations,
-        ctx->d_combined_sum, ctx->d_combined_count, ctx->d_rawsum, npix);
+        ctx->d_combined_sum, ctx->d_combined_count,
+        ctx->d_rawsum, ctx->d_rawcount, npix);
 
     cerr = cudaGetLastError();
     if (cerr != cudaSuccess) {
@@ -372,8 +396,8 @@ DsoError integration_gpu_finalize(IntegrationGpuCtx *ctx,
     dim3 grid((npix + 255) / 256);
 
     finalize_kernel<<<grid, block, 0, stream>>>(
-        ctx->d_combined_sum, ctx->d_combined_count, ctx->d_rawsum,
-        ctx->d_out, n_frames, npix);
+        ctx->d_combined_sum, ctx->d_combined_count,
+        ctx->d_rawsum, ctx->d_rawcount, ctx->d_out, npix);
 
     cudaError_t cerr = cudaGetLastError();
     if (cerr != cudaSuccess) {
@@ -406,6 +430,7 @@ DsoError integration_gpu_finalize(IntegrationGpuCtx *ctx,
     cudaMemset(ctx->d_combined_sum,   0, npix_f);
     cudaMemset(ctx->d_combined_count, 0, npix_i);
     cudaMemset(ctx->d_rawsum,         0, npix_f);
+    cudaMemset(ctx->d_rawcount,       0, npix_i);
 
     return DSO_OK;
 }

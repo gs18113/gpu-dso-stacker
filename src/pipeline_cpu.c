@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <omp.h>
 
 #define PIPELINE_CPU_BATCH_SIZE 32
@@ -86,23 +87,50 @@ static DsoError flush_batch(
         if (err != DSO_OK) { image_free(&b_out_r); goto cleanup; }
     }
 
-#pragma omp parallel for schedule(static)
-    for (pp = 0; pp < npix; pp++) {
-        global_sum_r[pp]   += b_out_r.data[pp] * n_batch;
-        global_count_r[pp] += n_batch;
-    }
-    image_free(&b_out_r);
-
-    if (color) {
+    /* Count per-pixel valid (non-NaN) frames in this batch.  R/G/B share
+     * the same homography so their OOB patterns are identical — count once. */
+    {
+        int *batch_valid = (int *)calloc((size_t)npix, sizeof(int));
+        if (!batch_valid) { err = DSO_ERR_ALLOC; image_free(&b_out_r);
+                            if (color) { image_free(&b_out_g); image_free(&b_out_b); }
+                            goto cleanup; }
 #pragma omp parallel for schedule(static)
         for (pp = 0; pp < npix; pp++) {
-            global_sum_g[pp]   += b_out_g.data[pp] * n_batch;
-            global_count_g[pp] += n_batch;
-            global_sum_b[pp]   += b_out_b.data[pp] * n_batch;
-            global_count_b[pp] += n_batch;
+            int vc = 0;
+            for (int fi = 0; fi < n_batch; fi++)
+                if (!isnan(xformed_r[fi].data[pp])) vc++;
+            batch_valid[pp] = vc;
         }
-        image_free(&b_out_g);
-        image_free(&b_out_b);
+
+#pragma omp parallel for schedule(static)
+        for (pp = 0; pp < npix; pp++) {
+            int vc = batch_valid[pp];
+            if (vc > 0 && !isnan(b_out_r.data[pp])) {
+                global_sum_r[pp]   += b_out_r.data[pp] * vc;
+                global_count_r[pp] += vc;
+            }
+        }
+        image_free(&b_out_r);
+
+        if (color) {
+#pragma omp parallel for schedule(static)
+            for (pp = 0; pp < npix; pp++) {
+                int vc = batch_valid[pp];
+                if (vc > 0) {
+                    if (!isnan(b_out_g.data[pp])) {
+                        global_sum_g[pp]   += b_out_g.data[pp] * vc;
+                        global_count_g[pp] += vc;
+                    }
+                    if (!isnan(b_out_b.data[pp])) {
+                        global_sum_b[pp]   += b_out_b.data[pp] * vc;
+                        global_count_b[pp] += vc;
+                    }
+                }
+            }
+            image_free(&b_out_g);
+            image_free(&b_out_b);
+        }
+        free(batch_valid);
     }
 
 cleanup:

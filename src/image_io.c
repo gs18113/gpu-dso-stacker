@@ -126,8 +126,12 @@ static void stretch_bounds_mono(const float *data, int n,
 {
     float lo = user_lo, hi = user_hi;
     if (isnan(lo) || isnan(hi)) {
-        float mn = data[0], mx = data[0];
-        for (int i = 1; i < n; i++) {
+        /* Find first non-NaN value as initial min/max */
+        float mn = 0.f, mx = 0.f;
+        int started = 0;
+        for (int i = 0; i < n; i++) {
+            if (isnan(data[i])) continue;
+            if (!started) { mn = mx = data[i]; started = 1; continue; }
             if (data[i] < mn) mn = data[i];
             if (data[i] > mx) mx = data[i];
         }
@@ -145,11 +149,17 @@ static void stretch_bounds_rgb(const float *r, const float *g, const float *b, i
 {
     float lo = user_lo, hi = user_hi;
     if (isnan(lo) || isnan(hi)) {
-        float mn = r[0], mx = r[0];
+        float mn = 0.f, mx = 0.f;
+        int started = 0;
         for (int i = 0; i < n; i++) {
-            if (r[i] < mn) mn = r[i]; if (r[i] > mx) mx = r[i];
-            if (g[i] < mn) mn = g[i]; if (g[i] > mx) mx = g[i];
-            if (b[i] < mn) mn = b[i]; if (b[i] > mx) mx = b[i];
+            const float *ch[3] = { r, g, b };
+            for (int c = 0; c < 3; c++) {
+                float v = ch[c][i];
+                if (isnan(v)) continue;
+                if (!started) { mn = mx = v; started = 1; continue; }
+                if (v < mn) mn = v;
+                if (v > mx) mx = v;
+            }
         }
         if (isnan(lo)) lo = mn;
         if (isnan(hi)) hi = mx;
@@ -160,7 +170,7 @@ static void stretch_bounds_rgb(const float *r, const float *g, const float *b, i
 
 static inline uint16_t quantise16(float val, float lo, float hi)
 {
-    if (hi <= lo) return 0;
+    if (hi <= lo || isnan(val)) return 0;
     float t = (val - lo) / (hi - lo) * 65535.0f;
     if (t < 0.0f)       t = 0.0f;
     if (t > 65535.0f)   t = 65535.0f;
@@ -169,7 +179,7 @@ static inline uint16_t quantise16(float val, float lo, float hi)
 
 static inline uint8_t quantise8(float val, float lo, float hi)
 {
-    if (hi <= lo) return 0;
+    if (hi <= lo || isnan(val)) return 0;
     float t = (val - lo) / (hi - lo) * 255.0f;
     if (t < 0.0f)  t = 0.0f;
     if (t > 255.0f) t = 255.0f;

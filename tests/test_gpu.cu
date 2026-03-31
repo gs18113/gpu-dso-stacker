@@ -5,7 +5,7 @@
  *   1. GPU init / cleanup runs without crashing.
  *   2. Identity homography: GPU output matches CPU output (within float epsilon).
  *   3. Integer-pixel shift: GPU output matches CPU output.
- *   4. Out-of-bounds shift: every destination pixel is 0.
+ *   4. Out-of-bounds shift: every destination pixel is NAN (OOB sentinel).
  *   5. Singular homography: returns DSO_ERR_INVALID_ARG (not CUDA error).
  *
  * If CUDA device initialisation fails (no GPU) the test binary exits with
@@ -161,9 +161,10 @@ static int test_gpu_oob_pixels_zero(void)
     Homography H_far = {{ 1,0,5000, 0,1,5000, 0,0,1 }};
     ASSERT_OK(lanczos_transform_gpu(&src, &dst, &H_far));
 
+    /* OOB pixels are NAN (sentinel for integration to skip) */
     for (int i = 0; i < W * H; i++) {
-        if (dst.data[i] != 0.f) {
-            printf("\n    dst[%d] = %f, expected 0\n", i, dst.data[i]);
+        if (!isnan(dst.data[i])) {
+            printf("\n    dst[%d] = %f, expected NAN\n", i, dst.data[i]);
             image_free(&src); image_free(&dst);
             return 1;
         }

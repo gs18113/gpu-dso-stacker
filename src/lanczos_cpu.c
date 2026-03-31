@@ -12,12 +12,15 @@
  *   3. Sample the source at (sx, sy) with a 6×6 Lanczos-3 tap window.
  *      Boundary taps outside [0, W) × [0, H) are skipped; weights are
  *      renormalised so partial windows near edges are handled cleanly.
- *      Pixels with no valid taps are set to 0.
+ *      Pixels with no valid taps are set to NAN (out-of-bounds sentinel).
+ *      Integration stages skip NAN-valued pixels so that OOB regions
+ *      from warped frames do not contaminate the stacked result.
  */
 
 #include "lanczos_cpu.h"
 #include <stdlib.h>
 #include <math.h>
+#include <float.h>
 #include <string.h>
 #include <stdio.h>
 #include <omp.h>
@@ -110,7 +113,7 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
             double sw   = hi[6]*dx + hi[7]*dy + hi[8];
 
             if (fabs(sw) < 1e-12) {
-                dst->data[dy * DW + dx] = 0.f;
+                dst->data[dy * DW + dx] = NAN;
                 continue;
             }
 
@@ -153,7 +156,7 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
                 }
             }
 
-            dst->data[dy * DW + dx] = (fabsf(weight_sum) < 1e-6f) ? 0.f : accum / weight_sum;
+            dst->data[dy * DW + dx] = (fabsf(weight_sum) < 1e-6f) ? NAN : accum / weight_sum;
         }
     }
 

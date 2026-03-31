@@ -518,23 +518,24 @@ static int test_lanczos_cpu_integer_shift(void)
 }
 
 /*
- * Pixels that map outside the source bounds must be written as 0.
+ * Pixels that map outside the source bounds must be written as NAN.
  * A large translation moves all source content out of the destination view.
+ * NAN sentinel allows integration to skip OOB pixels from warped frames.
  */
 static int test_lanczos_cpu_oob_pixels_zero(void)
 {
     const int W = 10, H = 10;
     Image src = make_image_const(W, H, 99.f);
-    Image dst = make_image_const(W, H, -1.f);  /* sentinel: non-zero */
+    Image dst = make_image_const(W, H, -1.f);  /* sentinel: non-NAN */
 
     /* Backward map with +1000 offset: src lookup at (dx+1000, dy+1000) — always OOB */
     Homography hom = {{ 1,0,1000, 0,1,1000, 0,0,1 }};
     ASSERT_OK(lanczos_transform_cpu(&src, &dst, &hom));
 
-    /* Every destination pixel should be 0 (out-of-bounds fill value) */
+    /* Every destination pixel should be NAN (OOB sentinel) */
     for (int i = 0; i < W * H; i++) {
-        if (dst.data[i] != 0.f) {
-            printf("\n    dst[%d] = %f, expected 0\n", i, dst.data[i]);
+        if (!isnan(dst.data[i])) {
+            printf("\n    dst[%d] = %f, expected NAN\n", i, dst.data[i]);
             image_free(&src); image_free(&dst);
             return 1;
         }
@@ -547,20 +548,25 @@ static int test_lanczos_cpu_oob_pixels_zero(void)
 
 /*
  * Degenerate H (sw = 0 everywhere): all destination pixels map to OOB
- * and must be written as 0. No error is returned — degenerate pixels are
- * silently zeroed, not rejected. (H is the backward map used directly;
- * there is no inversion step that would detect a singular matrix.)
+ * and must be written as NAN. No error is returned — degenerate pixels
+ * get the NAN sentinel. (H is the backward map used directly; there is
+ * no inversion step that would detect a singular matrix.)
  */
 static int test_lanczos_cpu_singular_h(void)
 {
     Image src = make_image_const(8, 8, 1.f);
     Image dst = make_image_const(8, 8, -1.f);  /* sentinel */
 
-    /* All-zero matrix: sw = 0 for every pixel → OOB → written as 0 */
+    /* All-zero matrix: sw = 0 for every pixel → OOB → written as NAN */
     Homography H = {{ 0,0,0, 0,0,0, 0,0,0 }};
     ASSERT_OK(lanczos_transform_cpu(&src, &dst, &H));
-    for (int i = 0; i < 8 * 8; i++)
-        ASSERT_NEAR(dst.data[i], 0.f, 1e-5f);
+    for (int i = 0; i < 8 * 8; i++) {
+        if (!isnan(dst.data[i])) {
+            printf("\n    dst[%d] = %f, expected NAN\n", i, dst.data[i]);
+            image_free(&src); image_free(&dst);
+            return 1;
+        }
+    }
 
     image_free(&src);
     image_free(&dst);

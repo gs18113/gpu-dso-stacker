@@ -68,6 +68,25 @@
     } while (0)
 
 /* -------------------------------------------------------------------------
+ * fill_nan — fill a device float buffer with NAN (OOB sentinel).
+ *
+ * nppiRemap leaves out-of-bounds destination pixels unwritten, so NAN-filling
+ * before the warp ensures those pixels carry the OOB sentinel into integration.
+ * ------------------------------------------------------------------------- */
+__global__ static void pipeline_fill_nan_kernel(float *buf, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) buf[i] = NAN;
+}
+
+static void fill_nan_async(float *d_buf, int npix, cudaStream_t stream)
+{
+    dim3 block(256);
+    dim3 grid((npix + 255) / 256);
+    pipeline_fill_nan_kernel<<<grid, block, 0, stream>>>(d_buf, npix);
+}
+
+/* -------------------------------------------------------------------------
  * phase_warp — warp a single raw device frame into the next integration slot.
  *
  * For mono: debayer_lum is already in d_lum; warp it directly.
@@ -84,35 +103,30 @@ static DsoError phase_warp(
     cudaStream_t stream, const char *label)
 {
     DsoError err = DSO_OK;
-    size_t npix_f = (size_t)W * H * sizeof(float);
 
     if (color) {
         /* Re-debayer raw → R (into d_lum), G (d_ch_g), B (d_ch_b) */
         PIPE_CHECK(debayer_gpu_rgb_d2d(d_raw, d_lum, d_ch_g, d_ch_b,
                                         W, H, pat, stream),
                    done, label);
-        CUDA_CHECK(cudaMemsetAsync(ctx_r->d_frames[batch_n], 0, npix_f, stream),
-                   done, label);
+        fill_nan_async(ctx_r->d_frames[batch_n], W * H, stream);
         PIPE_CHECK(lanczos_transform_gpu_d2d(d_lum, ctx_r->d_frames[batch_n],
                                               ctx_r->d_xmap, ctx_r->d_ymap,
                                               W, H, W, H, H_frame, stream),
                    done, label);
-        CUDA_CHECK(cudaMemsetAsync(ctx_g->d_frames[batch_n], 0, npix_f, stream),
-                   done, label);
+        fill_nan_async(ctx_g->d_frames[batch_n], W * H, stream);
         PIPE_CHECK(lanczos_transform_gpu_d2d(d_ch_g, ctx_g->d_frames[batch_n],
                                               ctx_g->d_xmap, ctx_g->d_ymap,
                                               W, H, W, H, H_frame, stream),
                    done, label);
-        CUDA_CHECK(cudaMemsetAsync(ctx_b->d_frames[batch_n], 0, npix_f, stream),
-                   done, label);
+        fill_nan_async(ctx_b->d_frames[batch_n], W * H, stream);
         PIPE_CHECK(lanczos_transform_gpu_d2d(d_ch_b, ctx_b->d_frames[batch_n],
                                               ctx_b->d_xmap, ctx_b->d_ymap,
                                               W, H, W, H, H_frame, stream),
                    done, label);
     } else {
         /* d_lum already contains the luminance; warp directly */
-        CUDA_CHECK(cudaMemsetAsync(ctx_r->d_frames[batch_n], 0, npix_f, stream),
-                   done, label);
+        fill_nan_async(ctx_r->d_frames[batch_n], W * H, stream);
         PIPE_CHECK(lanczos_transform_gpu_d2d(d_lum, ctx_r->d_frames[batch_n],
                                               ctx_r->d_xmap, ctx_r->d_ymap,
                                               W, H, W, H, H_frame, stream),

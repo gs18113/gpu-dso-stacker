@@ -370,7 +370,7 @@ DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
 ```
 
 All frames must be the same size. `out->data` is heap-allocated; free with `image_free()`.
-Kappa-sigma uses two-pass Bessel-corrected stddev per iteration; degenerate pixels (all clipped) fall back to unclipped mean.
+Kappa-sigma uses two-pass Bessel-corrected stddev per iteration; degenerate pixels (all clipped) fall back to unclipped mean. Both `integrate_mean` and `integrate_kappa_sigma` skip NaN-valued pixels (OOB sentinel from Lanczos warp) and output NAN when all frames are NaN at a pixel.
 
 ### `debayer_gpu.h`
 
@@ -547,8 +547,8 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - **C goto rule (C11 and C++17)**: variables that appear between a `goto` source and its label must be declared before the first `goto`. In `pipeline_cpu.c`, all variables are declared at the top of each function; error paths use explicit `image_free()` before `goto cleanup` rather than a PIPE_CHECK macro, to avoid jumping over initializers.
 - **Row steps for NPP**: all row steps are `width * sizeof(float)` (row-major float32).
 - **FITS pixel index**: `ffgpxv` / `ffppx` take `long *firstpix` (1-based per axis); pass `{1, 1}` for 2D, `{1, 1, plane}` for 3D (NAXIS=3 RGB output).
-- **Out-of-bounds pixels**: both CPU and GPU paths write 0 for destination pixels that map outside the source bounds.
-- **`IntegrationGpuCtx` is public**: the struct definition lives in `integration_gpu.h` (not just the `.cu`) so `pipeline.cu` can access `d_frames[]`, `d_xmap`, `d_ymap` directly. Opaque handle pattern was abandoned in favour of direct field access.
+- **Out-of-bounds pixels**: both CPU and GPU paths write `NAN` for destination pixels that map outside the source bounds. The NAN sentinel allows integration stages to distinguish OOB regions from legitimately dark pixels and exclude them from the stacked result. This prevents dark patches at frame overlap boundaries where only a subset of frames contribute valid data. `image_io.c` quantize functions treat NAN as 0; stretch-bound computation skips NAN values.
+- **`IntegrationGpuCtx` is public**: the struct definition lives in `integration_gpu.h` (not just the `.cu`) so `pipeline.cu` can access `d_frames[]`, `d_xmap`, `d_ymap` directly. Opaque handle pattern was abandoned in favour of direct field access. Includes `d_rawcount` (per-pixel valid-frame count) alongside `d_rawsum` for the NaN-aware all-clipped fallback.
 - **DLT produces backward H directly**: row setup uses `(ref_x, ref_y)` as H input and `(src_x, src_y)` as output → null vector = backward map (ref → src). No post-inversion needed.
 - **Moffat constant memory cap**: max kernel radius is 15 (alpha ≤ 5 → R = ceil(3·alpha) ≤ 15, diameter 31, 961 floats × 4 = ~3.8 KB within 64 KB constant limit).
 - **Single-pass pipeline**: each frame is loaded from disk exactly once. Star detection, RANSAC, and warp all run in the same pass before the next frame is loaded. No separate Phase 1 / Phase 2; no 11-column pre-computed transform path. The only CSV format is 2-column (`filepath, is_reference`).
