@@ -17,7 +17,7 @@
       --bg3:        #161923;
       --border:     #1e2535;
       --text:       #c9d1e0;
-      --text-dim:   #6b7a99;
+      --text-dim:   #8694b0;
       --accent:     #38bdf8;
       --accent2:    #818cf8;
       --accent3:    #34d399;
@@ -26,12 +26,12 @@
       --radius:     10px;
       --shadow:     0 4px 32px rgba(0,0,0,.5);
     }
-    html { scroll-behavior: smooth; font-size: 16px; }
+    html { scroll-behavior: smooth; font-size: 17px; }
     body {
       background: var(--bg);
       color: var(--text);
       font-family: 'Inter', system-ui, sans-serif;
-      line-height: 1.65;
+      line-height: 1.7;
       overflow-x: hidden;
     }
 
@@ -57,9 +57,10 @@
     h2 .accent { color: var(--accent); }
     .section-lead {
       color: var(--text-dim);
-      font-size: 1.05rem;
+      font-size: 1.08rem;
       margin-bottom: 3rem;
-      max-width: 620px;
+      max-width: 660px;
+      line-height: 1.75;
     }
 
     /* ── Navigation ───────────────────────────────────────────────────── */
@@ -327,9 +328,9 @@
       margin-bottom: .4rem;
     }
     .feature-card p {
-      font-size: .875rem;
+      font-size: .9rem;
       color: var(--text-dim);
-      line-height: 1.6;
+      line-height: 1.7;
     }
 
     /* ── Pipeline table ───────────────────────────────────────────────── */
@@ -341,21 +342,21 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: .875rem;
+      font-size: .9rem;
     }
     thead { background: var(--bg3); }
     th {
-      padding: .75rem 1rem;
+      padding: .85rem 1.15rem;
       text-align: left;
       font-weight: 600;
       color: var(--text-dim);
-      font-size: .8rem;
+      font-size: .82rem;
       text-transform: uppercase;
       letter-spacing: .05em;
       border-bottom: 1px solid var(--border);
     }
     td {
-      padding: .75rem 1rem;
+      padding: .85rem 1.15rem;
       border-bottom: 1px solid rgba(30,37,53,.5);
       color: var(--text);
       vertical-align: top;
@@ -407,8 +408,8 @@
     }
     .code-block pre {
       font-family: 'JetBrains Mono', monospace;
-      font-size: .82rem;
-      line-height: 1.7;
+      font-size: .85rem;
+      line-height: 1.75;
       color: #a5f3fc;
       white-space: pre;
     }
@@ -436,12 +437,12 @@
     /* ── Callout ──────────────────────────────────────────────────────── */
     .callout {
       display: flex;
-      gap: .75rem;
-      padding: .85rem 1.1rem;
+      gap: .85rem;
+      padding: 1rem 1.25rem;
       border-radius: 8px;
-      font-size: .875rem;
+      font-size: .9rem;
       margin-bottom: 1.25rem;
-      line-height: 1.55;
+      line-height: 1.65;
     }
     .callout-info  { background: rgba(56,189,248,.06); border-left: 3px solid var(--accent); }
     .callout-warn  { background: rgba(251,191,36,.06); border-left: 3px solid var(--warn); }
@@ -510,96 +511,18 @@
     .dl-info h4 { font-size: .95rem; font-weight: 600; color: #fff; margin-bottom: .2rem; }
     .dl-info p  { font-size: .78rem; color: var(--text-dim); }
 
-    /* ── GUI screenshot mockup ────────────────────────────────────────── */
-    .gui-mockup {
-      background: var(--bg3);
+    /* ── GUI screenshot ────────────────────────────────────────────────── */
+    .gui-screenshot {
       border: 1px solid var(--border);
       border-radius: 12px;
       overflow: hidden;
       box-shadow: var(--shadow);
     }
-    .gui-titlebar {
-      background: #0d1117;
-      border-bottom: 1px solid var(--border);
-      padding: .6rem 1rem;
-      display: flex;
-      align-items: center;
-      gap: .5rem;
-    }
-    .dot-red    { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
-    .dot-yellow { width: 12px; height: 12px; border-radius: 50%; background: #febc2e; }
-    .dot-green  { width: 12px; height: 12px; border-radius: 50%; background: #28c840; }
-    .gui-titlebar span {
-      flex: 1;
-      text-align: center;
-      font-size: .78rem;
-      color: var(--text-dim);
-      font-family: 'JetBrains Mono', monospace;
-    }
-    .gui-tabs-bar {
-      background: #111827;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      padding: 0 .75rem;
-    }
-    .gui-tab {
-      padding: .5rem 1rem;
-      font-size: .78rem;
-      color: var(--text-dim);
-      border-bottom: 2px solid transparent;
-    }
-    .gui-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .gui-body { padding: 1rem; }
-    .gui-table {
+    .gui-screenshot img {
       width: 100%;
-      border-collapse: collapse;
-      font-size: .75rem;
+      height: auto;
+      display: block;
     }
-    .gui-table th {
-      background: #0d1117;
-      color: var(--text-dim);
-      padding: .4rem .6rem;
-      text-align: left;
-      font-weight: 500;
-    }
-    .gui-table td {
-      padding: .4rem .6rem;
-      border-bottom: 1px solid rgba(30,37,53,.5);
-      font-family: 'JetBrains Mono', monospace;
-      color: var(--text);
-    }
-    .gui-table td.ref { color: var(--accent3); }
-    .gui-run-bar {
-      display: flex;
-      gap: .5rem;
-      padding: .75rem 1rem;
-      border-top: 1px solid var(--border);
-      background: #0d1117;
-    }
-    .gui-btn {
-      padding: .4rem .9rem;
-      border-radius: 6px;
-      font-size: .78rem;
-      font-weight: 600;
-      border: none;
-      cursor: pointer;
-    }
-    .gui-btn-run { background: var(--accent3); color: #052e16; }
-    .gui-btn-abort { background: var(--bg3); color: var(--text-dim); border: 1px solid var(--border); }
-    .gui-log {
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: .6rem .8rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: .72rem;
-      color: var(--text-dim);
-      margin: .75rem 1rem;
-      line-height: 1.6;
-    }
-    .gui-log .ok { color: var(--accent3); }
-    .gui-log .info { color: var(--accent); }
-
     /* ── Footer ───────────────────────────────────────────────────────── */
     footer {
       background: var(--bg);
@@ -744,8 +667,9 @@
         <div class="pipe-arrow">↓</div>
         <div class="pipe-step">
           <div class="pipe-num" style="background:rgba(251,191,36,.1);color:var(--warn)">3</div>
-          <div class="pipe-label">Triangle Matching + DLT<small>Adaptive RANSAC homography</small></div>
+          <div class="pipe-label">Triangle Matching + DLT<small>Adaptive RANSAC homography · <code style="font-size:.7rem;background:var(--code-bg);padding:.1rem .3rem;border-radius:3px;color:var(--accent2)">--match-device</code></small></div>
           <span class="pipe-tag tag-cpu">CPU</span>
+          <span class="pipe-tag tag-cuda">CUDA</span>
         </div>
         <div class="pipe-arrow">↓</div>
         <div class="pipe-step">
@@ -784,7 +708,7 @@
       <div class="feature-card reveal">
         <div class="feature-icon" style="background:rgba(52,211,153,.1)">⭐</div>
         <h3>Automatic Star Detection & Alignment</h3>
-        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Triangle-matching + DLT computes a full homography — no manual reference or pre-computed transforms required.</p>
+        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Triangle-matching + DLT computes a full homography — no manual reference or pre-computed transforms required. Matching runs on CPU or GPU via <code>--match-device</code>.</p>
       </div>
       <div class="feature-card reveal">
         <div class="feature-icon" style="background:rgba(129,140,248,.1)">🎨</div>
@@ -794,7 +718,7 @@
       <div class="feature-card reveal">
         <div class="feature-icon" style="background:rgba(251,191,36,.08)">🔧</div>
         <h3>Calibration Frame Pipeline</h3>
-        <p>Dark, flat, bias, and darkflat master generation via winsorized mean or median stacking. Applied before debayering. Dead-pixel guard and flat normalization built-in.</p>
+        <p>Dark, flat, bias, and darkflat master generation via winsorized mean, median, or kappa-sigma stacking. Applied before debayering. Dead-pixel guard and flat normalization built-in.</p>
       </div>
       <div class="feature-card reveal">
         <div class="feature-icon" style="background:rgba(56,189,248,.1)">💾</div>
@@ -842,7 +766,7 @@
           <tr>
             <td>3</td>
             <td><strong>Triangle Matching + Alignment</strong></td>
-            <td>Triangle asterism matching + DLT <span class="pipe-tag tag-cpu" style="font-size:.7rem">CPU</span></td>
+            <td>Triangle asterism matching + DLT <span class="pipe-tag tag-cpu" style="font-size:.7rem">CPU</span> <span class="pipe-tag tag-cuda" style="font-size:.7rem">CUDA</span><br /><small style="color:var(--text-dim);font-size:.78rem"><code>--match-device</code> selects CPU or GPU; default follows stacking device</small></td>
             <td>Triangle asterism matching + DLT <span class="pipe-tag tag-cpu" style="font-size:.7rem">CPU</span></td>
           </tr>
           <tr>
@@ -1172,70 +1096,9 @@ python src/GUI/main.py</pre>
         <p style="font-size:.8rem;color:var(--text-dim)">Or download a pre-built GUI bundle from <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases</a> — no Python required.</p>
       </div>
 
-      <!-- GUI mockup -->
-      <div class="gui-mockup reveal">
-        <div class="gui-titlebar">
-          <span class="dot-red"></span>
-          <span class="dot-yellow"></span>
-          <span class="dot-green"></span>
-          <span>DSO Stacker — project.yaml</span>
-        </div>
-        <div class="gui-tabs-bar">
-          <div class="gui-tab active">Light</div>
-          <div class="gui-tab">Dark</div>
-          <div class="gui-tab">Flat</div>
-          <div class="gui-tab">Bias</div>
-          <div class="gui-tab">Options</div>
-        </div>
-        <div class="gui-body">
-          <table class="gui-table">
-            <thead>
-              <tr>
-                <th>Ref</th>
-                <th>Filename</th>
-                <th>Size</th>
-                <th>Dimensions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td class="ref">●</td>
-                <td>light_001.fits</td>
-                <td>62.4 MB</td>
-                <td>4656×3520</td>
-              </tr>
-              <tr>
-                <td></td>
-                <td>light_002.fits</td>
-                <td>62.4 MB</td>
-                <td>4656×3520</td>
-              </tr>
-              <tr>
-                <td></td>
-                <td>light_003.fits</td>
-                <td>62.4 MB</td>
-                <td>4656×3520</td>
-              </tr>
-              <tr>
-                <td></td>
-                <td>light_004.fits</td>
-                <td>62.4 MB</td>
-                <td>4656×3520</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="gui-log">
-          <span class="info">[INFO]</span> Loaded 4 light frames<br />
-          <span class="info">[INFO]</span> Reference: light_001.fits<br />
-          <span class="ok">[OK]</span> Frame 2/4 aligned (47 inliers)<br />
-          <span class="ok">[OK]</span> Frame 3/4 aligned (51 inliers)<br />
-          <span class="ok">[OK]</span> Successful: 4/4 · Skipped: 0
-        </div>
-        <div class="gui-run-bar">
-          <button class="gui-btn gui-btn-run">▶ Run</button>
-          <button class="gui-btn gui-btn-abort">■ Abort</button>
-        </div>
+      <!-- GUI screenshot -->
+      <div class="gui-screenshot reveal">
+        <img src="example_screenshot.png" alt="DSO Stacker GUI — PySide6 desktop application showing the Light tab with loaded FITS frames and stacking options" loading="lazy" />
       </div>
     </div>
   </div>

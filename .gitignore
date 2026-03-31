@@ -74,6 +74,7 @@ _deps/
 *.fits
 *.tiff
 *.png
+!docs/example_screenshot.png
 
 # Editor / IDE
 .vscode/
