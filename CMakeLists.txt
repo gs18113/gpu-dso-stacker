@@ -33,6 +33,7 @@ endif()
 # ---- Configurable CUDA architectures (override with -DDSO_CUDA_ARCHITECTURES=) ----
 if(DSO_ENABLE_CUDA)
     set(DSO_CUDA_ARCHITECTURES "86;89" CACHE STRING "CUDA architectures to compile for")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --threads 0")
 endif()
 
 # ---- CUDA Toolkit ----

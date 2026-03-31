@@ -47,12 +47,18 @@ jobs:
           make -j$(nproc)
           make install
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
+
       - name: Build (GPU-selectable)
         run: |
           cmake -B build-gpu \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
             -DDSO_CUDA_ARCHITECTURES="61;70;75;80;86;89" \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CUDA_COMPILER_LAUNCHER=sccache \
             -DCMAKE_INSTALL_PREFIX=install-gpu
           cmake --build build-gpu --parallel $(nproc)
           cmake --install build-gpu
@@ -68,6 +74,8 @@ jobs:
           cmake -B build-cpu \
             -DCMAKE_BUILD_TYPE=Release \
             -DDSO_ENABLE_CUDA=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DCMAKE_INSTALL_PREFIX=install-cpu
           cmake --build build-cpu --parallel $(nproc)
           cmake --install build-cpu
@@ -107,7 +115,7 @@ jobs:
         with:
           cuda: '12.6.2'
           method: 'network'
-          sub-packages: '["nvcc", "cudart", "npp", "npp_dev", "visual_studio_integration"]'
+          sub-packages: '["nvcc", "cudart", "npp", "npp_dev"]'
 
       - name: Export GitHub Actions cache variables
         uses: actions/github-script@v7
@@ -134,6 +142,9 @@ jobs:
         env:
           VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
+
       - name: Build (GPU-selectable)
         run: |
           cmake -B build-gpu -G Ninja `
@@ -141,6 +152,9 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DCMAKE_CUDA_COMPILER="${{ steps.cuda-toolkit.outputs.CUDA_PATH }}/bin/nvcc.exe" `
             -DDSO_CUDA_ARCHITECTURES="61;70;75;80;86;89" `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CUDA_COMPILER_LAUNCHER=sccache `
             -DCMAKE_INSTALL_PREFIX=install-gpu
           cmake --build build-gpu --parallel
 
@@ -153,6 +167,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DDSO_ENABLE_CUDA=OFF `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
             -DCMAKE_INSTALL_PREFIX=install-cpu
           cmake --build build-cpu --parallel
 
