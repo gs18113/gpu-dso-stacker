@@ -288,20 +288,26 @@ jobs:
         run: cmake --install build-cpu
 
       - name: Upload Metal-enabled CLI binary
+        run: |
+          mkdir -p artifact-metal
+          cp install-metal/bin/dso_stacker artifact-metal/
+          cp install-metal/lib/*.dylib artifact-metal/
+      - name: Upload Metal-enabled CLI artifact
         uses: actions/upload-artifact@v4
         with:
           name: dso-stacker-macos-arm64-metal
-          path: |
-            install-metal/bin/dso_stacker
-            install-metal/lib/*.dylib
+          path: artifact-metal/
 
       - name: Upload CPU-only CLI binary
+        run: |
+          mkdir -p artifact-cpu
+          cp install-cpu/bin/dso_stacker artifact-cpu/
+          cp install-cpu/lib/*.dylib artifact-cpu/
+      - name: Upload CPU-only CLI artifact
         uses: actions/upload-artifact@v4
         with:
           name: dso-stacker-macos-arm64-cpu
-          path: |
-            install-cpu/bin/dso_stacker
-            install-cpu/lib/*.dylib
+          path: artifact-cpu/
 
   # ==================================================================
   # GUI package (Linux CPU-only) — PyInstaller bundle with CPU CLI binary
