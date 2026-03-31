@@ -41,6 +41,11 @@ from fits_meta import FitsMetaWorker
 from utils import format_size
 
 _FITS_EXTS = {".fit", ".fits", ".fts"}
+_RAW_EXTS = {
+    ".cr2", ".cr3", ".nef", ".arw", ".orf", ".rw2", ".raf", ".dng",
+    ".pef", ".srw", ".raw", ".3fr", ".iiq", ".rwl", ".nrw",
+}
+_IMAGE_EXTS = _FITS_EXTS | _RAW_EXTS
 
 # Column indices
 COL_FILENAME   = 0
@@ -51,8 +56,8 @@ COL_DIMENSIONS = 3
 _HEADERS = ["Filename", "Full Path", "Size", "Dimensions"]
 
 
-def _is_fits(url_path: str) -> bool:
-    return Path(url_path).suffix.lower() in _FITS_EXTS
+def _is_image(url_path: str) -> bool:
+    return Path(url_path).suffix.lower() in _IMAGE_EXTS
 
 
 class FrameTableWidget(QWidget):
@@ -200,9 +205,12 @@ class FrameTableWidget(QWidget):
     def _on_add_clicked(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Select FITS frames",
+            "Select image frames",
             "",
-            "FITS files (*.fit *.fits *.fts);;All files (*)",
+            "Supported images (*.fit *.fits *.fts *.cr2 *.cr3 *.nef *.arw *.dng *.orf *.rw2 *.raf *.pef *.srw *.raw *.3fr *.iiq *.rwl *.nrw);;"
+            "FITS files (*.fit *.fits *.fts);;"
+            "RAW camera files (*.cr2 *.cr3 *.nef *.arw *.dng *.orf *.rw2 *.raf *.pef *.srw *.raw *.3fr *.iiq *.rwl *.nrw);;"
+            "All files (*)",
         )
         if paths:
             self.add_files(paths)
@@ -213,7 +221,7 @@ class FrameTableWidget(QWidget):
 # ------------------------------------------------------------------ #
 
 class _InnerTable(QTableWidget):
-    """QTableWidget that accepts FITS-file drops from the OS file manager."""
+    """QTableWidget that accepts image file drops from the OS file manager."""
 
     files_dropped = Signal(list)
 
@@ -224,13 +232,13 @@ class _InnerTable(QTableWidget):
 
     # Override drag events on the table itself; Qt routes viewport events here.
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if self._has_fits(event):
+        if self._has_image(event):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-        if self._has_fits(event):
+        if self._has_image(event):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -240,7 +248,7 @@ class _InnerTable(QTableWidget):
         paths = [
             u.toLocalFile()
             for u in urls
-            if u.isLocalFile() and _is_fits(u.toLocalFile())
+            if u.isLocalFile() and _is_image(u.toLocalFile())
         ]
         if paths:
             self.files_dropped.emit(paths)
@@ -249,11 +257,11 @@ class _InnerTable(QTableWidget):
             event.ignore()
 
     @staticmethod
-    def _has_fits(event) -> bool:
+    def _has_image(event) -> bool:
         if not event.mimeData().hasUrls():
             return False
         return any(
-            u.isLocalFile() and _is_fits(u.toLocalFile())
+            u.isLocalFile() and _is_image(u.toLocalFile())
             for u in event.mimeData().urls()
         )
 

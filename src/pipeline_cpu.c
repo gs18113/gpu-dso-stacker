@@ -21,6 +21,7 @@
 #include "calibration.h"
 #include "image_io.h"
 #include "fits_io.h"
+#include "frame_load.h"
 #include "debayer_cpu.h"
 #include "star_detect_cpu.h"
 #include "ransac.h"
@@ -157,7 +158,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     int W = 0, H = 0;
     {
         Image ref_img = {NULL, 0, 0};
-        DsoError e = fits_load(frames[ref_idx].filepath, &ref_img);
+        DsoError e = frame_load(frames[ref_idx].filepath, &ref_img);
         if (e != DSO_OK) return e;
         W = ref_img.width;
         H = ref_img.height;
@@ -256,7 +257,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
 
             /* ---- Load ---- */
             Image raw = {NULL, 0, 0};
-            PIPE_CHECK(fits_load(frames[i].filepath, &raw),
+            PIPE_CHECK(frame_load(frames[i].filepath, &raw),
                        order_cleanup, frames[i].filepath);
             if (raw.width != W || raw.height != H) {
                 fprintf(stderr,
@@ -279,7 +280,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
             /* ---- Bayer pattern ---- */
             BayerPattern pat = config->bayer_override;
             if (pat == BAYER_NONE)
-                fits_get_bayer_pattern(frames[i].filepath, &pat);
+                frame_get_bayer_pattern(frames[i].filepath, &pat);
             frames[i].width   = W;
             frames[i].height  = H;
             frames[i].pattern = (int)pat;

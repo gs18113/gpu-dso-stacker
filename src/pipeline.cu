@@ -31,6 +31,7 @@
 #include "calibration_gpu.h"
 #include "image_io.h"
 #include "fits_io.h"
+#include "frame_load.h"
 #include "debayer_gpu.h"
 #include "star_detect_gpu.h"
 #include "star_detect_cpu.h"
@@ -267,7 +268,7 @@ static DsoError phase_detect_warp_integrate(
 
     /* --- Kickstart: load frame 0 and begin H2D --- */
     printf("[Pipeline] Loading frame 1/%d: %s\n", n_frames, frames[order[0]].filepath);
-    PIPE_CHECK(fits_load_to_buffer(frames[order[0]].filepath, pinned[0], W, H),
+    PIPE_CHECK(frame_load_to_buffer(frames[order[0]].filepath, pinned[0], W, H),
                cleanup, frames[order[0]].filepath);
     CUDA_CHECK(cudaMemcpyAsync(d_raw[0], pinned[0], npix_f,
                                cudaMemcpyHostToDevice, stream_copy),
@@ -284,7 +285,7 @@ static DsoError phase_detect_warp_integrate(
         FrameInfo *fi       = &frames[fi_idx];
 
         BayerPattern pat = config->bayer_override;
-        if (pat == BAYER_NONE) fits_get_bayer_pattern(fi->filepath, &pat);
+        if (pat == BAYER_NONE) frame_get_bayer_pattern(fi->filepath, &pat);
 
         /* ----------------------------------------------------------
          * 1. GPU: calib + debayer_lum + star_detect on stream_compute.
@@ -421,7 +422,7 @@ static DsoError phase_detect_warp_integrate(
             int fi_next_idx = order[pos + 1];
             printf("[Pipeline] Loading frame %d/%d: %s\n",
                    pos + 2, n_frames, frames[fi_next_idx].filepath);
-            PIPE_CHECK(fits_load_to_buffer(frames[fi_next_idx].filepath,
+            PIPE_CHECK(frame_load_to_buffer(frames[fi_next_idx].filepath,
                                             pinned[next_slot], W, H),
                        cleanup, frames[fi_next_idx].filepath);
             CUDA_CHECK(cudaMemcpyAsync(d_raw[next_slot], pinned[next_slot], npix_f,
@@ -503,7 +504,7 @@ DsoError pipeline_run_cuda(FrameInfo            *frames,
     /* Determine output dimensions from reference frame */
     {
         Image ref_img = {NULL, 0, 0};
-        PIPE_CHECK(fits_load(frames[ref_idx].filepath, &ref_img),
+        PIPE_CHECK(frame_load(frames[ref_idx].filepath, &ref_img),
                    done, frames[ref_idx].filepath);
         W = ref_img.width;
         H = ref_img.height;

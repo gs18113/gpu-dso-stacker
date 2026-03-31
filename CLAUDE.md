@@ -35,6 +35,7 @@ The CSV input is always 2-column (`filepath, is_reference`). Star detection + al
 - **CFITSIO 4.6.3** — FITS image I/O
 - **libtiff 4.5.1** — TIFF output (FP32, FP16, INT16, INT8; none/zip/lzw/rle compression)
 - **libpng 1.6.43** — PNG output (INT8, INT16)
+- **LibRaw 0.21+** — RAW camera file input (CR2, NEF, ARW, DNG, etc.); optional, `-DDSO_ENABLE_LIBRAW=ON`
 - **C++17** — CLI entry point (`main.cpp`)
 
 ---
@@ -68,6 +69,8 @@ gpu-dso-stacker/
 │   ├── integration_gpu.h        ← GPU mini-batch kappa-sigma context + API
 │   ├── calibration.h            ← CalibFrames, CalibMethod, calib_load_or_generate, calib_apply_cpu
 │   ├── calibration_gpu.h        ← CalibGpuCtx, calib_gpu_init/apply_d2d/cleanup
+│   ├── raw_io.h                 ← RAW camera file loading via LibRaw (conditional: DSO_HAS_LIBRAW)
+│   ├── frame_load.h             ← Format-agnostic load dispatch (FITS or RAW by extension)
 │   └── pipeline.h               ← pipeline_run dispatch + pipeline_run_{cpu,cuda,metal} + PipelineConfig
 ├── src/
 │   ├── fits_io.c                ← CFITSIO-based I/O
@@ -79,6 +82,8 @@ gpu-dso-stacker/
 │   ├── debayer_cpu.c            ← VNG debayer CPU implementation (OpenMP)
 │   ├── debayer_gpu.cu           ← VNG debayer kernel (16×16 tiles, 2px apron)
 │   ├── star_detect_gpu.cu       ← Moffat conv kernel + reduction + threshold
+│   ├── raw_io.c                 ← LibRaw wrapper: load RAW as float32 Bayer mosaic
+│   ├── frame_load.c             ← Extension-based dispatch to fits_io or raw_io
 │   ├── star_detect_cpu.c        ← Moffat conv + threshold (OpenMP) + CCL + CoM
 │   ├── ransac.c                 ← Jacobi eigendecomp DLT + RANSAC loop
 │   ├── integration_gpu.cu       ← Mini-batch kappa-sigma + finalize kernels
@@ -102,7 +107,8 @@ gpu-dso-stacker/
 │   ├── test_calibration.c       ← 29 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, kappa-sigma, bias sub, flat normalization)
 │   ├── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
 │   ├── test_color.c             ← 33 tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
-│   └── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
+│   ├── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
+│   └── test_raw_io.c           ← 10 tests: frame_is_raw extension detection, frame_load FITS fallback, frame_get_bayer_pattern dispatch, raw_io error handling (conditional on DSO_HAS_LIBRAW)
 ├── test/
 │   └── star_detect_overlay.cpp  ← Standalone CLI helper that runs CPU/GPU star detection and writes PNG overlays with detected-star circles
 ├── docs/
@@ -132,6 +138,7 @@ gpu-dso-stacker/
 | OpenMP | any | system (GCC on Linux; MSVC on Windows) |
 | libtiff | 4.5.1 | system pkg-config (Linux); vcpkg (Windows) |
 | libpng | 1.6.43 | system pkg-config (Linux); vcpkg (Windows) |
+| LibRaw | >= 0.21 | system pkg-config (Linux); brew (macOS); vcpkg (Windows) — optional (`-DDSO_ENABLE_LIBRAW=ON`) |
 | CMake | >= 3.18 | system |
 | pkg-config | any | system (Linux only) |
 
@@ -288,7 +295,7 @@ typedef enum { BAYER_NONE=0, BAYER_RGGB, BAYER_BGGR, BAYER_GRBG, BAYER_GBRG } Ba
 typedef enum { DSO_OK=0, DSO_ERR_IO=-1, DSO_ERR_ALLOC=-2, DSO_ERR_FITS=-3,
                DSO_ERR_CUDA=-4, DSO_ERR_NPP=-5, DSO_ERR_CSV=-6,
                DSO_ERR_INVALID_ARG=-7, DSO_ERR_STAR_DETECT=-8,
-               DSO_ERR_RANSAC=-9 } DsoError;
+               DSO_ERR_RANSAC=-9, DSO_ERR_RAW=-10 } DsoError;
 ```
 
 `MoffatParams` lives in `dso_types.h` (not `star_detect_gpu.h`) so pure-C CPU code can use it without pulling in CUDA headers.
@@ -514,6 +521,34 @@ DsoError calib_gpu_apply_d2d(float *d_frame, int W, int H,
 
 Single CUDA kernel (256 threads/block): subtract dark, divide by flat, dead-pixel guard (flat < 1e-6 → 0). Upload happens once in `pipeline_run` before Phase 1.
 
+### `raw_io.h`
+
+```c
+DsoError raw_load(const char *filepath, Image *out);
+DsoError raw_load_to_buffer(const char *filepath, float *buffer, int W, int H);
+DsoError raw_get_bayer_pattern(const char *filepath, BayerPattern *pattern_out);
+DsoError raw_get_dimensions(const char *filepath, int *width_out, int *height_out);
+```
+
+LibRaw wrapper for RAW camera files (CR2, NEF, ARW, DNG, etc.). Only compiled when `DSO_HAS_LIBRAW=1`.
+- `raw_load`: unpacks raw Bayer mosaic as float32 in [0, 1] range with per-channel black subtraction.
+- Uses usable image area (`sizes.width × sizes.height`), not masked border pixels.
+- Per-channel black levels from `color.cblack[c] + color.black`, normalized by `color.maximum`.
+- Bayer pattern from `idata.filters`: 0x94→RGGB, 0x16→BGGR, 0x61→GRBG, 0x49→GBRG. Non-Bayer → `BAYER_NONE`.
+- `raw_get_bayer_pattern` and `raw_get_dimensions` are header-only reads (no `libraw_unpack`).
+
+### `frame_load.h`
+
+```c
+int      frame_is_raw(const char *filepath);
+DsoError frame_load(const char *filepath, Image *out);
+DsoError frame_load_to_buffer(const char *filepath, float *buffer, int W, int H);
+DsoError frame_get_bayer_pattern(const char *filepath, BayerPattern *pattern_out);
+DsoError frame_get_dimensions(const char *filepath, int *width_out, int *height_out);
+```
+
+Format-agnostic dispatch layer. `frame_is_raw` checks file extension against a table of recognized RAW extensions (case-insensitive): `.cr2`, `.cr3`, `.nef`, `.arw`, `.orf`, `.rw2`, `.raf`, `.dng`, `.pef`, `.srw`, `.raw`, `.3fr`, `.iiq`, `.rwl`, `.nrw`. Each `frame_*` function dispatches to `raw_*` or `fits_*`. When `DSO_HAS_LIBRAW=0`, RAW paths return `DSO_ERR_IO`.
+
 ### `pipeline.h`
 
 ```c
@@ -585,6 +620,9 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - **Integer stretch semantics**: for INT8/INT16 output, `stretch_min`/`stretch_max` are NAN by default (auto min/max of the image). For RGB, the stretch bounds are derived globally across all three planes so that colour ratios are preserved. Setting both to the same value (hi == lo) produces a black image.
 - **FP16 TIFF precision**: values outside the IEEE 754 half-precision representable range (~[6e-8, 65504]) are flushed to ±0 / ±infinity. For astronomical data with wide dynamic range, prefer FP32 or INT16.
 - **TIFF RGB interleaving**: `PLANARCONFIG_CONTIG` (RGBRGB…) — the three `Image` planes are interleaved into a per-row buffer at write time, no full-image allocation.
+- **RAW file support via LibRaw**: optional, controlled by `-DDSO_ENABLE_LIBRAW=ON` (default OFF). `raw_io.c` extracts the raw uint16 Bayer mosaic via `libraw_unpack()` — never calls `libraw_dcraw_process()` since the project has its own VNG debayer pipeline. Pixel extraction uses `sizes.width/height` (usable area) with `top_margin/left_margin` offsets, per-channel black subtraction via `cblack[c] + black`, normalization by `color.maximum` to float32 [0, 1]. CFA pattern derived from `idata.filters` (0x94949494→RGGB, 0x16161616→BGGR, 0x61616161→GRBG, 0x49494949→GBRG); non-Bayer sensors (X-Trans, Foveon) return `BAYER_NONE`.
+- **`frame_load` dispatch layer**: all pipeline call sites (`pipeline_cpu.c`, `pipeline.cu`, `main.cpp`, `calibration.c`) use `frame_load`/`frame_get_bayer_pattern`/`frame_get_dimensions` instead of calling `fits_load` directly. The dispatch layer checks file extension via `frame_is_raw()` and routes to `raw_*` or `fits_*`. When `DSO_HAS_LIBRAW=0`, RAW paths return `DSO_ERR_IO` with a diagnostic message.
+- **Calibration RAW support**: `calibration.c` uses `is_image_file()` (checks both FITS and RAW extensions) instead of `is_fits_file()` for the master-vs-framelist decision, and `frame_load()` for loading individual frames.
 
 ---
 
@@ -605,7 +643,7 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 
 **`getopt_port.c`**: compiled only on MSVC via conditional `list(APPEND LIB_SOURCES ...)` in `CMakeLists.txt`. BSD-2-Clause licensed.
 
-**Optional CUDA/Metal build toggles**: `CMakeLists.txt` now supports `DSO_ENABLE_CUDA` (default ON) and `DSO_ENABLE_METAL` (default OFF, Apple-only). CUDA sources/tests are conditionally added; CPU-only builds compile without NVCC by setting `-DDSO_ENABLE_CUDA=OFF`.
+**Optional CUDA/Metal/LibRaw build toggles**: `CMakeLists.txt` supports `DSO_ENABLE_CUDA` (default ON), `DSO_ENABLE_METAL` (default OFF, Apple-only), and `DSO_ENABLE_LIBRAW` (default OFF). CUDA sources/tests are conditionally added; CPU-only builds compile without NVCC by setting `-DDSO_ENABLE_CUDA=OFF`. LibRaw support adds `src/raw_io.c` and links libraw; without it, RAW file paths return `DSO_ERR_IO`.
 
 **`test_framework.h`**: `SUMMARY()` macro uses `static inline` function instead of GCC statement expression `({...})` for MSVC compatibility.
 

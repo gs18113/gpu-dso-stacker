@@ -27,7 +27,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             cmake gcc g++ pkg-config git curl ca-certificates \
             libtiff-dev libpng-dev zlib1g-dev \
-            libcurl4-openssl-dev libomp-dev
+            libcurl4-openssl-dev libomp-dev libraw-dev
 
       - uses: actions/checkout@v4
 
@@ -56,6 +56,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
             -DDSO_CUDA_ARCHITECTURES="61;70;75;80;86;89" \
+            -DDSO_ENABLE_LIBRAW=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CUDA_COMPILER_LAUNCHER=sccache \
@@ -74,6 +75,7 @@ jobs:
           cmake -B build-cpu \
             -DCMAKE_BUILD_TYPE=Release \
             -DDSO_ENABLE_CUDA=OFF \
+            -DDSO_ENABLE_LIBRAW=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DCMAKE_INSTALL_PREFIX=install-cpu
@@ -152,6 +154,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DCMAKE_CUDA_COMPILER="${{ steps.cuda-toolkit.outputs.CUDA_PATH }}/bin/nvcc.exe" `
             -DDSO_CUDA_ARCHITECTURES="61;70;75;80;86;89" `
+            -DDSO_ENABLE_LIBRAW=ON `
             -DCMAKE_C_COMPILER_LAUNCHER=sccache `
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
             -DCMAKE_CUDA_COMPILER_LAUNCHER=sccache `
@@ -167,6 +170,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DDSO_ENABLE_CUDA=OFF `
+            -DDSO_ENABLE_LIBRAW=ON `
             -DCMAKE_C_COMPILER_LAUNCHER=sccache `
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
             -DCMAKE_INSTALL_PREFIX=install-cpu
@@ -218,7 +222,7 @@ jobs:
       - name: Install Homebrew dependencies
         run: |
           brew update
-          brew install cfitsio libtiff libpng pkg-config libomp
+          brew install cfitsio libtiff libpng pkg-config libomp libraw
 
       - name: Build (Metal-enabled)
         run: |
@@ -228,6 +232,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DDSO_ENABLE_CUDA=OFF \
             -DDSO_ENABLE_METAL=ON \
+            -DDSO_ENABLE_LIBRAW=ON \
             -DCMAKE_PREFIX_PATH="${BREW_PREFIX}" \
             -DOpenMP_ROOT="${LIBOMP_PREFIX}" \
             -DCMAKE_INSTALL_PREFIX=install-metal
@@ -245,6 +250,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DDSO_ENABLE_CUDA=OFF \
             -DDSO_ENABLE_METAL=OFF \
+            -DDSO_ENABLE_LIBRAW=ON \
             -DCMAKE_PREFIX_PATH="${BREW_PREFIX}" \
             -DOpenMP_ROOT="${LIBOMP_PREFIX}" \
             -DCMAKE_INSTALL_PREFIX=install-cpu

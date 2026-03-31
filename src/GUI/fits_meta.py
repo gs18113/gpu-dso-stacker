@@ -1,9 +1,9 @@
 """
-fits_meta.py — Asynchronous FITS header metadata reader.
+fits_meta.py — Asynchronous image metadata reader (FITS and RAW).
 
-Reads NAXIS1 (width), NAXIS2 (height), and the optional BAYERPAT keyword
-from a FITS file using a minimal pure-Python parser — no external libraries
-required. Only the primary HDU header is read; pixel data is never loaded.
+Reads width, height, and the optional Bayer pattern from FITS or RAW camera
+files.  FITS uses a minimal pure-Python header parser; RAW files use the
+optional ``rawpy`` package (Python wrapper for LibRaw).
 
 Runs in a QThreadPool worker so the UI thread is never blocked.
 
@@ -14,11 +14,64 @@ FITS header format (FITS Standard 4.0 §4):
 """
 
 from __future__ import annotations
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 _BLOCK = 2880
 _CARD  = 80
+
+_RAW_EXTS = {
+    ".cr2", ".cr3", ".nef", ".arw", ".orf", ".rw2", ".raf", ".dng",
+    ".pef", ".srw", ".raw", ".3fr", ".iiq", ".rwl", ".nrw",
+}
+
+# Optional rawpy import for RAW metadata reading
+try:
+    import rawpy as _rawpy  # type: ignore[import-untyped]
+    _HAS_RAWPY = True
+except ImportError:
+    _HAS_RAWPY = False
+
+
+def _is_raw(path: str) -> bool:
+    return Path(path).suffix.lower() in _RAW_EXTS
+
+
+# Bayer pattern mapping from rawpy's 2x2 raw_pattern to string
+_RAWPY_BAYER_MAP = {
+    (0, 1, 1, 2): "RGGB",
+    (2, 1, 1, 0): "BGGR",
+    (1, 0, 2, 1): "GRBG",
+    (1, 2, 0, 1): "GBRG",
+}
+
+
+def _read_raw_meta(path: str) -> dict[str, str]:
+    """Read width, height, and Bayer pattern from a RAW camera file.
+
+    Uses rawpy (LibRaw wrapper).  Returns empty dict on error or if
+    rawpy is not installed.
+    """
+    if not _HAS_RAWPY:
+        return {}
+    try:
+        with _rawpy.imread(path) as raw:
+            found: dict[str, str] = {}
+            found["NAXIS1"] = str(raw.sizes.width)
+            found["NAXIS2"] = str(raw.sizes.height)
+            # raw_pattern is a 2x2 numpy array for Bayer sensors
+            try:
+                pat = raw.raw_pattern[:2, :2]
+                key = tuple(pat.flat)
+                bayer = _RAWPY_BAYER_MAP.get(key)
+                if bayer:
+                    found["BAYERPAT"] = bayer
+            except (AttributeError, IndexError):
+                pass
+            return found
+    except Exception:
+        return {}
 
 
 def _read_fits_keywords(path: str, want: set[str]) -> dict[str, str]:
@@ -75,7 +128,10 @@ class FitsMetaWorker(QRunnable):
     @Slot()
     def run(self) -> None:
         meta: dict = {"width": None, "height": None, "bayer": None}
-        kw = _read_fits_keywords(self.path, {"NAXIS1", "NAXIS2", "BAYERPAT"})
+        if _is_raw(self.path):
+            kw = _read_raw_meta(self.path)
+        else:
+            kw = _read_fits_keywords(self.path, {"NAXIS1", "NAXIS2", "BAYERPAT"})
         try:
             meta["width"]  = int(kw["NAXIS1"])
         except (KeyError, ValueError):

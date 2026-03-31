@@ -43,6 +43,7 @@
 
 #include "calibration.h"
 #include "fits_io.h"
+#include "frame_load.h"
 #include "compat.h"
 
 #include <fitsio.h>   /* fits_open_file, fits_close_file (for FITS probe) */
@@ -76,6 +77,19 @@ static int is_fits_file(const char *path)
         fits_close_file(fp, &status);
         return 1;
     }
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * Image file probe (FITS or RAW)
+ *
+ * Returns 1 if 'path' is a FITS file or a recognized RAW camera file.
+ * Used to distinguish pre-computed master frames from text frame lists.
+ * ------------------------------------------------------------------------- */
+static int is_image_file(const char *path)
+{
+    if (is_fits_file(path)) return 1;
+    if (frame_is_raw(path)) return 1;
     return 0;
 }
 
@@ -174,7 +188,7 @@ static DsoError stack_frames(const char **paths, int n,
     /* Load all frames; derive dimensions from first frame */
     for (int i = 0; i < n; i++) {
         Image img = {NULL, 0, 0};
-        err = fits_load(paths[i], &img);
+        err = frame_load(paths[i], &img);
         if (err != DSO_OK) {
             fprintf(stderr, "calib: failed to load '%s' (err=%d)\n", paths[i], (int)err);
             goto cleanup;
@@ -358,9 +372,9 @@ static DsoError load_or_generate_one(const char *path, CalibMethod method,
 {
     *was_generated = 0;
 
-    if (is_fits_file(path)) {
-        /* Pre-computed master FITS — load directly */
-        return fits_load(path, out);
+    if (is_image_file(path)) {
+        /* Pre-computed master (FITS or RAW) — load directly */
+        return frame_load(path, out);
     }
 
     /* Text frame list — generate master */

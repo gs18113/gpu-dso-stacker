@@ -6,6 +6,7 @@
   "dependencies": [
     "cfitsio",
     "tiff",
-    "libpng"
+    "libpng",
+    "libraw"
   ]
 }

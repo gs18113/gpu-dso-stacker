@@ -9,6 +9,8 @@ dependencies listed below:
 
 - CFITSIO, libtiff, libpng, PyYAML, and getopt_port use permissive licenses
   that are compatible with GPLv3 distribution.
+- LibRaw is dual-licensed under LGPL 2.1 and CDDL 1.0; used here under
+  LGPL 2.1, which is compatible with GPLv3.
 - PySide6/Qt for Python is under LGPLv3, which is compatible with GPLv3.
 - CUDA/NPP components are under the NVIDIA CUDA EULA (non-open-source). They
   are optional and only required for GPU-selectable builds/runs. Redistributors
@@ -140,7 +142,31 @@ NVIDIA, the NVIDIA logo, CUDA, and NPP are trademarks and/or registered
 trademarks of NVIDIA Corporation in the U.S. and other countries.
 
 ================================================================================
-5. getopt_port — Portable getopt / getopt_long
+5. LibRaw — RAW Camera Image Decoder Library
+   https://www.libraw.org/
+================================================================================
+
+Copyright (C) 2008-2024 LibRaw LLC (info@libraw.org)
+
+LibRaw is dual-licensed:
+
+  1. GNU Lesser General Public License, version 2.1 (LGPL 2.1)
+  2. Common Development and Distribution License (CDDL), version 1.0
+
+This project uses LibRaw under the terms of the LGPL 2.1.
+
+The full text of the LGPL 2.1 is available at:
+  https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+LibRaw uses code from dcraw.c by Dave Coffin (Public Domain).
+LibRaw API documentation, sample code, and samples are licensed under the
+3-clause BSD license.
+
+LibRaw is an optional dependency — builds without -DDSO_ENABLE_LIBRAW=ON
+do not link or distribute any LibRaw code.
+
+================================================================================
+6. getopt_port — Portable getopt / getopt_long
    (Bundled in src/getopt_port.c and include/getopt_port.h)
 ================================================================================
 
@@ -164,7 +190,7 @@ LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
 A PARTICULAR PURPOSE ARE DISCLAIMED.
 
 ================================================================================
-6. PySide6 — Qt for Python (GUI only)
+7. PySide6 — Qt for Python (GUI only)
    https://wiki.qt.io/Qt_for_Python
 ================================================================================
 
@@ -178,7 +204,7 @@ Qt itself (the C++ framework) is used under the LGPL v3.
   https://www.qt.io/licensing/
 
 ================================================================================
-7. PyYAML (GUI only)
+8. PyYAML (GUI only)
    https://pyyaml.org/
 ================================================================================
 

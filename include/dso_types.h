@@ -118,6 +118,7 @@ typedef enum {
  * DSO_ERR_INVALID_ARG (-7) — NULL pointer, singular matrix, size mismatch, …
  * DSO_ERR_STAR_DETECT (-8) — insufficient stars found for alignment
  * DSO_ERR_RANSAC      (-9) — RANSAC failed to find a valid homography
+ * DSO_ERR_RAW         (-10) — LibRaw error (RAW file decode failure)
  */
 /*
  * MoffatParams — shape parameters for the Moffat PSF detection kernel.
@@ -140,7 +141,8 @@ typedef enum {
     DSO_ERR_CSV         = -6,
     DSO_ERR_INVALID_ARG = -7,
     DSO_ERR_STAR_DETECT = -8,
-    DSO_ERR_RANSAC      = -9
+    DSO_ERR_RANSAC      = -9,
+    DSO_ERR_RAW         = -10
 } DsoError;
 
 #ifdef __cplusplus

@@ -87,6 +87,7 @@ Metal 가속이 필요 없으면 URL에서 `metal`을 `cpu`로 변경하세요.
 - **CFITSIO 4.6.3** — FITS 이미지 I/O
 - **libtiff 4.5.1** — TIFF 출력 (FP32, FP16, INT16, INT8; none/zip/lzw/rle 압축)
 - **libpng 1.6.43** — PNG 출력 (INT8 및 INT16)
+- **LibRaw 0.21+** — RAW 카메라 파일 입력 (CR2, NEF, ARW, DNG 등); 선택사항, `-DDSO_ENABLE_LIBRAW=ON`
 - **C++17** — CLI 엔트리포인트
 
 ---
@@ -125,6 +126,7 @@ Metal 가속이 필요 없으면 URL에서 `metal`을 `cpu`로 변경하세요.
 | CFITSIO | 4.6.3 |
 | libtiff | 4.x |
 | libpng | 1.6.x |
+| LibRaw | >= 0.21 (선택사항) |
 | OpenMP | any (GCC) |
 | CMake | >= 3.18 |
 
@@ -146,13 +148,20 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DDSO_ENABLE_CUDA=OFF
 cmake --build build --parallel $(nproc)
 ```
 
+RAW 카메라 파일 지원 활성화 (LibRaw 필요):
+
+```bash
+# LibRaw 설치: apt install libraw-dev (Linux), brew install libraw (macOS)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DDSO_ENABLE_LIBRAW=ON ...
+```
+
 ### Windows
 
 Visual Studio 2022, CUDA Toolkit 12.x, C 라이브러리 의존성을 위한 [vcpkg](https://vcpkg.io/)가 필요합니다.
 
 ```powershell
 # vcpkg로 C 의존성 설치
-vcpkg install cfitsio tiff libpng --triplet x64-windows
+vcpkg install cfitsio tiff libpng libraw --triplet x64-windows
 
 # 구성
 cmake -B build -G "Visual Studio 17 2022" -A x64 `
@@ -207,7 +216,7 @@ filepath, is_reference
 /data/frame3.fits, 0
 ```
 
-정확히 **하나**의 행이 `is_reference = 1`이어야 합니다.
+정확히 **하나**의 행이 `is_reference = 1`이어야 합니다. 입력 프레임은 **FITS** (`.fits`, `.fit`, `.fts`) 또는 **RAW 카메라 파일** (`.cr2`, `.cr3`, `.nef`, `.arw`, `.orf`, `.rw2`, `.raf`, `.dng`, `.pef`, `.srw`, `.raw`, `.3fr`, `.iiq`, `.rwl`, `.nrw`)을 사용할 수 있으며, `-DDSO_ENABLE_LIBRAW=ON`으로 빌드해야 합니다. 해상도가 일치하면 FITS와 RAW 프레임을 같은 CSV에 혼합할 수 있습니다.
 
 ### 옵션
 
@@ -368,6 +377,8 @@ cd build && ctest --output-on-failure -V
 | `test_calibration` | 26 | CPU 보정: 다크/플랫 적용, 데드픽셀 가드, 차원 검증, FITS 마스터 로딩, 프레임 목록 스태킹, 윈저화 평균, 중앙값, 바이어스/다크플랫 차감, 플랫 정규화 |
 | `test_color` | 33 | OSC 컬러 출력: `debayer_cpu_rgb` (검증, BAYER_NONE 패스스루, 균일 4패턴, 채널별 우세, 휘도 일관성, 채널 구별성, 비음수); `fits_save_rgb` (검증, NAXIS=3, 평면별 왕복, 그래디언트 평면); `fits_get_bayer_pattern` (4패턴 + 키워드 부재) |
 | `test_image_io` | 21 | 형식 감지; FITS 패스스루; TIFF FP32/FP16/INT16/INT8 모노+RGB; TIFF zip/lzw/rle 왕복; PNG 8비트/16비트 모노+RGB; 에러 케이스; 자동 스트레치 |
+| `test_pipeline_backend` | — | 백엔드 디스패치 검증 |
+| `test_raw_io` | 10 | `frame_is_raw` 확장자 검출 (긍정 + 부정); `frame_load` FITS 폴백; `frame_get_bayer_pattern` 디스패치; `frame_get_dimensions` 디스패치; RAW 비활성화 시 에러 경로; LibRaw 에러 핸들링 (조건부) |
 
 GPU 테스트 모음은 CUDA 장치가 없으면 종료 코드 77 (CTest SKIP)을 반환합니다.
 
@@ -417,9 +428,9 @@ python src/GUI/main.py
 ### 기능
 
 - **탭**: Light, Dark, Flat, Bias, Darkflat, Stacking Options
-- **드래그 앤 드롭**: FITS 프레임 (`.fit` / `.fits` / `.fts`)을 아무 탭에나 드롭
+- **드래그 앤 드롭**: FITS 프레임 (`.fit` / `.fits` / `.fts`) 및 RAW 카메라 파일 (`.cr2`, `.nef`, `.arw`, `.dng` 등)을 아무 탭에나 드롭
 - **기준 프레임 선택**: Light 탭의 라디오 버튼 열 (기본값: 첫 번째 프레임)
-- **파일 정보**: 파일명, 경로, 크기, 해상도 (W×H)를 FITS 헤더에서 비동기 로딩
+- **파일 정보**: 파일명, 경로, 크기, 해상도 (W×H)를 FITS 헤더 또는 RAW 메타데이터(선택적 `rawpy` 사용)에서 비동기 로딩
 - **조건부 옵션**: 평균 적분 시 카파/반복 숨김; CPU 모드 시 배치 크기 숨김; 비TIFF 출력 시 TIFF 압축 숨김; 부동소수점 출력 시 스트레치 범위 숨김; 출력 형식별 비트 심도 제한
 - **바이어스 / 다크플랫 상호 배제**: 한쪽에 프레임을 로딩하면 다른 쪽 탭이 비활성화
 - **프로젝트 파일** (`.yaml`): 전체 프로젝트 상태 저장 및 복원 (프레임 목록 + 모든 옵션)
@@ -505,7 +516,9 @@ NVIDIA CUDA EULA에 의해 관리되므로, GPU 아티팩트를 재배포하는 
 프로젝트에 대한 GPLv3 의무와 NVIDIA 런타임 구성 요소에 대한 CUDA EULA
 조건을 모두 충족해야 합니다.
 
-서드파티 오픈소스 구성 요소(CFITSIO, libtiff, libpng, PySide6, PyYAML,
-getopt\_port)는 각각의 허용적 또는 LGPL 라이선스에 따라 사용됩니다.
-전체 저작자 표시 및 라이선스 텍스트는
+서드파티 오픈소스 구성 요소(CFITSIO, libtiff, libpng, LibRaw, PySide6,
+PyYAML, getopt\_port)는 각각의 허용적 또는 LGPL 라이선스에 따라
+사용됩니다. LibRaw는 LGPL 2.1과 CDDL 1.0의 이중 라이선스이며, 이
+프로젝트에서는 GPLv3와 호환되는 LGPL 2.1에 따라 사용합니다. 전체
+저작자 표시 및 라이선스 텍스트는
 [THIRD\_PARTY\_LICENSES](THIRD_PARTY_LICENSES)를 참조하세요.

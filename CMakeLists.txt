@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.18)
 
 option(DSO_ENABLE_CUDA "Enable CUDA backend" ON)
 option(DSO_ENABLE_METAL "Enable Metal backend (macOS only)" OFF)
+option(DSO_ENABLE_LIBRAW "Enable RAW camera file support via LibRaw" OFF)
 
 set(DSO_PROJECT_LANGUAGES C CXX)
 if(DSO_ENABLE_CUDA)
@@ -22,6 +23,11 @@ if(DSO_ENABLE_METAL)
     add_compile_definitions(DSO_HAS_METAL=1)
 else()
     add_compile_definitions(DSO_HAS_METAL=0)
+endif()
+if(DSO_ENABLE_LIBRAW)
+    add_compile_definitions(DSO_HAS_LIBRAW=1)
+else()
+    add_compile_definitions(DSO_HAS_LIBRAW=0)
 endif()
 
 set(CMAKE_C_STANDARD 11)
@@ -62,6 +68,11 @@ if(WIN32)
     find_package(TIFF REQUIRED)
     find_package(PNG REQUIRED)
 
+    if(DSO_ENABLE_LIBRAW)
+        find_package(libraw CONFIG REQUIRED)
+        set(LIBRAW_TARGET libraw::raw)
+    endif()
+
     # Imported target names from vcpkg
     set(CFITSIO_TARGET CFITSIO::cfitsio)
     set(TIFF_TARGET    TIFF::TIFF)
@@ -77,6 +88,9 @@ else()
     pkg_check_modules(CFITSIO REQUIRED cfitsio)
     pkg_check_modules(LIBTIFF REQUIRED libtiff-4)
     pkg_check_modules(LIBPNG  REQUIRED libpng)
+    if(DSO_ENABLE_LIBRAW)
+        pkg_check_modules(LIBRAW REQUIRED libraw)
+    endif()
 endif()
 
 # ---- Library sources ----
@@ -92,7 +106,12 @@ set(LIB_SOURCES
     src/calibration.c
     src/pipeline_dispatch.c
     src/pipeline_cpu.c
+    src/frame_load.c
 )
+
+if(DSO_ENABLE_LIBRAW)
+    list(APPEND LIB_SOURCES src/raw_io.c)
+endif()
 
 if(DSO_ENABLE_CUDA)
     list(APPEND LIB_SOURCES
@@ -132,12 +151,16 @@ if(WIN32)
     if(DSO_ENABLE_CUDA)
         target_include_directories(dso_stacker_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
     endif()
-    target_link_libraries(dso_stacker_lib PUBLIC
+    set(_DSO_WIN_LIBS
         ${CFITSIO_TARGET}
         ${TIFF_TARGET}
         ${PNG_TARGET}
         OpenMP::OpenMP_C
     )
+    if(DSO_ENABLE_LIBRAW)
+        list(APPEND _DSO_WIN_LIBS ${LIBRAW_TARGET})
+    endif()
+    target_link_libraries(dso_stacker_lib PUBLIC ${_DSO_WIN_LIBS})
     if(DSO_ENABLE_CUDA)
         target_link_libraries(dso_stacker_lib PUBLIC
             CUDA::cudart
@@ -147,24 +170,38 @@ if(WIN32)
     endif()
 else()
     # pkg-config variables
-    target_include_directories(dso_stacker_lib PUBLIC
-        include
+    set(_DSO_PKG_INCLUDE_DIRS
         ${CFITSIO_INCLUDE_DIRS}
         ${LIBTIFF_INCLUDE_DIRS}
         ${LIBPNG_INCLUDE_DIRS}
+    )
+    set(_DSO_PKG_LIBRARY_DIRS
+        ${CFITSIO_LIBRARY_DIRS}
+        ${LIBTIFF_LIBRARY_DIRS}
+        ${LIBPNG_LIBRARY_DIRS}
+    )
+    set(_DSO_PKG_LIBRARIES
+        ${CFITSIO_LIBRARIES}
+        ${LIBTIFF_LIBRARIES}
+        ${LIBPNG_LIBRARIES}
+    )
+    if(DSO_ENABLE_LIBRAW)
+        list(APPEND _DSO_PKG_INCLUDE_DIRS ${LIBRAW_INCLUDE_DIRS})
+        list(APPEND _DSO_PKG_LIBRARY_DIRS ${LIBRAW_LIBRARY_DIRS})
+        list(APPEND _DSO_PKG_LIBRARIES    ${LIBRAW_LIBRARIES})
+    endif()
+    target_include_directories(dso_stacker_lib PUBLIC
+        include
+        ${_DSO_PKG_INCLUDE_DIRS}
     )
     if(DSO_ENABLE_CUDA)
         target_include_directories(dso_stacker_lib PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
     endif()
     target_link_directories(dso_stacker_lib PUBLIC
-        ${CFITSIO_LIBRARY_DIRS}
-        ${LIBTIFF_LIBRARY_DIRS}
-        ${LIBPNG_LIBRARY_DIRS}
+        ${_DSO_PKG_LIBRARY_DIRS}
     )
     target_link_libraries(dso_stacker_lib PUBLIC
-        ${CFITSIO_LIBRARIES}
-        ${LIBTIFF_LIBRARIES}
-        ${LIBPNG_LIBRARIES}
+        ${_DSO_PKG_LIBRARIES}
         OpenMP::OpenMP_C
     )
     if(DSO_ENABLE_CUDA)
@@ -280,3 +317,9 @@ add_executable(test_pipeline_backend tests/test_pipeline_backend.c)
 target_include_directories(test_pipeline_backend PRIVATE tests)
 target_link_libraries(test_pipeline_backend PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_pipeline_backend COMMAND test_pipeline_backend)
+
+# frame_load dispatch + raw_io tests
+add_executable(test_raw_io tests/test_raw_io.c)
+target_include_directories(test_raw_io PRIVATE tests)
+target_link_libraries(test_raw_io PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_raw_io COMMAND test_raw_io)

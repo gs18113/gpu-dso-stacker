@@ -87,6 +87,7 @@ Replace `metal` with `cpu` in the URL if you don't need Metal acceleration.
 - **CFITSIO 4.6.3** — FITS image I/O
 - **libtiff 4.5.1** — TIFF output (FP32, FP16, INT16, INT8; none/zip/lzw/rle compression)
 - **libpng 1.6.43** — PNG output (INT8 and INT16)
+- **LibRaw 0.21+** — RAW camera file input (CR2, NEF, ARW, DNG, etc.); optional, `-DDSO_ENABLE_LIBRAW=ON`
 - **C++17** — CLI entry point
 
 ---
@@ -125,6 +126,7 @@ Replace `metal` with `cpu` in the URL if you don't need Metal acceleration.
 | CFITSIO | 4.6.3 |
 | libtiff | 4.x |
 | libpng | 1.6.x |
+| LibRaw | >= 0.21 (optional) |
 | OpenMP | any (GCC) |
 | CMake | >= 3.18 |
 
@@ -146,13 +148,20 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DDSO_ENABLE_CUDA=OFF
 cmake --build build --parallel $(nproc)
 ```
 
+Enable RAW camera file support (requires LibRaw):
+
+```bash
+# Install LibRaw: apt install libraw-dev (Linux), brew install libraw (macOS)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DDSO_ENABLE_LIBRAW=ON ...
+```
+
 ### Windows
 
 Requires Visual Studio 2022, CUDA Toolkit 12.x, and [vcpkg](https://vcpkg.io/) for C library dependencies.
 
 ```powershell
 # Install C dependencies via vcpkg
-vcpkg install cfitsio tiff libpng --triplet x64-windows
+vcpkg install cfitsio tiff libpng libraw --triplet x64-windows
 
 # Configure
 cmake -B build -G "Visual Studio 17 2022" -A x64 `
@@ -207,7 +216,7 @@ filepath, is_reference
 /data/frame3.fits, 0
 ```
 
-Exactly **one** row must have `is_reference = 1`.
+Exactly **one** row must have `is_reference = 1`. Input frames can be **FITS** (`.fits`, `.fit`, `.fts`) or **RAW camera files** (`.cr2`, `.cr3`, `.nef`, `.arw`, `.orf`, `.rw2`, `.raf`, `.dng`, `.pef`, `.srw`, `.raw`, `.3fr`, `.iiq`, `.rwl`, `.nrw`) when built with `-DDSO_ENABLE_LIBRAW=ON`. FITS and RAW frames can be mixed in the same CSV as long as dimensions match.
 
 ### Options
 
@@ -368,6 +377,8 @@ cd build && ctest --output-on-failure -V
 | `test_calibration` | 26 | CPU calibration: dark/flat apply, dead-pixel guard, dimension validation, FITS master loading, frame-list stacking, winsorized mean, median, bias/darkflat subtraction, flat normalization |
 | `test_color` | 33 | OSC color output: `debayer_cpu_rgb` (validation, BAYER_NONE passthrough, uniform all 4 patterns, per-channel dominance RGGB/BGGR/GRBG/GBRG, luminance consistency, channel distinctness, non-negative); `fits_save_rgb` (validation, NAXIS=3, per-plane round-trip, gradient planes); `fits_get_bayer_pattern` (all 4 patterns + absent keyword) |
 | `test_image_io` | 21 | Format detection; FITS passthrough; TIFF FP32/FP16/INT16/INT8 mono+RGB; TIFF zip/lzw/rle round-trips; PNG 8-bit/16-bit mono+RGB; error cases (FP32→PNG, unknown ext); auto stretch |
+| `test_pipeline_backend` | — | Backend dispatch validation |
+| `test_raw_io` | 10 | `frame_is_raw` extension detection (positive + negative); `frame_load` FITS fallback; `frame_get_bayer_pattern` dispatch; `frame_get_dimensions` dispatch; RAW-disabled error path; LibRaw error handling (conditional) |
 
 GPU test suites return exit code 77 (CTest SKIP) when no CUDA device is found.
 
@@ -418,9 +429,9 @@ python src/GUI/main.py
 ### Features
 
 - **Tabs**: Light, Dark, Flat, Bias, Darkflat, Stacking Options
-- **Drag-and-drop** FITS frames (`.fit` / `.fits` / `.fts`) onto any tab
+- **Drag-and-drop** FITS frames (`.fit` / `.fits` / `.fts`) and RAW camera files (`.cr2`, `.nef`, `.arw`, `.dng`, etc.) onto any tab
 - **Reference frame** selection in the Light tab (radio button column; default: first frame)
-- **File info**: filename, path, size, and dimensions (W×H) loaded asynchronously from FITS headers
+- **File info**: filename, path, size, and dimensions (W×H) loaded asynchronously from FITS headers or RAW metadata (via optional `rawpy`)
 - **Conditional options**: kappa/iterations hidden for mean integration; batch size hidden in CPU mode; TIFF compression hidden for non-TIFF output; stretch bounds hidden for floating-point output; bit depth options restricted per output format
 - **Bias / Darkflat mutual exclusion**: loading frames in one disables the other tab
 - **Project files** (`.yaml`): save and reload complete project state (frame lists + all options)
@@ -506,7 +517,9 @@ components). CUDA/NPP remains optional but is governed by the NVIDIA CUDA EULA,
 so redistributors of GPU artifacts must satisfy both GPLv3 obligations for this
 project and CUDA EULA terms for NVIDIA runtime components.
 
-Third-party open-source components (CFITSIO, libtiff, libpng, PySide6,
-PyYAML, getopt\_port) are used under their respective permissive or
-LGPL licenses. See [THIRD\_PARTY\_LICENSES](THIRD_PARTY_LICENSES) for
-full attribution and license texts.
+Third-party open-source components (CFITSIO, libtiff, libpng, LibRaw,
+PySide6, PyYAML, getopt\_port) are used under their respective
+permissive or LGPL licenses. LibRaw is dual-licensed under LGPL 2.1 and
+CDDL 1.0; this project uses it under LGPL 2.1 (GPLv3-compatible). See
+[THIRD\_PARTY\_LICENSES](THIRD_PARTY_LICENSES) for full attribution and
+license texts.

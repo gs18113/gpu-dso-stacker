@@ -697,7 +697,7 @@
 <section id="features">
   <div class="container">
     <h2>Everything you need to <span class="accent">stack frames</span></h2>
-    <p class="section-lead">From raw FITS to a finished stack — debayering, alignment, calibration, and integration in one pipeline.</p>
+    <p class="section-lead">From raw FITS or camera RAW files to a finished stack — debayering, alignment, calibration, and integration in one pipeline.</p>
 
     <div class="features-grid">
       <div class="feature-card reveal">
@@ -711,9 +711,14 @@
         <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Triangle-matching + DLT computes a full homography — no manual reference or pre-computed transforms required. Matching runs on CPU or GPU via <code>--match-device</code>.</p>
       </div>
       <div class="feature-card reveal">
+        <div class="feature-icon" style="background:rgba(129,140,248,.1)">📷</div>
+        <h3>RAW Camera File Support</h3>
+        <p>Load CR2, NEF, ARW, DNG, and 12 other RAW formats directly via LibRaw. Raw Bayer mosaic extraction with per-channel black subtraction — no external conversion needed. Build with <code>-DDSO_ENABLE_LIBRAW=ON</code>.</p>
+      </div>
+      <div class="feature-card reveal">
         <div class="feature-icon" style="background:rgba(129,140,248,.1)">🎨</div>
         <h3>Full Color Output</h3>
-        <p>Bayer pattern auto-detection from FITS <code>BAYERPAT</code> keyword. VNG demosaic produces separate R, G, B planes; all warp and integration stages run per-channel; output FITS uses NAXIS=3.</p>
+        <p>Bayer pattern auto-detection from FITS <code>BAYERPAT</code> keyword or RAW camera metadata. VNG demosaic produces separate R, G, B planes; all warp and integration stages run per-channel; output FITS uses NAXIS=3.</p>
       </div>
       <div class="feature-card reveal">
         <div class="feature-icon" style="background:rgba(251,191,36,.08)">🔧</div>
@@ -873,17 +878,20 @@ cmake --build build --parallel $(nproc)
 cmake -B build -DCMAKE_BUILD_TYPE=Release <span class="flag">-DDSO_ENABLE_CUDA=OFF</span>
 cmake --build build --parallel $(nproc)
 
+<span class="comment"># Enable RAW camera file support (requires libraw-dev)</span>
+cmake -B build ... <span class="flag">-DDSO_ENABLE_LIBRAW=ON</span>
+
 <span class="comment"># Run</span>
 ./build/dso_stacker -f frames.csv -o stacked.fits</pre>
       </div>
-      <p style="font-size:.85rem;color:var(--text-dim)">Prerequisites: CUDA Toolkit 12.x · CFITSIO 4.6.3 · libtiff · libpng · CMake ≥ 3.18</p>
+      <p style="font-size:.85rem;color:var(--text-dim)">Prerequisites: CUDA Toolkit 12.x · CFITSIO 4.6.3 · libtiff · libpng · CMake ≥ 3.18 · LibRaw (optional)</p>
     </div>
 
     <div class="tab-panel" id="tab-windows">
       <div class="code-block reveal">
         <button class="copy-btn" data-target="code-windows">Copy</button>
         <pre id="code-windows"><span class="comment"># Install C library dependencies via vcpkg</span>
-vcpkg install cfitsio tiff libpng --triplet x64-windows
+vcpkg install cfitsio tiff libpng libraw --triplet x64-windows
 
 <span class="comment"># Configure</span>
 cmake -B build -G <span class="str">"Visual Studio 17 2022"</span> -A x64 `
@@ -1066,11 +1074,11 @@ cmake --build build --parallel
         <ul style="list-style:none;display:flex;flex-direction:column;gap:.9rem;margin-bottom:2rem">
           <li class="reveal" style="display:flex;gap:.75rem;align-items:flex-start">
             <span style="color:var(--accent3);font-size:1.1rem;flex-shrink:0">✓</span>
-            <div><strong style="color:#fff">Drag-and-drop frames</strong><br /><span style="font-size:.85rem;color:var(--text-dim)">Drop FITS files onto Light, Dark, Flat, Bias, or Darkflat tabs</span></div>
+            <div><strong style="color:#fff">Drag-and-drop frames</strong><br /><span style="font-size:.85rem;color:var(--text-dim)">Drop FITS or RAW camera files onto Light, Dark, Flat, Bias, or Darkflat tabs</span></div>
           </li>
           <li class="reveal" style="display:flex;gap:.75rem;align-items:flex-start">
             <span style="color:var(--accent3);font-size:1.1rem;flex-shrink:0">✓</span>
-            <div><strong style="color:#fff">Async FITS metadata</strong><br /><span style="font-size:.85rem;color:var(--text-dim)">Filename, path, size, and W×H loaded in background — UI never blocks</span></div>
+            <div><strong style="color:#fff">Async image metadata</strong><br /><span style="font-size:.85rem;color:var(--text-dim)">Filename, path, size, and W×H loaded in background from FITS headers or RAW metadata — UI never blocks</span></div>
           </li>
           <li class="reveal" style="display:flex;gap:.75rem;align-items:flex-start">
             <span style="color:var(--accent3);font-size:1.1rem;flex-shrink:0">✓</span>
@@ -1108,7 +1116,7 @@ python src/GUI/main.py</pre>
 <section id="tests">
   <div class="container">
     <h2>Test <span class="accent">Coverage</span></h2>
-    <p class="section-lead">167+ tests across 9 suites. GPU test suites return CTest exit code 77 (SKIP) when no CUDA device is found.</p>
+    <p class="section-lead">180+ tests across 12 suites. GPU test suites return CTest exit code 77 (SKIP) when no CUDA device is found.</p>
     <div class="table-wrap reveal">
       <table>
         <thead>
@@ -1124,6 +1132,9 @@ python src/GUI/main.py</pre>
           <tr><td><code>test_calibration</code></td><td>26</td><td>Dark/flat apply · masters · winsorized mean · median · flat normalization</td></tr>
           <tr><td><code>test_color</code></td><td>33</td><td>OSC color output · <code>fits_save_rgb</code> · Bayer pattern detection</td></tr>
           <tr><td><code>test_image_io</code></td><td>21</td><td>Format detection · FITS · TIFF · PNG · auto-stretch</td></tr>
+          <tr><td><code>test_pipeline_backend</code></td><td>—</td><td>Backend dispatch validation</td></tr>
+          <tr><td><code>test_audit</code></td><td>4</td><td>Integration stability · CCL large-frame · Lanczos baseline · RANSAC non-determinism</td></tr>
+          <tr><td><code>test_raw_io</code></td><td>10</td><td>Extension detection · FITS fallback · RAW dispatch · LibRaw error handling</td></tr>
         </tbody>
       </table>
     </div>

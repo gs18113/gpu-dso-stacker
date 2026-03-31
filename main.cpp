@@ -65,7 +65,8 @@
 #include "dso_types.h"
 #include "csv_parser.h"
 #include "calibration.h"
-#include "fits_io.h"           /* fits_get_bayer_pattern */
+#include "fits_io.h"           /* image_free */
+#include "frame_load.h"        /* frame_get_bayer_pattern */
 #include "image_io.h"          /* ImageSaveOptions, image_detect_format */
 #include "integration_limits.h"/* INTEGRATION_GPU_MAX_BATCH */
 #include "pipeline.h"
@@ -687,7 +688,7 @@ int main(int argc, char **argv)
     {
         BayerPattern detected = cfg.bayer_override;
         if (detected == BAYER_NONE)
-            fits_get_bayer_pattern(frames[ref_idx].filepath, &detected);
+            frame_get_bayer_pattern(frames[ref_idx].filepath, &detected);
         cfg.color_output = (detected != BAYER_NONE) ? 1 : 0;
     }
 
