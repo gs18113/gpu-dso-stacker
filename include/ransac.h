@@ -26,7 +26,7 @@ typedef struct {
     float inlier_thresh; /* reprojection error threshold in pixels (default: 2) */
     float match_radius;  /* max star-to-star distance for a valid match (px)    */
     float confidence;    /* desired success probability (default: 0.99)         */
-    int   min_inliers;   /* minimum inliers to declare success (default: 4)     */
+    int   min_inliers;   /* minimum inliers to declare success (default: 10)    */
 } RansacParams;
 
 /* -------------------------------------------------------------------------

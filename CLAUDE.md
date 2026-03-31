@@ -226,7 +226,7 @@ Star detection (2-column CSV only):
       --moffat-alpha <float>     Moffat PSF alpha / FWHM (default: 2.5)
       --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
       --top-stars <int>          Top-K stars for matching (default: 50)
-      --min-stars <int>          Minimum detected stars to attempt alignment (default: 6)
+      --min-stars <int>          Minimum detected stars to attempt alignment (default: 20)
 
 Triangle matching (2-column CSV only):
       --triangle-iters <int>     Max triangle-matching iterations (default: 1000)
@@ -234,7 +234,7 @@ Triangle matching (2-column CSV only):
       --ransac-iters <int>       Deprecated alias of --triangle-iters
       --ransac-thresh <float>    Deprecated alias of --triangle-thresh
       --match-radius <float>     Star matching search radius px (default: 30.0)
-      --min-inliers <int>        Minimum RANSAC inliers for acceptance (default: 4)
+      --min-inliers <int>        Minimum RANSAC inliers for acceptance (default: 10)
       --match-device <device>    auto | cpu | gpu (default: auto = stacking device)
 
 Sensor:
@@ -560,7 +560,7 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - **Moffat constant memory cap**: max kernel radius is 15 (alpha ≤ 5 → R = ceil(3·alpha) ≤ 15, diameter 31, 961 floats × 4 = ~3.8 KB within 64 KB constant limit).
 - **Single-pass pipeline**: each frame is loaded from disk exactly once. Star detection, RANSAC, and warp all run in the same pass before the next frame is loaded. No separate Phase 1 / Phase 2; no 11-column pre-computed transform path. The only CSV format is 2-column (`filepath, is_reference`).
 - **Triangle-matching mismatch policy**: non-reference frames that fail alignment are skipped (not fatal). Both CPU and GPU pipelines print a final summary: `successful frames: X/Y (skipped: Z)`. Reference-frame alignment failure still aborts.
-- **`--min-stars` and `--min-inliers` are independent**: `--min-stars` (default 6) gates the pre-RANSAC star-count check in both pipeline paths (skip frames with too few detected stars); `--min-inliers` (default 4) sets `RansacParams.min_inliers` for RANSAC acceptance. They are no longer coupled.
+- **`--min-stars` and `--min-inliers` are independent**: `--min-stars` (default 20) gates the pre-RANSAC star-count check in both pipeline paths (skip frames with too few detected stars); `--min-inliers` (default 10) sets `RansacParams.min_inliers` for RANSAC acceptance. They are no longer coupled.
 - **CPU vs GPU output agreement**: not bit-identical due to different Moffat conv precision (→ slightly different homographies), different Lanczos implementations (nppi vs hand-coded), and different integration paths. Empirical PSNR ≈ 44.6 dB; mean relative error ≈ 0.25% in the interior on 10 × 4656×3520 frames.
 - **`lanczos_transform_cpu` identity fast path**: if H is identity and src/dst dimensions match, falls back to `memcpy` before entering the warp loop.
 - **`lanczos_transform_cpu` weight precomputation**: `wx_arr[6]` and `wy_arr[6]` are computed once before the 6×6 tap loop, reducing `lanczos_weight` calls from 42 to 12 per destination pixel.
@@ -786,7 +786,7 @@ options:
   output_path: output.fits     use_cpu: false
   integration: kappa-sigma     kappa: 3.0     iterations: 3     batch_size: 16
   star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
-  top_stars: 50     min_stars: 6     min_inliers: 4
+  top_stars: 50     min_stars: 20    min_inliers: 10
   triangle_iters: 1000     triangle_thresh: 2.0     match_radius: 30.0     match_device: auto
   bayer: auto     bit_depth: f32     tiff_compression: none
   stretch_min: null     stretch_max: null

@@ -132,7 +132,7 @@ static void usage(const char *prog)
         "      --moffat-alpha <float>     Moffat PSF alpha / FWHM (default: 2.5)\n"
         "      --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)\n"
         "      --top-stars <int>          Top-K stars for matching (default: 50)\n"
-        "      --min-stars <int>          Minimum detected stars to attempt alignment (default: 6)\n"
+        "      --min-stars <int>          Minimum detected stars to attempt alignment (default: 20)\n"
         "\n"
         "Triangle matching alignment (used only for 2-column CSV input):\n"
         "      --triangle-iters <int>     Max triangle-matching iterations (default: 1000)\n"
@@ -140,7 +140,7 @@ static void usage(const char *prog)
         "      --ransac-iters <int>       Deprecated alias of --triangle-iters\n"
         "      --ransac-thresh <float>    Deprecated alias of --triangle-thresh\n"
         "      --match-radius <float>     Star matching radius px (default: 30.0)\n"
-        "      --min-inliers <int>        Minimum RANSAC inliers for acceptance (default: 4)\n"
+        "      --min-inliers <int>        Minimum RANSAC inliers for acceptance (default: 10)\n"
         "      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)\n"
         "      --backend <backend>        auto | cpu | cuda | metal (default: auto)\n"
         "\n"
@@ -230,8 +230,8 @@ int main(int argc, char **argv)
     cfg.star_sigma      = 3.0f;
     cfg.moffat          = {2.5f, 2.0f};
     cfg.top_stars       = 50;
-    cfg.min_stars       = 6;
-    cfg.ransac          = {1000, 2.0f, 30.0f, 0.99f, 4};
+    cfg.min_stars       = 20;
+    cfg.ransac          = {1000, 2.0f, 30.0f, 0.99f, 10};
     cfg.batch_size      = 16;
     cfg.kappa           = 3.0f;
     cfg.iterations      = 3;

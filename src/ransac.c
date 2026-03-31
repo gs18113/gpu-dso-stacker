@@ -751,7 +751,7 @@ static const RansacParams TRI_DEFAULTS = {
     .inlier_thresh = 2.0f,
     .match_radius = 30.0f,
     .confidence = 0.99f,
-    .min_inliers = 4
+    .min_inliers = 10
 };
 
 DsoError ransac_compute_homography(const StarList     *ref_list,

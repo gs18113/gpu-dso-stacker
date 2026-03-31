@@ -50,12 +50,12 @@ typedef struct {
     float        star_sigma;      /* detection threshold: mean + star_sigma*σ (3.0) */
     MoffatParams moffat;          /* Moffat kernel shape {alpha=2.5, beta=2.0}       */
     int          top_stars;       /* top-K stars to use for matching (50)            */
-    int          min_stars;       /* minimum detected stars to attempt alignment (6) */
+    int          min_stars;       /* minimum detected stars to attempt alignment (20)*/
 
     /* --- RANSAC --- */
     RansacParams ransac;          /* {max_iters=1000, inlier_thresh=2.0,
                                       match_radius=30.0, confidence=0.99,
-                                      min_inliers=4}                                */
+                                      min_inliers=10}                                */
 
     /* --- Integration --- */
     int          batch_size;      /* frames per GPU mini-batch (16)                  */
