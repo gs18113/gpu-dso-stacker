@@ -425,6 +425,12 @@ int main(int argc, char **argv)
         }
     }
 
+    /* min_stars drives both the pre-RANSAC star-count guard and the RANSAC
+       inlier acceptance threshold.  Without this, --min-stars N only skips
+       frames with fewer than N detected stars but RANSAC still accepts matches
+       with as few as 4 inliers (its hardcoded default). */
+    cfg.ransac.min_inliers = cfg.min_stars;
+
     if (!csv_file) {
         fprintf(stderr, "Error: --file is required\n\n");
         usage(argv[0]);
