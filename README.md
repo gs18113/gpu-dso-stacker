@@ -6,7 +6,7 @@
 
 > A high-performance DSO (Deep Sky Object) stacker with CUDA (Linux/Windows) and Metal scaffolding (Apple Silicon) backends
 
-**Pre-built binaries** (CLI + GUI) for Linux and Windows are available on the [Releases](https://github.com/gs18113/gpu-dso-stacker/releases) page.
+**Pre-built binaries** (CLI + GUI) for Linux, macOS, and Windows are available on the [Releases](https://github.com/gs18113/gpu-dso-stacker/releases) page.
 
 ---
 
@@ -64,6 +64,42 @@ For unattended / silent installation:
 ```powershell
 # Download the installer, then:
 cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n
+```
+
+### macOS (Gatekeeper workaround for release archives)
+
+Apple Gatekeeper can block downloaded binaries and bundled dynamic libraries.
+Use the script below to download a release asset, extract it, clear quarantine
+attributes in the extracted folder, and run the binary.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="gs18113/gpu-dso-stacker"
+TAG="v1.0.0"  # replace with the release tag you want to download
+ASSET="dso-stacker-cli-macos-arm64-metal.tar.gz"  # or ...-cpu.tar.gz / gui archive
+
+URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
+WORKDIR="${PWD}/dso-stacker-${TAG}"
+mkdir -p "${WORKDIR}"
+cd "${WORKDIR}"
+
+curl -fL -o "${ASSET}" "${URL}"
+
+case "${ASSET}" in
+  *.zip) unzip -o "${ASSET}" ;;
+  *.tar.gz|*.tgz) tar -xzf "${ASSET}" ;;
+  *) echo "Unsupported archive format: ${ASSET}" >&2; exit 1 ;;
+esac
+
+# Remove Gatekeeper quarantine flags recursively in the extracted folder
+xattr -cr .
+
+# Example: run CLI from extracted archive
+if [ -x ./dso_stacker ]; then
+  ./dso_stacker --help
+fi
 ```
 
 ---

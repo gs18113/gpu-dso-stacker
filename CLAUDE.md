@@ -651,6 +651,8 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 | `dso-stacker-gui-windows-x86_64-cpu.zip` | GUI + CPU-only CLI .exe + DLLs |
 | `dso-stacker-gui-windows-x86_64-gpu.zip` | GUI + GPU-selectable CLI .exe + DLLs |
 
+Before creating release archives, `release.yml` `create-release` now re-applies execute permissions for macOS binaries (`dso_stacker`, `DSOStacker`, and bundled `bin/dso_stacker`) so CLI and GUI artifacts remain directly runnable after download.
+
 ---
 
 ## Licensing
