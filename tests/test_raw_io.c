@@ -93,7 +93,8 @@ static int test_frame_load_fits_fallback(void)
     for (int i = 0; i < 12; i++) data[i] = (float)i * 100.0f;
 
     Image src = { data, W, H };
-    const char *path = "/tmp/test_frame_load_fallback.fits";
+    char path[512];
+    snprintf(path, sizeof(path), "%s/test_frame_load_fallback.fits", test_tmpdir());
     ASSERT_OK(fits_save(path, &src));
 
     /* Load through frame_load (should dispatch to fits_load) */
@@ -118,7 +119,8 @@ static int test_frame_get_bayer_fits(void)
     const int W = 4, H = 4;
     float data[16] = {0};
     Image src = { data, W, H };
-    const char *path = "/tmp/test_frame_bayer.fits";
+    char path[512];
+    snprintf(path, sizeof(path), "%s/test_frame_bayer.fits", test_tmpdir());
     ASSERT_OK(fits_save(path, &src));
 
     /* fits_save doesn't write BAYERPAT, so we should get BAYER_NONE */
@@ -143,7 +145,8 @@ static int test_frame_get_dimensions_fits(void)
     const int W = 8, H = 6;
     float data[48] = {0};
     Image src = { data, W, H };
-    const char *path = "/tmp/test_frame_dims.fits";
+    char path[512];
+    snprintf(path, sizeof(path), "%s/test_frame_dims.fits", test_tmpdir());
     ASSERT_OK(fits_save(path, &src));
 
     int w_out = 0, h_out = 0;
