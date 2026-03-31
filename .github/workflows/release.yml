@@ -252,7 +252,11 @@ jobs:
         run: |
           mkdir -p artifact-metal
           cp install-metal/bin/dso_stacker artifact-metal/
-          cp install-metal/lib/*.dylib artifact-metal/
+          shopt -s nullglob
+          dylibs=(install-metal/lib/*.dylib)
+          if [ ${#dylibs[@]} -gt 0 ]; then
+            cp "${dylibs[@]}" artifact-metal/
+          fi
       - name: Upload Metal-enabled CLI artifact
         uses: actions/upload-artifact@v4
         with:
@@ -263,7 +267,11 @@ jobs:
         run: |
           mkdir -p artifact-cpu
           cp install-cpu/bin/dso_stacker artifact-cpu/
-          cp install-cpu/lib/*.dylib artifact-cpu/
+          shopt -s nullglob
+          dylibs=(install-cpu/lib/*.dylib)
+          if [ ${#dylibs[@]} -gt 0 ]; then
+            cp "${dylibs[@]}" artifact-cpu/
+          fi
       - name: Upload CPU-only CLI artifact
         uses: actions/upload-artifact@v4
         with:
