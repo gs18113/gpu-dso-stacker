@@ -77,7 +77,7 @@ attributes in the extracted folder, and run the binary.
 set -euo pipefail
 
 REPO="gs18113/gpu-dso-stacker"
-TAG="vX.Y.Z"  # e.g. v1.2.3
+TAG="v1.0.0"  # replace with the release tag you want to download
 ASSET="dso-stacker-cli-macos-arm64-metal.tar.gz"  # or ...-cpu.tar.gz / gui archive
 
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
