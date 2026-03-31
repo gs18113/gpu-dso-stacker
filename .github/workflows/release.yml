@@ -524,9 +524,9 @@ jobs:
             dso-stacker-macos-arm64-cpu/dso_stacker \
             dso-stacker-macos-arm64-metal/dso_stacker \
             dso-stacker-gui-macos-arm64-cpu/DSOStacker \
-            dso-stacker-gui-macos-arm64-cpu/bin/dso_stacker \
+            dso-stacker-gui-macos-arm64-cpu/_internal/bin/dso_stacker \
             dso-stacker-gui-macos-arm64-metal/DSOStacker \
-            dso-stacker-gui-macos-arm64-metal/bin/dso_stacker; do
+            dso-stacker-gui-macos-arm64-metal/_internal/bin/dso_stacker; do
             if [ -f "$exe" ]; then
               chmod +x "$exe"
             else

@@ -672,7 +672,7 @@ Both workflows declare least-privilege `permissions: contents: read` at the top 
 | `dso-stacker-gui-windows-x86_64-cpu.zip` | GUI + CPU-only CLI .exe + DLLs |
 | `dso-stacker-gui-windows-x86_64-gpu.zip` | GUI + GPU-selectable CLI .exe + DLLs |
 
-Before creating release archives, `release.yml` `create-release` now re-applies execute permissions for macOS binaries (`dso_stacker`, `DSOStacker`, and bundled `bin/dso_stacker`) so CLI and GUI artifacts remain directly runnable after download.
+Before creating release archives, `release.yml` `create-release` now re-applies execute permissions for macOS binaries (`dso_stacker`, `DSOStacker`, and bundled `_internal/bin/dso_stacker`) so CLI and GUI artifacts remain directly runnable after download.
 
 ---
 

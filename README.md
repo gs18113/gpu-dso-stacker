@@ -66,41 +66,15 @@ For unattended / silent installation:
 cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n
 ```
 
-### macOS (Gatekeeper workaround for release archives)
+### macOS (Gatekeeper workaround)
 
-Apple Gatekeeper can block downloaded binaries and bundled dynamic libraries.
-Use the script below to download a release asset, extract it, clear quarantine
-attributes in the extracted folder, and run the binary.
+Download, extract, and clear quarantine in one shot:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-REPO="gs18113/gpu-dso-stacker"
-TAG="v1.0.0"  # replace with the release tag you want to download
-ASSET="dso-stacker-cli-macos-arm64-metal.tar.gz"  # or ...-cpu.tar.gz / gui archive
-
-URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
-WORKDIR="${PWD}/dso-stacker-${TAG}"
-mkdir -p "${WORKDIR}"
-cd "${WORKDIR}"
-
-curl -fL -o "${ASSET}" "${URL}"
-
-case "${ASSET}" in
-  *.zip) unzip -o "${ASSET}" ;;
-  *.tar.gz|*.tgz) tar -xzf "${ASSET}" ;;
-  *) echo "Unsupported archive format: ${ASSET}" >&2; exit 1 ;;
-esac
-
-# Remove Gatekeeper quarantine flags recursively in the extracted folder
-xattr -cr .
-
-# Example: run CLI from extracted archive
-if [ -x ./dso_stacker ]; then
-  ./dso_stacker --help
-fi
+mkdir -p ~/DSOStacker && curl -fL https://github.com/gs18113/gpu-dso-stacker/releases/latest/download/dso-stacker-gui-macos-arm64-metal.tar.gz | tar xz -C ~/DSOStacker && xattr -cr ~/DSOStacker && chmod +x ~/DSOStacker/DSOStacker ~/DSOStacker/_internal/bin/dso_stacker
 ```
+
+Replace `metal` with `cpu` in the URL if you don't need Metal acceleration.
 
 ---
 
