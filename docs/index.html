@@ -279,11 +279,16 @@ sudo dnf install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
 
       <div class="tab-panel" id="tab-cuda-windows">
         <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA Runtime Setup (GPU builds only)</h3>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">Download a CUDA Toolkit 12.x installer from the <a href="https://developer.nvidia.com/cuda-toolkit-archive" style="color:var(--accent)" target="_blank">CUDA Toolkit Archive</a>. During installation, select Custom and enable CUDA Runtime, NPP, and Display Driver.</p>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">Download a CUDA Toolkit 12.x installer from the <a href="https://developer.nvidia.com/cuda-toolkit-archive" style="color:var(--accent)" target="_blank">CUDA Toolkit Archive</a>. During installation, select <strong style="color:#fff">Custom</strong> and enable at minimum:</p>
+        <ul style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem;padding-left:1.5rem;line-height:1.8">
+          <li><strong style="color:#fff">CUDA Runtime</strong> (<code>cudart</code>)</li>
+          <li><strong style="color:#fff">NPP</strong> (NVIDIA Performance Primitives)</li>
+          <li><strong style="color:#fff">Display Driver</strong> (if not already installed)</li>
+        </ul>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">Alternatively, install silently from PowerShell after downloading the installer:</p>
         <div class="code-block">
           <button class="copy-btn" data-target="code-cuda-windows">Copy</button>
-          <pre id="code-cuda-windows"><span class="comment"># Unattended installation (PowerShell)</span>
-cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
+          <pre id="code-cuda-windows">cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
         </div>
       </div>
 
