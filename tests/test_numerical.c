@@ -15,6 +15,7 @@
 
 #include "test_framework.h"
 #include "dso_types.h"
+#include "fits_io.h"
 #include "debayer_cpu.h"
 #include "lanczos_cpu.h"
 #include "integration.h"
