@@ -70,8 +70,8 @@ extern "C" {
  * Not thread-safe; use one context per pipeline instance.
  */
 typedef struct IntegrationGpuCtx {
-    float  *d_combined_sum;                      /* W*H floats — survivor-weighted sum  */
-    float  *d_rawsum;                            /* W*H floats — unclipped sum          */
+    double *d_combined_sum;                      /* W*H doubles — survivor-weighted sum  */
+    double *d_rawsum;                            /* W*H doubles — unclipped sum          */
     int    *d_combined_count;                    /* W*H ints   — survivor count         */
     int    *d_rawcount;                          /* W*H ints   — valid (non-NaN) count  */
     float  *d_frames[INTEGRATION_GPU_MAX_BATCH]; /* batch device frame buffers          */

@@ -102,6 +102,12 @@ DsoError star_detect_gpu_d2d(const float        *d_src,
                               float               sigma_k,
                               cudaStream_t        stream);
 
+/* -------------------------------------------------------------------------
+ * star_detect_gpu_cleanup — free persistent GPU resources (cached Moffat
+ * kernel state and reduction scratch buffer).  Safe to call multiple times.
+ * ------------------------------------------------------------------------- */
+void star_detect_gpu_cleanup(void);
+
 #ifdef __cplusplus
 }
 #endif

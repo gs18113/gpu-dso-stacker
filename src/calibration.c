@@ -224,9 +224,9 @@ static DsoError stack_frames(const char **paths, int n,
                 sum += (double)bufs[i][p];
             double mean = sum / npix;
             if (mean > 1e-9) {
-                float inv_mean = (float)(1.0 / mean);
+                double inv_mean = 1.0 / mean;
                 for (int p = 0; p < npix; p++)
-                    bufs[i][p] *= inv_mean;
+                    bufs[i][p] = (float)((double)bufs[i][p] * inv_mean);
             } else {
                 fprintf(stderr,
                         "calib: flat frame '%s' has near-zero mean (%.3g), "

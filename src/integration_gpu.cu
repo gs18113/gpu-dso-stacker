@@ -83,9 +83,9 @@ __global__ static void kappa_sigma_batch_kernel(
     int            M,
     float          kappa,
     int            iterations,
-    float         *d_combined_sum,
+    double        *d_combined_sum,
     int           *d_combined_count,
-    float         *d_rawsum,
+    double        *d_rawsum,
     int           *d_rawcount,
     int            npix)
 {
@@ -95,7 +95,7 @@ __global__ static void kappa_sigma_batch_kernel(
     /* Load M values into registers; skip NaN (OOB sentinel from Lanczos warp) */
     float vals[INTEGRATION_GPU_MAX_BATCH];
     char  active[INTEGRATION_GPU_MAX_BATCH];   /* 1 = not yet clipped */
-    float raw_total = 0.f;
+    double raw_total = 0.0;
     int   n_valid   = 0;
 
     for (int i = 0; i < M; i++) {
@@ -106,7 +106,7 @@ __global__ static void kappa_sigma_batch_kernel(
         } else {
             vals[i]   = v;
             active[i] = 1;
-            raw_total += v;
+            raw_total += (double)v;
             n_valid++;
         }
     }
@@ -124,27 +124,27 @@ __global__ static void kappa_sigma_batch_kernel(
     for (int iter = 0; iter < iterations; iter++) {
         if (n_active < 2) break;  /* need ≥ 2 samples for Bessel-corrected stddev */
 
-        /* Mean of active values */
-        float sum = 0.f;
-        for (int i = 0; i < M; i++) if (active[i]) sum += vals[i];
-        float mean = sum / (float)n_active;
+        /* Mean of active values (double precision to match CPU path) */
+        double sum = 0.0;
+        for (int i = 0; i < M; i++) if (active[i]) sum += (double)vals[i];
+        double mean = sum / (double)n_active;
 
         /* Bessel-corrected sample variance (double to avoid FP loss for
          * high-dynamic-range pixels; matches CPU integrate_kappa_sigma) */
         double sq = 0.0;
         for (int i = 0; i < M; i++) {
             if (active[i]) {
-                float d = vals[i] - mean;
-                sq += (double)d * d;
+                double d = (double)vals[i] - mean;
+                sq += d * d;
             }
         }
-        float sigma  = sqrtf((float)(sq / (double)(n_active - 1)));
+        float sigma  = (float)sqrt(sq / (double)(n_active - 1));
         float thresh = kappa * sigma;
 
         /* Reject outliers */
         int rejected = 0;
         for (int i = 0; i < M; i++) {
-            if (active[i] && fabsf(vals[i] - mean) > thresh) {
+            if (active[i] && fabs((double)vals[i] - mean) > (double)thresh) {
                 active[i] = 0;
                 rejected++;
             }
@@ -156,8 +156,8 @@ __global__ static void kappa_sigma_batch_kernel(
     /* Accumulate surviving values into the persistent combined buffers.
      * When n_active == 0 (all clipped), skip — finalize will use rawsum. */
     if (n_active > 0) {
-        float clipped_sum = 0.f;
-        for (int i = 0; i < M; i++) if (active[i]) clipped_sum += vals[i];
+        double clipped_sum = 0.0;
+        for (int i = 0; i < M; i++) if (active[i]) clipped_sum += (double)vals[i];
         d_combined_sum[px]   += clipped_sum;
         d_combined_count[px] += n_active;
     }
@@ -172,19 +172,19 @@ __global__ static void kappa_sigma_batch_kernel(
 __global__ static void mean_batch_kernel(
     float * const *d_frame_ptrs,
     int            M,
-    float         *d_combined_sum,
+    double        *d_combined_sum,
     int           *d_combined_count,
-    float         *d_rawsum,
+    double        *d_rawsum,
     int            npix)
 {
     int px = blockIdx.x * blockDim.x + threadIdx.x;
     if (px >= npix) return;
 
-    float sum = 0.f;
+    double sum = 0.0;
     int   valid = 0;
     for (int i = 0; i < M; i++) {
         float v = d_frame_ptrs[i][px];
-        if (!isnan(v)) { sum += v; valid++; }
+        if (!isnan(v)) { sum += (double)v; valid++; }
     }
 
     if (valid > 0) {
@@ -201,25 +201,25 @@ __global__ static void mean_batch_kernel(
  * Fallback: rawsum / n_frames             (unclipped mean, when all clipped)
  */
 __global__ static void finalize_kernel(
-    const float *d_combined_sum,
-    const int   *d_combined_count,
-    const float *d_rawsum,
-    const int   *d_rawcount,
-    float       *d_out,
-    int          npix)
+    const double *d_combined_sum,
+    const int    *d_combined_count,
+    const double *d_rawsum,
+    const int    *d_rawcount,
+    float        *d_out,
+    int           npix)
 {
     int px = blockIdx.x * blockDim.x + threadIdx.x;
     if (px >= npix) return;
 
     int c = d_combined_count[px];
     if (c > 0) {
-        d_out[px] = d_combined_sum[px] / (float)c;
+        d_out[px] = (float)(d_combined_sum[px] / (double)c);
     } else {
         /* Degenerate: every value was clipped in every batch — fall back to
          * the unclipped mean of valid (non-NaN) frames.  If no frames
          * contributed valid data (all OOB), output NAN. */
         int rc = d_rawcount[px];
-        d_out[px] = (rc > 0) ? d_rawsum[px] / (float)rc : NAN;
+        d_out[px] = (rc > 0) ? (float)(d_rawsum[px] / (double)rc) : NAN;
     }
 }
 
@@ -243,17 +243,19 @@ DsoError integration_gpu_init(int W, int H, int batch_size,
     ctx->batch_size = batch_size;
 
     size_t npix_f   = (size_t)W * H * sizeof(float);
+    size_t npix_d   = (size_t)W * H * sizeof(double);
     size_t npix_i   = (size_t)W * H * sizeof(int);
     cudaError_t cerr;
 
-    /* Persistent accumulator buffers (zeroed) */
-    if ((cerr = cudaMalloc(&ctx->d_combined_sum,   npix_f)) != cudaSuccess) goto oom_cuda;
+    /* Persistent accumulator buffers (zeroed).
+     * Sum accumulators use double to prevent precision loss for large stacks. */
+    if ((cerr = cudaMalloc(&ctx->d_combined_sum,   npix_d)) != cudaSuccess) goto oom_cuda;
     if ((cerr = cudaMalloc(&ctx->d_combined_count, npix_i)) != cudaSuccess) goto oom_cuda;
-    if ((cerr = cudaMalloc(&ctx->d_rawsum,         npix_f)) != cudaSuccess) goto oom_cuda;
+    if ((cerr = cudaMalloc(&ctx->d_rawsum,         npix_d)) != cudaSuccess) goto oom_cuda;
     if ((cerr = cudaMalloc(&ctx->d_rawcount,       npix_i)) != cudaSuccess) goto oom_cuda;
-    cudaMemset(ctx->d_combined_sum,   0, npix_f);
+    cudaMemset(ctx->d_combined_sum,   0, npix_d);
     cudaMemset(ctx->d_combined_count, 0, npix_i);
-    cudaMemset(ctx->d_rawsum,         0, npix_f);
+    cudaMemset(ctx->d_rawsum,         0, npix_d);
     cudaMemset(ctx->d_rawcount,       0, npix_i);
 
     /* Finalize staging output buffer */
@@ -425,11 +427,11 @@ DsoError integration_gpu_finalize(IntegrationGpuCtx *ctx,
     }
 
     /* Reset accumulators so the context can be reused for another run */
-    size_t npix_f = (size_t)npix * sizeof(float);
+    size_t npix_d = (size_t)npix * sizeof(double);
     size_t npix_i = (size_t)npix * sizeof(int);
-    cudaMemset(ctx->d_combined_sum,   0, npix_f);
+    cudaMemset(ctx->d_combined_sum,   0, npix_d);
     cudaMemset(ctx->d_combined_count, 0, npix_i);
-    cudaMemset(ctx->d_rawsum,         0, npix_f);
+    cudaMemset(ctx->d_rawsum,         0, npix_d);
     cudaMemset(ctx->d_rawcount,       0, npix_i);
 
     return DSO_OK;

@@ -50,17 +50,18 @@ DsoError star_detect_cpu_moffat_convolve(const float        *src,
     if (!kern) return DSO_ERR_ALLOC;
 
     float alpha2 = params->alpha * params->alpha;
-    float ksum   = 0.f;
+    double ksum  = 0.0;
     for (int ky = -R; ky <= R; ky++) {
         for (int kx = -R; kx <= R; kx++) {
             float r2 = (float)(kx*kx + ky*ky);
             float v  = powf(1.f + r2 / alpha2, -params->beta);
             kern[(ky+R)*kw + (kx+R)] = v;
-            ksum += v;
+            ksum += (double)v;
         }
     }
-    /* Normalise */
-    for (int i = 0; i < kn; i++) kern[i] /= ksum;
+    /* Normalise (double division for accuracy) */
+    double inv_ksum = 1.0 / ksum;
+    for (int i = 0; i < kn; i++) kern[i] = (float)((double)kern[i] * inv_ksum);
 
     /* 2-D convolution with zero-boundary padding */
     int y;
