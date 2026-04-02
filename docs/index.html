@@ -3,590 +3,176 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>gpu-dso-stacker — GPU-Accelerated Deep Sky Object Stacker</title>
-  <meta name="description" content="High-performance DSO image stacker with CUDA, Metal, and CPU backends. VNG debayering, Moffat star detection, Lanczos warp, kappa-sigma integration." />
+  <title>gpu-dso-stacker &mdash; GPU-Accelerated Deep Sky Object Stacker</title>
+  <meta name="description" content="High-performance DSO image stacker with CUDA, Metal, and CPU backends." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
-    /* ── Reset & base ─────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:         #0a0c12;
-      --bg2:        #0f1118;
-      --bg3:        #161923;
-      --border:     #1e2535;
-      --text:       #c9d1e0;
-      --text-dim:   #8694b0;
-      --accent:     #38bdf8;
-      --accent2:    #818cf8;
-      --accent3:    #34d399;
-      --warn:       #fbbf24;
-      --code-bg:    #111827;
-      --radius:     10px;
-      --shadow:     0 4px 32px rgba(0,0,0,.5);
+      --bg:       #181825;
+      --bg2:      #1e1e30;
+      --bg3:      #252540;
+      --border:   #2e2e4a;
+      --text:     #d0d0e0;
+      --text-dim: #8888a8;
+      --accent:   #7aa2d4;
+      --code-bg:  #1c1c30;
+      --radius:   8px;
     }
-    html { scroll-behavior: smooth; font-size: 17px; }
+    html { scroll-behavior: smooth; font-size: 16px; }
     body {
       background: var(--bg);
       color: var(--text);
       font-family: 'Inter', system-ui, sans-serif;
       line-height: 1.7;
-      overflow-x: hidden;
     }
 
-    /* ── Starfield canvas ─────────────────────────────────────────────── */
-    #stars-canvas {
-      position: fixed;
-      inset: 0;
-      z-index: 0;
-      pointer-events: none;
-      opacity: .6;
-    }
-
-    /* ── Layout helpers ───────────────────────────────────────────────── */
-    .container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; }
-    section { position: relative; z-index: 1; padding: 5rem 0; }
+    .container { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+    section { padding: 4rem 0; }
     section:nth-child(even) { background: var(--bg2); }
-    h2 {
-      font-size: 2rem;
-      font-weight: 700;
-      color: #fff;
-      margin-bottom: 0.5rem;
-    }
-    h2 .accent { color: var(--accent); }
-    .section-lead {
-      color: var(--text-dim);
-      font-size: 1.08rem;
-      margin-bottom: 3rem;
-      max-width: 660px;
-      line-height: 1.75;
-    }
+    h2 { font-size: 1.6rem; font-weight: 700; color: #fff; margin-bottom: 0.4rem; }
+    .section-lead { color: var(--text-dim); font-size: 0.95rem; margin-bottom: 2rem; max-width: 600px; }
 
-    /* ── Navigation ───────────────────────────────────────────────────── */
+    /* Nav */
     nav {
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      z-index: 100;
-      background: rgba(10,12,18,.85);
-      backdrop-filter: blur(14px);
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(24,24,37,.92); backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--border);
     }
     .nav-inner {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 0 1.5rem;
-      height: 60px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      max-width: 960px; margin: 0 auto; padding: 0 1.5rem;
+      height: 52px; display: flex; align-items: center; justify-content: space-between;
     }
     .nav-logo {
-      font-family: 'JetBrains Mono', monospace;
-      font-weight: 500;
-      font-size: .95rem;
-      color: var(--accent);
-      text-decoration: none;
-      letter-spacing: -.02em;
+      font-family: 'JetBrains Mono', monospace; font-weight: 500;
+      font-size: .9rem; color: var(--accent); text-decoration: none;
     }
-    .nav-links {
-      display: flex;
-      gap: 2rem;
-      list-style: none;
-    }
-    .nav-links a {
-      color: var(--text-dim);
-      text-decoration: none;
-      font-size: .875rem;
-      font-weight: 500;
-      transition: color .2s;
-    }
+    .nav-links { display: flex; gap: 1.5rem; list-style: none; }
+    .nav-links a { color: var(--text-dim); text-decoration: none; font-size: .85rem; font-weight: 500; }
     .nav-links a:hover { color: var(--accent); }
     .nav-cta {
-      background: var(--accent);
-      color: var(--bg) !important;
-      padding: .35rem .9rem;
-      border-radius: 6px;
-      font-weight: 600 !important;
+      background: var(--accent); color: var(--bg) !important;
+      padding: .3rem .8rem; border-radius: 5px; font-weight: 600 !important;
     }
-    .nav-cta:hover { background: #7dd3fc !important; color: var(--bg) !important; }
-    .hamburger { display: none; flex-direction: column; gap: 5px; cursor: pointer; background: none; border: none; padding: 4px; }
-    .hamburger span { display: block; width: 22px; height: 2px; background: var(--text); border-radius: 2px; transition: .3s; }
+    .hamburger { display: none; flex-direction: column; gap: 4px; cursor: pointer; background: none; border: none; padding: 4px; }
+    .hamburger span { display: block; width: 20px; height: 2px; background: var(--text); border-radius: 2px; }
 
-    /* ── Hero ─────────────────────────────────────────────────────────── */
-    #hero {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      padding-top: 60px;
-    }
-    .hero-inner {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 4rem;
-      align-items: center;
-    }
-    .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: .5rem;
-      background: rgba(56,189,248,.08);
-      border: 1px solid rgba(56,189,248,.25);
-      border-radius: 999px;
-      padding: .3rem .85rem;
-      font-size: .78rem;
-      color: var(--accent);
-      font-weight: 600;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-      margin-bottom: 1.25rem;
-    }
-    .hero-badge .dot {
-      width: 7px; height: 7px;
-      background: var(--accent);
-      border-radius: 50%;
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0%,100% { opacity:1; transform: scale(1); }
-      50%      { opacity:.4; transform: scale(.7); }
-    }
-    .hero h1 {
-      font-size: clamp(2.2rem, 5vw, 3.4rem);
-      font-weight: 700;
-      line-height: 1.15;
-      color: #fff;
-      margin-bottom: 1.25rem;
-    }
-    .hero h1 em {
-      font-style: normal;
-      background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .hero-sub {
-      font-size: 1.1rem;
-      color: var(--text-dim);
-      margin-bottom: 2rem;
-      max-width: 500px;
-    }
-    .hero-actions { display: flex; gap: 1rem; flex-wrap: wrap; }
+    /* Intro */
+    #intro { padding: 6rem 0 4rem; }
+    .intro h1 { font-size: 2.2rem; font-weight: 700; color: #fff; margin-bottom: 0.75rem; line-height: 1.2; }
+    .intro-sub { font-size: 1rem; color: var(--text-dim); margin-bottom: 1.5rem; max-width: 560px; line-height: 1.7; }
+    .intro-actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
     .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: .5rem;
-      padding: .7rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: .925rem;
-      text-decoration: none;
-      transition: transform .15s, box-shadow .15s, background .15s;
-      cursor: pointer;
-      border: none;
+      display: inline-flex; align-items: center; gap: .4rem;
+      padding: .55rem 1.2rem; border-radius: 6px; font-weight: 600;
+      font-size: .875rem; text-decoration: none; border: none; cursor: pointer;
     }
-    .btn:hover { transform: translateY(-2px); }
-    .btn-primary {
-      background: var(--accent);
-      color: var(--bg);
-      box-shadow: 0 0 24px rgba(56,189,248,.3);
-    }
-    .btn-primary:hover { background: #7dd3fc; box-shadow: 0 0 36px rgba(56,189,248,.45); }
-    .btn-secondary {
-      background: var(--bg3);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .btn-secondary:hover { background: #1e2535; }
-    .btn svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+    .btn-primary { background: var(--accent); color: var(--bg); }
+    .btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+    .btn svg { width: 16px; height: 16px; fill: currentColor; flex-shrink: 0; }
+    .badge-row { display: flex; gap: .5rem; flex-wrap: wrap; }
+    .badge-row img { height: 20px; }
 
-    /* Hero visual — pipeline diagram */
-    .hero-visual {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 1.5rem;
-      box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,.04);
-    }
-    .pipeline-header {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: .75rem;
-      color: var(--text-dim);
-      margin-bottom: 1rem;
-      display: flex;
-      align-items: center;
-      gap: .5rem;
-    }
-    .pipeline-header::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: var(--border);
-    }
-    .pipe-step {
-      display: flex;
-      align-items: center;
-      gap: .75rem;
-      padding: .55rem .8rem;
-      border-radius: 7px;
-      margin-bottom: .4rem;
-      transition: background .2s;
-    }
-    .pipe-step:hover { background: rgba(255,255,255,.03); }
-    .pipe-num {
-      width: 22px; height: 22px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: .7rem;
-      font-weight: 700;
-      font-family: 'JetBrains Mono', monospace;
-      flex-shrink: 0;
-    }
-    .pipe-label {
-      flex: 1;
-      font-size: .82rem;
-      color: var(--text);
-    }
-    .pipe-label small { display: block; font-size: .72rem; color: var(--text-dim); }
-    .pipe-tag {
-      font-size: .68rem;
-      font-weight: 600;
-      padding: .15rem .45rem;
-      border-radius: 4px;
-      letter-spacing: .03em;
-    }
-    .tag-cuda  { background: rgba(56,189,248,.12); color: var(--accent); border: 1px solid rgba(56,189,248,.2); }
-    .tag-omp   { background: rgba(52,211,153,.1); color: var(--accent3); border: 1px solid rgba(52,211,153,.2); }
-    .tag-cpu   { background: rgba(251,191,36,.08); color: var(--warn); border: 1px solid rgba(251,191,36,.2); }
-    .pipe-arrow {
-      text-align: center;
-      color: var(--border);
-      font-size: .75rem;
-      margin: .1rem 0 .1rem 1.65rem;
-    }
-    .speed-badge {
-      margin-top: 1rem;
-      padding: .6rem .9rem;
-      background: rgba(52,211,153,.06);
-      border: 1px solid rgba(52,211,153,.15);
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      gap: .6rem;
-      font-size: .8rem;
-    }
-    .speed-num {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 1.3rem;
-      font-weight: 700;
-      color: var(--accent3);
-    }
-    .speed-desc { color: var(--text-dim); }
-
-    /* ── Badge row ────────────────────────────────────────────────────── */
-    .badge-row {
-      display: flex;
-      gap: .5rem;
-      flex-wrap: wrap;
-      margin-top: 1.5rem;
-    }
-    .badge-row img { height: 20px; border-radius: 4px; }
-
-    /* ── Features grid ────────────────────────────────────────────────── */
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
-      gap: 1.25rem;
-    }
+    /* Feature cards */
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
     .feature-card {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.5rem;
-      transition: border-color .2s, transform .2s, box-shadow .2s;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
     }
-    .feature-card:hover {
-      border-color: rgba(56,189,248,.3);
-      transform: translateY(-3px);
-      box-shadow: 0 8px 32px rgba(0,0,0,.4);
-    }
-    .feature-icon {
-      width: 42px; height: 42px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.2rem;
-      margin-bottom: 1rem;
-    }
-    .feature-card h3 {
-      font-size: 1rem;
-      font-weight: 600;
-      color: #fff;
-      margin-bottom: .4rem;
-    }
-    .feature-card p {
-      font-size: .9rem;
-      color: var(--text-dim);
-      line-height: 1.7;
-    }
+    .feature-card h3 { font-size: .95rem; font-weight: 600; color: #fff; margin-bottom: .3rem; }
+    .feature-card p { font-size: .85rem; color: var(--text-dim); line-height: 1.65; }
 
-    /* ── Pipeline table ───────────────────────────────────────────────── */
-    .table-wrap {
-      overflow-x: auto;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: .9rem;
-    }
+    /* Tables */
+    .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; font-size: .875rem; }
     thead { background: var(--bg3); }
-    th {
-      padding: .85rem 1.15rem;
-      text-align: left;
-      font-weight: 600;
-      color: var(--text-dim);
-      font-size: .82rem;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      border-bottom: 1px solid var(--border);
-    }
-    td {
-      padding: .85rem 1.15rem;
-      border-bottom: 1px solid rgba(30,37,53,.5);
-      color: var(--text);
-      vertical-align: top;
-    }
+    th { padding: .7rem 1rem; text-align: left; font-weight: 600; color: var(--text-dim); font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
+    td { padding: .7rem 1rem; border-bottom: 1px solid rgba(46,46,74,.5); color: var(--text); vertical-align: top; }
     tbody tr:last-child td { border-bottom: none; }
-    tbody tr:hover { background: rgba(255,255,255,.02); }
-    td code, th code {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: .82em;
-      background: var(--code-bg);
-      padding: .1rem .35rem;
-      border-radius: 4px;
-      color: var(--accent2);
-    }
+    td code, th code { font-family: 'JetBrains Mono', monospace; font-size: .82em; background: var(--code-bg); padding: .1rem .3rem; border-radius: 3px; color: var(--accent); }
 
-    /* ── Install tabs ─────────────────────────────────────────────────── */
-    .tabs { display: flex; gap: .5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    /* Tabs */
+    .tabs { display: flex; gap: .4rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
     .tab-btn {
-      padding: .45rem 1.1rem;
-      border-radius: 7px;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--text-dim);
-      font-size: .875rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: .2s;
-      font-family: inherit;
+      padding: .4rem 1rem; border-radius: 6px; border: 1px solid var(--border);
+      background: transparent; color: var(--text-dim); font-size: .85rem;
+      font-weight: 500; cursor: pointer; font-family: inherit;
     }
     .tab-btn:hover { border-color: var(--accent); color: var(--accent); }
-    .tab-btn.active {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: var(--bg);
-      font-weight: 600;
-    }
+    .tab-btn.active { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
 
-    /* ── Code blocks ──────────────────────────────────────────────────── */
+    /* Code blocks */
     .code-block {
-      position: relative;
-      background: var(--code-bg);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.25rem 1.25rem 1.25rem 1.5rem;
-      overflow-x: auto;
-      margin-bottom: 1rem;
+      position: relative; background: var(--code-bg);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1rem 1.25rem; overflow-x: auto; margin-bottom: .75rem;
     }
-    .code-block pre {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: .85rem;
-      line-height: 1.75;
-      color: #a5f3fc;
-      white-space: pre;
-    }
-    .code-block .comment { color: #4b5563; }
-    .code-block .cmd     { color: #fcd34d; }
-    .code-block .flag    { color: #86efac; }
-    .code-block .str     { color: #f9a8d4; }
+    .code-block pre { font-family: 'JetBrains Mono', monospace; font-size: .82rem; line-height: 1.7; color: #c8d0e0; white-space: pre; }
+    .code-block .comment { color: #5a5a7a; }
+    .code-block .flag { color: #8bc89e; }
+    .code-block .str { color: #d4a0b8; }
     .copy-btn {
-      position: absolute;
-      top: .75rem;
-      right: .75rem;
-      background: rgba(255,255,255,.06);
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      padding: .3rem .55rem;
-      border-radius: 5px;
-      font-size: .72rem;
-      cursor: pointer;
-      font-family: inherit;
-      transition: .2s;
+      position: absolute; top: .6rem; right: .6rem;
+      background: rgba(255,255,255,.05); border: 1px solid var(--border);
+      color: var(--text-dim); padding: .25rem .5rem; border-radius: 4px;
+      font-size: .7rem; cursor: pointer; font-family: inherit;
     }
-    .copy-btn:hover { background: rgba(255,255,255,.12); color: var(--text); }
-    .copy-btn.copied { color: var(--accent3); border-color: var(--accent3); }
+    .copy-btn:hover { background: rgba(255,255,255,.1); color: var(--text); }
+    .copy-btn.copied { color: #8bc89e; border-color: #8bc89e; }
 
-    /* ── Callout ──────────────────────────────────────────────────────── */
-    .callout {
-      display: flex;
-      gap: .85rem;
-      padding: 1rem 1.25rem;
-      border-radius: 8px;
-      font-size: .9rem;
-      margin-bottom: 1.25rem;
-      line-height: 1.65;
-    }
-    .callout-info  { background: rgba(56,189,248,.06); border-left: 3px solid var(--accent); }
-    .callout-warn  { background: rgba(251,191,36,.06); border-left: 3px solid var(--warn); }
-    .callout-icon  { font-size: 1rem; flex-shrink: 0; margin-top: .05rem; }
+    /* Callout */
+    .callout { display: flex; gap: .75rem; padding: .85rem 1rem; border-radius: 6px; font-size: .85rem; margin-bottom: 1rem; line-height: 1.6; }
+    .callout-info { background: rgba(122,162,212,.06); border-left: 3px solid var(--accent); }
+    .callout-warn { background: rgba(200,180,100,.06); border-left: 3px solid #c8b464; }
     .callout strong { color: #fff; }
 
-    /* ── Benchmark ────────────────────────────────────────────────────── */
-    .bench-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.5rem;
-      margin-bottom: 2rem;
-    }
-    .bench-card {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.5rem;
-    }
-    .bench-label {
-      font-size: .78rem;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-      color: var(--text-dim);
-      font-weight: 600;
-      margin-bottom: .5rem;
-    }
-    .bench-value {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 2.4rem;
-      font-weight: 700;
-      line-height: 1;
-      margin-bottom: .25rem;
-    }
+    /* Benchmark */
+    .bench-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem; }
+    .bench-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; }
+    .bench-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); font-weight: 600; margin-bottom: .4rem; }
+    .bench-value { font-family: 'JetBrains Mono', monospace; font-size: 2rem; font-weight: 700; line-height: 1; margin-bottom: .2rem; }
     .bench-sub { font-size: .8rem; color: var(--text-dim); }
-    .bar-wrap { margin-top: 1.5rem; }
-    .bar-row { display: flex; align-items: center; gap: .75rem; margin-bottom: .5rem; font-size: .8rem; }
-    .bar-name { width: 110px; color: var(--text-dim); flex-shrink: 0; }
-    .bar-track { flex: 1; height: 8px; background: var(--bg3); border-radius: 99px; overflow: hidden; }
-    .bar-fill { height: 100%; border-radius: 99px; transition: width 1.2s cubic-bezier(.25,.8,.25,1); }
+    .bar-wrap { margin-top: 1rem; }
+    .bar-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .4rem; font-size: .8rem; }
+    .bar-name { width: 90px; color: var(--text-dim); flex-shrink: 0; }
+    .bar-track { flex: 1; height: 6px; background: var(--bg3); border-radius: 99px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 99px; }
     .bar-time { color: var(--text-dim); width: 50px; text-align: right; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }
 
-    /* ── Download cards ───────────────────────────────────────────────── */
-    .dl-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 1rem;
-    }
-    .dl-card {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 1.25rem 1.5rem;
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      text-decoration: none;
-      transition: .2s;
-    }
-    .dl-card:hover {
-      border-color: rgba(56,189,248,.4);
-      background: rgba(56,189,248,.04);
-      transform: translateY(-2px);
-    }
-    .dl-icon { font-size: 1.8rem; flex-shrink: 0; }
-    .dl-info h4 { font-size: .95rem; font-weight: 600; color: #fff; margin-bottom: .2rem; }
-    .dl-info p  { font-size: .78rem; color: var(--text-dim); }
+    /* GUI screenshot */
+    .gui-screenshot { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .gui-screenshot img { width: 100%; height: auto; display: block; }
 
-    /* ── GUI screenshot ────────────────────────────────────────────────── */
-    .gui-screenshot {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow: var(--shadow);
-    }
-    .gui-screenshot img {
-      width: 100%;
-      height: auto;
-      display: block;
-    }
-    /* ── Footer ───────────────────────────────────────────────────────── */
-    footer {
-      background: var(--bg);
-      border-top: 1px solid var(--border);
-      padding: 3rem 0 2rem;
-      position: relative;
-      z-index: 1;
-    }
-    .footer-inner {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 2rem;
-      padding-bottom: 2rem;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 1.5rem;
-    }
-    .footer-brand .logo {
-      font-family: 'JetBrains Mono', monospace;
-      font-weight: 500;
-      color: var(--accent);
-      font-size: 1rem;
-      display: block;
-      margin-bottom: .5rem;
-    }
-    .footer-brand p { font-size: .82rem; color: var(--text-dim); line-height: 1.6; }
-    .footer-col h4 { font-size: .85rem; font-weight: 600; color: #fff; margin-bottom: .75rem; }
-    .footer-col ul { list-style: none; display: flex; flex-direction: column; gap: .4rem; }
-    .footer-col a { color: var(--text-dim); text-decoration: none; font-size: .82rem; transition: color .2s; }
-    .footer-col a:hover { color: var(--accent); }
-    .footer-copy {
-      text-align: center;
-      font-size: .78rem;
-      color: var(--text-dim);
-    }
+    /* Pipeline tags */
+    .pipe-tag { font-size: .68rem; font-weight: 600; padding: .12rem .4rem; border-radius: 3px; letter-spacing: .02em; }
+    .tag-cuda { background: rgba(122,162,212,.12); color: var(--accent); border: 1px solid rgba(122,162,212,.2); }
+    .tag-omp { background: rgba(139,200,158,.1); color: #8bc89e; border: 1px solid rgba(139,200,158,.2); }
+    .tag-cpu { background: rgba(200,180,100,.08); color: #c8b464; border: 1px solid rgba(200,180,100,.2); }
+
+    /* Footer */
+    footer { background: var(--bg); border-top: 1px solid var(--border); padding: 2rem 0; }
+    .footer-inner { display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; flex-wrap: wrap; }
+    .footer-brand .logo { font-family: 'JetBrains Mono', monospace; font-weight: 500; color: var(--accent); font-size: .9rem; display: block; margin-bottom: .3rem; }
+    .footer-brand p { font-size: .8rem; color: var(--text-dim); max-width: 280px; }
+    .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .footer-links a { color: var(--text-dim); text-decoration: none; font-size: .8rem; }
+    .footer-links a:hover { color: var(--accent); }
+    .footer-copy { text-align: center; font-size: .75rem; color: var(--text-dim); }
     .footer-copy a { color: var(--accent); text-decoration: none; }
 
-    /* ── Scroll reveal ────────────────────────────────────────────────── */
-    .reveal {
-      opacity: 0;
-      transform: translateY(24px);
-      transition: opacity .6s ease, transform .6s ease;
-    }
-    .reveal.visible { opacity: 1; transform: none; }
-
-    /* ── Responsive ───────────────────────────────────────────────────── */
+    /* Responsive */
     @media (max-width: 768px) {
       .nav-links { display: none; }
-      .nav-links.open {
-        display: flex;
-        flex-direction: column;
-        position: absolute;
-        top: 60px; left: 0; right: 0;
-        background: rgba(10,12,18,.97);
-        border-bottom: 1px solid var(--border);
-        padding: 1rem 1.5rem 1.5rem;
-        gap: 1rem;
-      }
+      .nav-links.open { display: flex; flex-direction: column; position: absolute; top: 52px; left: 0; right: 0; background: rgba(24,24,37,.97); border-bottom: 1px solid var(--border); padding: 1rem 1.5rem; gap: .75rem; }
       .hamburger { display: flex; }
-      .hero-inner { grid-template-columns: 1fr; }
-      .hero-visual { display: none; }
       .bench-grid { grid-template-columns: 1fr; }
-      .footer-inner { grid-template-columns: 1fr; }
-      h2 { font-size: 1.6rem; }
-      section { padding: 3.5rem 0; }
+      .gui-layout { grid-template-columns: 1fr !important; }
+      h2 { font-size: 1.4rem; }
+      section { padding: 3rem 0; }
     }
     @media (max-width: 480px) {
       .dl-grid { grid-template-columns: 1fr; }
@@ -596,19 +182,17 @@
 </head>
 <body>
 
-<canvas id="stars-canvas"></canvas>
-
-<!-- ─── Navigation ───────────────────────────────────────────────────── -->
+<!-- Nav -->
 <nav>
   <div class="nav-inner">
-    <a class="nav-logo" href="#">⊙ gpu-dso-stacker</a>
+    <a class="nav-logo" href="#">gpu-dso-stacker</a>
     <button class="hamburger" id="hamburger" aria-label="Toggle menu">
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links" id="nav-links">
+      <li><a href="#install">Install</a></li>
       <li><a href="#features">Features</a></li>
       <li><a href="#pipeline">Pipeline</a></li>
-      <li><a href="#install">Install</a></li>
       <li><a href="#usage">Usage</a></li>
       <li><a href="#benchmark">Benchmark</a></li>
       <li><a href="#gui">GUI</a></li>
@@ -617,272 +201,101 @@
   </div>
 </nav>
 
-<!-- ─── Hero ─────────────────────────────────────────────────────────── -->
-<section id="hero">
+<!-- Intro -->
+<section id="intro">
   <div class="container">
-    <div class="hero-inner">
-      <div class="hero-text">
-        <div class="hero-badge">
-          <span class="dot"></span>
-          GPU-Accelerated · CUDA / Metal / CPU
-        </div>
-        <h1>Stack deep-sky frames<br />at <em>warp speed</em></h1>
-        <p class="hero-sub">
-          High-performance image stacker for DSO astrophotography.
-          VNG debayering, Moffat star detection, Lanczos-3 warp,
-          and kappa-sigma integration — all GPU-accelerated.
-        </p>
-        <div class="hero-actions">
-          <a class="btn btn-primary" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-            <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7C6.73 19.91 6.14 18 6.14 18c-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.56 9.56 0 0 1 12 6.8c.85.004 1.71.115 2.51.337 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg>
-            Download Releases
-          </a>
-          <a class="btn btn-secondary" href="https://github.com/gs18113/gpu-dso-stacker" target="_blank">
-            View on GitHub
-          </a>
-        </div>
-        <div class="badge-row">
-          <img src="https://github.com/gs18113/gpu-dso-stacker/actions/workflows/ci.yml/badge.svg" alt="CI" />
-          <img src="https://img.shields.io/badge/CUDA-12.x-76b900?style=flat-square&logo=nvidia" alt="CUDA 12" />
-          <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="GPLv3" />
-          <img src="https://img.shields.io/badge/C11-blue?style=flat-square" alt="C11" />
-        </div>
+    <div class="intro">
+      <h1>GPU-Accelerated Deep Sky<br />Object Stacker</h1>
+      <p class="intro-sub">
+        A high-performance image stacker for DSO astrophotography, written in C/CUDA.
+        VNG debayering, Moffat star detection, Lanczos-3 warp,
+        and kappa-sigma integration &mdash; with CUDA, Metal, and CPU backends.
+      </p>
+      <div class="intro-actions">
+        <a class="btn btn-primary" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
+          <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7C6.73 19.91 6.14 18 6.14 18c-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.56 9.56 0 0 1 12 6.8c.85.004 1.71.115 2.51.337 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg>
+          Download
+        </a>
+        <a class="btn btn-secondary" href="https://github.com/gs18113/gpu-dso-stacker" target="_blank">
+          View Source
+        </a>
       </div>
-
-      <!-- Pipeline visual -->
-      <div class="hero-visual">
-        <div class="pipeline-header">// processing pipeline</div>
-
-        <div class="pipe-step">
-          <div class="pipe-num" style="background:rgba(56,189,248,.12);color:var(--accent)">1</div>
-          <div class="pipe-label">VNG Debayering<small>CFA → luminance / R·G·B planes</small></div>
-          <span class="pipe-tag tag-cuda">CUDA</span>
-        </div>
-        <div class="pipe-arrow">↓</div>
-        <div class="pipe-step">
-          <div class="pipe-num" style="background:rgba(129,140,248,.12);color:var(--accent2)">2</div>
-          <div class="pipe-label">Moffat Star Detection<small>PSF convolution + sigma threshold</small></div>
-          <span class="pipe-tag tag-cuda">CUDA</span>
-        </div>
-        <div class="pipe-arrow">↓</div>
-        <div class="pipe-step">
-          <div class="pipe-num" style="background:rgba(251,191,36,.1);color:var(--warn)">3</div>
-          <div class="pipe-label">Triangle Matching + DLT<small>Adaptive RANSAC homography · <code style="font-size:.7rem;background:var(--code-bg);padding:.1rem .3rem;border-radius:3px;color:var(--accent2)">--match-device</code></small></div>
-          <span class="pipe-tag tag-cpu">CPU</span>
-          <span class="pipe-tag tag-cuda">CUDA</span>
-        </div>
-        <div class="pipe-arrow">↓</div>
-        <div class="pipe-step">
-          <div class="pipe-num" style="background:rgba(56,189,248,.12);color:var(--accent)">4</div>
-          <div class="pipe-label">Lanczos-3 Warp<small>nppiRemap + coord-map kernel</small></div>
-          <span class="pipe-tag tag-cuda">CUDA</span>
-        </div>
-        <div class="pipe-arrow">↓</div>
-        <div class="pipe-step">
-          <div class="pipe-num" style="background:rgba(52,211,153,.1);color:var(--accent3)">5</div>
-          <div class="pipe-label">Kappa-Sigma Integration<small>Mini-batch GPU accumulation</small></div>
-          <span class="pipe-tag tag-cuda">CUDA</span>
-        </div>
-
-        <div class="speed-badge">
-          <span class="speed-num">4.4×</span>
-          <span class="speed-desc">faster than CPU on 10 × 4656×3520 frames</span>
-        </div>
+      <div class="badge-row">
+        <img src="https://github.com/gs18113/gpu-dso-stacker/actions/workflows/ci.yml/badge.svg" alt="CI" />
+        <img src="https://img.shields.io/badge/CUDA-12.x-76b900?style=flat-square&logo=nvidia" alt="CUDA 12" />
+        <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="GPLv3" />
+        <img src="https://img.shields.io/badge/C11-blue?style=flat-square" alt="C11" />
       </div>
     </div>
   </div>
 </section>
 
-<!-- ─── Features ──────────────────────────────────────────────────────── -->
-<section id="features">
-  <div class="container">
-    <h2>Everything you need to <span class="accent">stack frames</span></h2>
-    <p class="section-lead">From raw FITS or camera RAW files to a finished stack — debayering, alignment, calibration, and integration in one pipeline.</p>
-
-    <div class="features-grid">
-      <div class="feature-card reveal">
-        <div class="feature-icon" style="background:rgba(56,189,248,.1)">🚀</div>
-        <h3>GPU-Accelerated Core</h3>
-        <p>Every compute-heavy stage runs on CUDA — VNG debayer, Moffat convolution, Lanczos warp, and kappa-sigma integration use double-buffered stream overlap for maximum GPU utilization.</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon" style="background:rgba(52,211,153,.1)">⭐</div>
-        <h3>Automatic Star Detection & Alignment</h3>
-        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Triangle-matching + DLT computes a full homography — no manual reference or pre-computed transforms required. Matching runs on CPU or GPU via <code>--match-device</code>.</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon" style="background:rgba(129,140,248,.1)">📷</div>
-        <h3>RAW Camera File Support</h3>
-        <p>Load CR2, NEF, ARW, DNG, and 12 other RAW formats directly via LibRaw. Raw Bayer mosaic extraction with per-channel black subtraction — no external conversion needed. Build with <code>-DDSO_ENABLE_LIBRAW=ON</code>.</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon" style="background:rgba(129,140,248,.1)">🎨</div>
-        <h3>Full Color Output</h3>
-        <p>Bayer pattern auto-detection from FITS <code>BAYERPAT</code> keyword or RAW camera metadata. VNG demosaic produces separate R, G, B planes; all warp and integration stages run per-channel; output FITS uses NAXIS=3.</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon" style="background:rgba(251,191,36,.08)">🔧</div>
-        <h3>Calibration Frame Pipeline</h3>
-        <p>Dark, flat, bias, and darkflat master generation via winsorized mean, median, or kappa-sigma stacking. Applied before debayering. Dead-pixel guard and flat normalization built-in.</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon" style="background:rgba(56,189,248,.1)">💾</div>
-        <h3>Flexible Output Formats</h3>
-        <p>FITS (FP32), TIFF (FP32/FP16/INT16/INT8 + none/zip/lzw/rle), PNG (8/16-bit). Integer stretch bounds auto-derived per image or set manually. Format detected from file extension.</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon" style="background:rgba(52,211,153,.1)">🖥️</div>
-        <h3>CPU Fallback & Apple Silicon</h3>
-        <p>Full OpenMP-parallelized CPU path via <code>--cpu</code>. Metal backend scaffolded for Apple Silicon with phased kernel porting. CPU-only builds require no NVIDIA GPU or CUDA runtime.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ─── Pipeline ──────────────────────────────────────────────────────── -->
-<section id="pipeline">
-  <div class="container">
-    <h2>Processing <span class="accent">Pipeline</span></h2>
-    <p class="section-lead">Six stages, two execution paths. Pass <code>--cpu</code> to run everything with OpenMP instead of CUDA.</p>
-
-    <div class="table-wrap reveal">
-      <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Stage</th>
-            <th>GPU path (default)</th>
-            <th>CPU path (<code>--cpu</code>)</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>1</td>
-            <td><strong>Debayering (star detection)</strong></td>
-            <td>VNG demosaic → luminance <span class="pipe-tag tag-cuda" style="font-size:.7rem">CUDA kernel</span></td>
-            <td>VNG demosaic → luminance <span class="pipe-tag tag-omp" style="font-size:.7rem">OpenMP</span></td>
-          </tr>
-          <tr>
-            <td>2</td>
-            <td><strong>Star Detection</strong></td>
-            <td>Moffat PSF conv + σ threshold <span class="pipe-tag tag-cuda" style="font-size:.7rem">CUDA</span></td>
-            <td>Moffat PSF conv + σ threshold <span class="pipe-tag tag-omp" style="font-size:.7rem">OpenMP</span></td>
-          </tr>
-          <tr>
-            <td>3</td>
-            <td><strong>Triangle Matching + Alignment</strong></td>
-            <td>Triangle asterism matching + DLT <span class="pipe-tag tag-cpu" style="font-size:.7rem">CPU</span> <span class="pipe-tag tag-cuda" style="font-size:.7rem">CUDA</span><br /><small style="color:var(--text-dim);font-size:.78rem"><code>--match-device</code> selects CPU or GPU; default follows stacking device</small></td>
-            <td>Triangle asterism matching + DLT <span class="pipe-tag tag-cpu" style="font-size:.7rem">CPU</span></td>
-          </tr>
-          <tr>
-            <td>4</td>
-            <td><strong>Debayering (warp)</strong></td>
-            <td>VNG demosaic → lum or R/G/B <span class="pipe-tag tag-cuda" style="font-size:.7rem">CUDA</span></td>
-            <td>VNG demosaic → lum or R/G/B <span class="pipe-tag tag-omp" style="font-size:.7rem">OpenMP</span></td>
-          </tr>
-          <tr>
-            <td>5</td>
-            <td><strong>Lanczos-3 Warp</strong></td>
-            <td><code>nppiRemap</code> + coord-map kernel <span class="pipe-tag tag-cuda" style="font-size:.7rem">CUDA</span></td>
-            <td>6-tap backward-map warp <span class="pipe-tag tag-omp" style="font-size:.7rem">OpenMP</span></td>
-          </tr>
-          <tr>
-            <td>6</td>
-            <td><strong>Integration</strong></td>
-            <td>Mini-batch κ-σ clipping <span class="pipe-tag tag-cuda" style="font-size:.7rem">CUDA</span></td>
-            <td>Full κ-σ clipping <span class="pipe-tag tag-omp" style="font-size:.7rem">OpenMP</span></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div style="margin-top:1.5rem;display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-      <div class="callout callout-info reveal">
-        <span class="callout-icon">ℹ️</span>
-        <div><strong>Single-pass loading</strong> — each frame file is opened exactly once. Star detection, RANSAC, and warping all complete before the next frame is loaded. No intermediate files.</div>
-      </div>
-      <div class="callout callout-warn reveal">
-        <span class="callout-icon">⚠️</span>
-        <div><strong>Mismatch handling</strong> — frames that fail alignment (too few stars or triangle-matching mismatch) are skipped gracefully. A final summary prints successful / skipped counts.</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ─── Install ───────────────────────────────────────────────────────── -->
+<!-- Install -->
 <section id="install">
   <div class="container">
-    <h2>Get <span class="accent">Started</span></h2>
-    <p class="section-lead">Pre-built binaries available — no compiler needed. Or build from source for your exact GPU architecture.</p>
+    <h2>Getting Started</h2>
+    <p class="section-lead">Pre-built binaries available, or build from source for your exact GPU architecture.</p>
 
     <div class="tabs">
-      <button class="tab-btn active" data-tab="prebuilt">Pre-built (recommended)</button>
-      <button class="tab-btn" data-tab="linux">Build — Linux</button>
-      <button class="tab-btn" data-tab="windows">Build — Windows</button>
-      <button class="tab-btn" data-tab="macos">Build — macOS</button>
+      <button class="tab-btn active" data-tab="prebuilt">Pre-built</button>
+      <button class="tab-btn" data-tab="linux">Linux</button>
+      <button class="tab-btn" data-tab="windows">Windows</button>
+      <button class="tab-btn" data-tab="macos">macOS</button>
     </div>
 
     <div class="tab-panel active" id="tab-prebuilt">
       <div class="callout callout-info">
-        <span class="callout-icon">📦</span>
         <div>Download the archive for your platform from the <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases page</a>. GPU builds require an NVIDIA GPU and CUDA 12.x runtime. CPU builds have no GPU dependency.</div>
       </div>
-      <div class="tabs" style="margin-bottom:1rem">
+      <div class="tabs" style="margin-bottom:.75rem">
         <button class="tab-btn active" data-tab="cuda-linux">Linux</button>
         <button class="tab-btn" data-tab="cuda-windows">Windows</button>
         <button class="tab-btn" data-tab="cuda-macos">macOS</button>
       </div>
 
       <div class="tab-panel active" id="tab-cuda-linux">
-        <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:0 0 .75rem">CUDA Runtime Setup (GPU builds only)</h3>
-        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">GPU builds require the NVIDIA CUDA 12.x runtime. CPU builds skip this entirely. Any CUDA 12.x minor version works.</p>
-        <p style="font-size:.88rem;font-weight:600;color:#fff;margin-bottom:.5rem">Debian / Ubuntu</p>
-        <div class="code-block reveal">
+        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA Runtime Setup (GPU builds only)</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">GPU builds require the NVIDIA CUDA 12.x runtime. Any CUDA 12.x minor version works.</p>
+        <p style="font-size:.85rem;font-weight:600;color:#fff;margin-bottom:.4rem">Debian / Ubuntu</p>
+        <div class="code-block">
           <button class="copy-btn" data-target="code-cuda-linux">Copy</button>
-          <pre id="code-cuda-linux"><span class="comment"># 1. Install the cuda-keyring package (sets up the NVIDIA apt repository)</span>
-<span class="comment">#    Replace &lt;distro&gt; with: ubuntu2404, ubuntu2204, debian12, etc.</span>
+          <pre id="code-cuda-linux"><span class="comment"># Install the cuda-keyring package (sets up the NVIDIA apt repository)</span>
+<span class="comment"># Replace &lt;distro&gt; with: ubuntu2404, ubuntu2204, debian12, etc.</span>
 wget https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-keyring_1.1-1_all.deb
 sudo dpkg -i cuda-keyring_1.1-1_all.deb
 sudo apt-get update
 
-<span class="comment"># 2. Install the runtime libraries (no compiler or dev headers needed)</span>
+<span class="comment"># Install the runtime libraries (no compiler needed)</span>
 sudo apt-get install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
         </div>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">This installs <code>libcudart.so.12</code>, <code>libnppc.so.12</code>, and <code>libnppig.so.12</code>.</p>
-        <p style="font-size:.88rem;font-weight:600;color:#fff;margin-bottom:.5rem">RHEL / Fedora</p>
-        <div class="code-block reveal">
+        <p style="font-size:.85rem;font-weight:600;color:#fff;margin:.75rem 0 .4rem">RHEL / Fedora</p>
+        <div class="code-block">
           <button class="copy-btn" data-target="code-cuda-linux-rhel">Copy</button>
           <pre id="code-cuda-linux-rhel">sudo dnf config-manager --add-repo \
   https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-<span class="str">&lt;distro&gt;</span>.repo
 sudo dnf install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
         </div>
-        <div class="callout callout-info" style="margin-bottom:1.25rem">
-          <span class="callout-icon">ℹ️</span>
-          <div>Any CUDA 12.x minor version will work (e.g. <code>cuda-cudart-12-6 libnpp-12-6</code>). The packages provide the <code>*.so.12</code> symlinks that the binary needs. Replace <code>&lt;distro&gt;</code> with <code>rhel8</code>, <code>rhel9</code>, <code>fedora42</code>, etc.</div>
-        </div>
       </div>
 
       <div class="tab-panel" id="tab-cuda-windows">
-        <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:0 0 .75rem">CUDA Runtime Setup (GPU builds only)</h3>
-        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">Download the CUDA Toolkit 12.x installer from <a href="https://developer.nvidia.com/cuda-downloads" style="color:var(--accent)" target="_blank">developer.nvidia.com/cuda-downloads</a> (or the <a href="https://developer.nvidia.com/cuda-toolkit-archive" style="color:var(--accent)" target="_blank">archive</a> for a specific version).</p>
-        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:.5rem;line-height:1.65">During installation, select <strong style="color:#fff">Custom</strong> and enable at minimum:</p>
-        <ul style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;padding-left:1.5rem;line-height:1.8">
+        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA Runtime Setup (GPU builds only)</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">Download a CUDA Toolkit 12.x installer from the <a href="https://developer.nvidia.com/cuda-toolkit-archive" style="color:var(--accent)" target="_blank">CUDA Toolkit Archive</a>. During installation, select <strong style="color:#fff">Custom</strong> and enable at minimum:</p>
+        <ul style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem;padding-left:1.5rem;line-height:1.8">
           <li><strong style="color:#fff">CUDA Runtime</strong> (<code>cudart</code>)</li>
           <li><strong style="color:#fff">NPP</strong> (NVIDIA Performance Primitives)</li>
           <li><strong style="color:#fff">Display Driver</strong> (if not already installed)</li>
         </ul>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">This places <code>cudart64_12.dll</code>, <code>nppc64_12.dll</code>, and <code>nppig64_12.dll</code> in <code>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.x\bin</code>. Recent CUDA installers may set <code>CUDA_PATH</code> without updating <code>PATH</code>; the GUI launcher prepends <code>%CUDA_PATH%\bin</code> automatically.</p>
-        <div class="code-block reveal">
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">Alternatively, install silently from PowerShell after downloading the installer:</p>
+        <div class="code-block">
           <button class="copy-btn" data-target="code-cuda-windows">Copy</button>
-          <pre id="code-cuda-windows"><span class="comment"># Unattended / silent installation (PowerShell)</span>
-cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
+          <pre id="code-cuda-windows">cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
         </div>
       </div>
 
       <div class="tab-panel" id="tab-cuda-macos">
-        <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:0 0 .75rem">Gatekeeper Workaround</h3>
-        <p style="font-size:.88rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.65">Download, extract, and clear quarantine in one shot:</p>
-        <div class="code-block reveal">
+        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">Gatekeeper Workaround</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">macOS quarantines files downloaded from the internet. Since the binaries are not Apple-notarized, you need to clear the quarantine attribute before macOS will allow them to run.</p>
+        <div class="code-block">
           <button class="copy-btn" data-target="code-macos-gk">Copy</button>
           <pre id="code-macos-gk">mkdir -p ~/DSOStacker && curl -fL \
   https://github.com/gs18113/gpu-dso-stacker/releases/latest/download/dso-stacker-gui-macos-arm64-metal.tar.gz \
@@ -890,51 +303,12 @@ cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
   && xattr -cr ~/DSOStacker \
   && chmod +x ~/DSOStacker/DSOStacker ~/DSOStacker/_internal/bin/dso_stacker</pre>
         </div>
-        <p style="font-size:.85rem;color:var(--text-dim)">Replace <code>metal</code> with <code>cpu</code> in the URL if you don't need Metal acceleration.</p>
-      </div>
-
-      <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:2rem 0 .75rem">Download</h3>
-      <div class="dl-grid reveal">
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">🐧</span>
-          <div class="dl-info">
-            <h4>Linux x86_64 — GPU</h4>
-            <p>CUDA 12 runtime required · CLI + GUI bundles</p>
-          </div>
-        </a>
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">🐧</span>
-          <div class="dl-info">
-            <h4>Linux x86_64 — CPU</h4>
-            <p>No GPU required · OpenMP accelerated</p>
-          </div>
-        </a>
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">🪟</span>
-          <div class="dl-info">
-            <h4>Windows x86_64 — GPU</h4>
-            <p>CUDA 12 runtime required · CLI + GUI bundles</p>
-          </div>
-        </a>
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">🪟</span>
-          <div class="dl-info">
-            <h4>Windows x86_64 — CPU</h4>
-            <p>No GPU required · OpenMP accelerated</p>
-          </div>
-        </a>
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">🍎</span>
-          <div class="dl-info">
-            <h4>macOS arm64 — CPU / Metal</h4>
-            <p>Apple Silicon · Metal scaffold backend</p>
-          </div>
-        </a>
+        <p style="font-size:.82rem;color:var(--text-dim)">Replace <code>metal</code> with <code>cpu</code> in the URL if you don't need Metal acceleration.</p>
       </div>
     </div>
 
     <div class="tab-panel" id="tab-linux">
-      <div class="code-block reveal">
+      <div class="code-block">
         <button class="copy-btn" data-target="code-linux">Copy</button>
         <pre id="code-linux"><span class="comment"># GPU build (CUDA 12 toolkit required)</span>
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
@@ -946,18 +320,15 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release <span class="flag">-DDSO_ENABLE_CUDA=O
 cmake --build build --parallel $(nproc)
 
 <span class="comment"># Enable RAW camera file support (requires libraw-dev)</span>
-cmake -B build ... <span class="flag">-DDSO_ENABLE_LIBRAW=ON</span>
-
-<span class="comment"># Run</span>
-./build/dso_stacker -f frames.csv -o stacked.fits</pre>
+cmake -B build ... <span class="flag">-DDSO_ENABLE_LIBRAW=ON</span></pre>
       </div>
-      <p style="font-size:.85rem;color:var(--text-dim)">Prerequisites: CUDA Toolkit 12.x · CFITSIO 4.6.3 · libtiff · libpng · CMake ≥ 3.18 · LibRaw (optional)</p>
+      <p style="font-size:.82rem;color:var(--text-dim)">Prerequisites: CUDA Toolkit 12.x, CFITSIO, libtiff, libpng, CMake &ge; 3.18, LibRaw (optional)</p>
     </div>
 
     <div class="tab-panel" id="tab-windows">
-      <div class="code-block reveal">
+      <div class="code-block">
         <button class="copy-btn" data-target="code-windows">Copy</button>
-        <pre id="code-windows"><span class="comment"># Install C library dependencies via vcpkg</span>
+        <pre id="code-windows"><span class="comment"># Install dependencies via vcpkg</span>
 vcpkg install cfitsio tiff libpng libraw --triplet x64-windows
 
 <span class="comment"># Configure</span>
@@ -965,16 +336,16 @@ cmake -B build -G <span class="str">"Visual Studio 17 2022"</span> -A x64 `
       -DCMAKE_TOOLCHAIN_FILE=<span class="str">"$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"</span> `
       -DCMAKE_CUDA_COMPILER=<span class="str">"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/bin/nvcc.exe"</span>
 
-<span class="comment"># Compile</span>
+<span class="comment"># Build</span>
 cmake --build build --config Release --parallel</pre>
       </div>
-      <p style="font-size:.85rem;color:var(--text-dim)">Prerequisites: Visual Studio 2022 · CUDA Toolkit 12.x · <a href="https://vcpkg.io" style="color:var(--accent)">vcpkg</a></p>
+      <p style="font-size:.82rem;color:var(--text-dim)">Prerequisites: Visual Studio 2022, CUDA Toolkit 12.x, <a href="https://vcpkg.io" style="color:var(--accent)">vcpkg</a></p>
     </div>
 
     <div class="tab-panel" id="tab-macos">
-      <div class="code-block reveal">
+      <div class="code-block">
         <button class="copy-btn" data-target="code-macos">Copy</button>
-        <pre id="code-macos"><span class="comment"># Apple Silicon — Metal scaffold backend</span>
+        <pre id="code-macos"><span class="comment"># Apple Silicon &mdash; Metal scaffold backend</span>
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       <span class="flag">-DDSO_ENABLE_CUDA=OFF</span> \
       <span class="flag">-DDSO_ENABLE_METAL=ON</span>
@@ -984,130 +355,192 @@ cmake --build build --parallel
 ./build/dso_stacker -f frames.csv -o stacked.fits <span class="flag">--backend metal</span></pre>
       </div>
       <div class="callout callout-warn">
-        <span class="callout-icon">🔨</span>
-        <div><strong>Metal backend is scaffolded.</strong> Phase-1 wires backend selection and falls back to the CPU pipeline while Metal kernels are ported incrementally.</div>
+        <div><strong>Metal backend is scaffolded.</strong> Currently falls back to the CPU pipeline while Metal kernels are ported incrementally.</div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ─── Usage ─────────────────────────────────────────────────────────── -->
+<!-- Features -->
+<section id="features">
+  <div class="container">
+    <h2>Features</h2>
+    <p class="section-lead">From raw FITS or camera RAW files to a finished stack &mdash; debayering, alignment, calibration, and integration in one pipeline.</p>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <h3>GPU-Accelerated Pipeline</h3>
+        <p>Every compute-heavy stage runs on CUDA &mdash; VNG debayer, Moffat convolution, Lanczos warp, and kappa-sigma integration use double-buffered stream overlap for maximum GPU utilization.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Automatic Star Alignment</h3>
+        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Triangle-matching + DLT computes a full homography &mdash; no manual reference or pre-computed transforms required.</p>
+      </div>
+      <div class="feature-card">
+        <h3>RAW Camera File Support</h3>
+        <p>Load CR2, NEF, ARW, DNG, and 12 other RAW formats directly via LibRaw. Raw Bayer mosaic extraction with per-channel black subtraction. Build with <code>-DDSO_ENABLE_LIBRAW=ON</code>.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Full Color Output</h3>
+        <p>Bayer pattern auto-detection from FITS BAYERPAT keyword or RAW metadata. VNG demosaic produces separate R, G, B planes; all warp and integration stages run per-channel.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Calibration Frames</h3>
+        <p>Dark, flat, bias, and darkflat master generation via winsorized mean, median, or kappa-sigma stacking. Applied before debayering. Dead-pixel guard and flat normalization built-in.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Flexible Output Formats</h3>
+        <p>FITS (FP32), TIFF (FP32/FP16/INT16/INT8 + none/zip/lzw/rle), PNG (8/16-bit). Format detected from file extension.</p>
+      </div>
+      <div class="feature-card">
+        <h3>CPU &amp; Apple Silicon</h3>
+        <p>Full OpenMP-parallelized CPU path via <code>--cpu</code>. Metal backend scaffolded for Apple Silicon. CPU-only builds require no NVIDIA GPU or CUDA runtime.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Pipeline -->
+<section id="pipeline">
+  <div class="container">
+    <h2>Processing Pipeline</h2>
+    <p class="section-lead">Six stages, two execution paths. Pass <code>--cpu</code> to run everything with OpenMP instead of CUDA.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Stage</th><th>GPU path (default)</th><th>CPU path (<code>--cpu</code>)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td><td><strong>Debayering</strong></td>
+            <td>VNG demosaic &rarr; luminance <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>VNG demosaic &rarr; luminance <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+          <tr>
+            <td>2</td><td><strong>Star Detection</strong></td>
+            <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+          <tr>
+            <td>3</td><td><strong>Alignment</strong></td>
+            <td>Triangle matching + DLT <span class="pipe-tag tag-cpu">CPU</span> <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>Triangle matching + DLT <span class="pipe-tag tag-cpu">CPU</span></td>
+          </tr>
+          <tr>
+            <td>4</td><td><strong>Debayering (warp)</strong></td>
+            <td>VNG &rarr; lum or R/G/B <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>VNG &rarr; lum or R/G/B <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+          <tr>
+            <td>5</td><td><strong>Lanczos-3 Warp</strong></td>
+            <td><code>nppiRemap</code> + coord-map kernel <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>6-tap backward-map warp <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+          <tr>
+            <td>6</td><td><strong>Integration</strong></td>
+            <td>Mini-batch &kappa;-&sigma; clipping <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>Full &kappa;-&sigma; clipping <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:1.25rem;display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+      <div class="callout callout-info">
+        <div><strong>Single-pass loading</strong> &mdash; each frame file is opened exactly once. Star detection, alignment, and warping all complete before the next frame is loaded.</div>
+      </div>
+      <div class="callout callout-warn">
+        <div><strong>Mismatch handling</strong> &mdash; frames that fail alignment (too few stars or triangle-matching mismatch) are skipped gracefully.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Usage -->
 <section id="usage">
   <div class="container">
-    <h2>CLI <span class="accent">Usage</span></h2>
-    <p class="section-lead">Point it at a 2-column CSV frame list and choose your options. Star detection and alignment run automatically.</p>
+    <h2>CLI Usage</h2>
+    <p class="section-lead">Point it at a 2-column CSV frame list and choose your options.</p>
 
-    <h3 style="font-size:1rem;font-weight:600;color:#fff;margin-bottom:.75rem;margin-top:0">Input CSV format</h3>
-    <div class="code-block reveal" style="margin-bottom:2rem">
+    <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin-bottom:.5rem">Input CSV format</h3>
+    <div class="code-block" style="margin-bottom:1.5rem">
       <pre><span class="comment">filepath, is_reference</span>
 /data/frame1.fits, <span class="flag">1</span>
 /data/frame2.fits, 0
 /data/frame3.fits, 0</pre>
     </div>
 
-    <h3 style="font-size:1rem;font-weight:600;color:#fff;margin-bottom:.75rem">Example commands</h3>
+    <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin-bottom:.5rem">Examples</h3>
 
-    <div class="reveal">
-      <p style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);font-weight:600;margin-bottom:.4rem">GPU stack (default)</p>
-      <div class="code-block">
-        <button class="copy-btn" data-target="ex1">Copy</button>
-        <pre id="ex1">dso_stacker -f frames.csv -o stacked.fits</pre>
-      </div>
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">GPU stack (default)</p>
+    <div class="code-block">
+      <button class="copy-btn" data-target="ex1">Copy</button>
+      <pre id="ex1">dso_stacker -f frames.csv -o stacked.fits</pre>
     </div>
 
-    <div class="reveal">
-      <p style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);font-weight:600;margin-bottom:.4rem">CPU-only (no GPU required)</p>
-      <div class="code-block">
-        <button class="copy-btn" data-target="ex2">Copy</button>
-        <pre id="ex2">dso_stacker -f frames.csv -o stacked.fits <span class="flag">--cpu</span></pre>
-      </div>
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">CPU-only</p>
+    <div class="code-block">
+      <button class="copy-btn" data-target="ex2">Copy</button>
+      <pre id="ex2">dso_stacker -f frames.csv -o stacked.fits <span class="flag">--cpu</span></pre>
     </div>
 
-    <div class="reveal">
-      <p style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);font-weight:600;margin-bottom:.4rem">Color OSC camera (RGGB sensor)</p>
-      <div class="code-block">
-        <button class="copy-btn" data-target="ex3">Copy</button>
-        <pre id="ex3">dso_stacker -f frames.csv -o stacked.fits <span class="flag">--bayer rggb</span> --kappa 2.5 --iterations 5</pre>
-      </div>
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">Color OSC camera (RGGB sensor)</p>
+    <div class="code-block">
+      <button class="copy-btn" data-target="ex3">Copy</button>
+      <pre id="ex3">dso_stacker -f frames.csv -o stacked.fits <span class="flag">--bayer rggb</span> --kappa 2.5 --iterations 5</pre>
     </div>
 
-    <div class="reveal">
-      <p style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);font-weight:600;margin-bottom:.4rem">With calibration frames</p>
-      <div class="code-block">
-        <button class="copy-btn" data-target="ex4">Copy</button>
-        <pre id="ex4">dso_stacker -f frames.csv -o stacked.fits \
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">With calibration frames</p>
+    <div class="code-block">
+      <button class="copy-btn" data-target="ex4">Copy</button>
+      <pre id="ex4">dso_stacker -f frames.csv -o stacked.fits \
     <span class="flag">--bias</span>  bias_frames.txt \
     <span class="flag">--dark</span>  dark_frames.txt \
     <span class="flag">--flat</span>  flat_frames.txt \
     --save-master-frames ./masters</pre>
-      </div>
     </div>
 
-    <div class="reveal">
-      <p style="font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);font-weight:600;margin-bottom:.4rem">16-bit TIFF with ZIP compression</p>
-      <div class="code-block">
-        <button class="copy-btn" data-target="ex5">Copy</button>
-        <pre id="ex5">dso_stacker -f frames.csv -o stacked.tiff <span class="flag">--bit-depth 16 --tiff-compression zip</span></pre>
-      </div>
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">16-bit TIFF with ZIP compression</p>
+    <div class="code-block">
+      <button class="copy-btn" data-target="ex5">Copy</button>
+      <pre id="ex5">dso_stacker -f frames.csv -o stacked.tiff <span class="flag">--bit-depth 16 --tiff-compression zip</span></pre>
     </div>
 
-    <!-- Output formats table -->
-    <h3 style="font-size:1rem;font-weight:600;color:#fff;margin:2rem 0 .75rem">Output Formats</h3>
-    <div class="table-wrap reveal">
+    <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:1.5rem 0 .5rem">Output Formats</h3>
+    <div class="table-wrap">
       <table>
-        <thead>
-          <tr>
-            <th>Extension</th>
-            <th>Format</th>
-            <th>Bit depths</th>
-            <th>Compression</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Extension</th><th>Format</th><th>Bit depths</th><th>Compression</th></tr></thead>
         <tbody>
-          <tr>
-            <td><code>.fits</code> <code>.fit</code> <code>.fts</code></td>
-            <td>FITS</td>
-            <td>f32 (always)</td>
-            <td>none</td>
-          </tr>
-          <tr>
-            <td><code>.tif</code> <code>.tiff</code></td>
-            <td>TIFF</td>
-            <td>f32, f16, 16, 8</td>
-            <td>none · zip · lzw · rle</td>
-          </tr>
-          <tr>
-            <td><code>.png</code></td>
-            <td>PNG</td>
-            <td>16, 8</td>
-            <td>lossless DEFLATE</td>
-          </tr>
+          <tr><td><code>.fits</code> <code>.fit</code> <code>.fts</code></td><td>FITS</td><td>f32 (always)</td><td>none</td></tr>
+          <tr><td><code>.tif</code> <code>.tiff</code></td><td>TIFF</td><td>f32, f16, 16, 8</td><td>none / zip / lzw / rle</td></tr>
+          <tr><td><code>.png</code></td><td>PNG</td><td>16, 8</td><td>lossless DEFLATE</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 </section>
 
-<!-- ─── Benchmark ─────────────────────────────────────────────────────── -->
+<!-- Benchmark -->
 <section id="benchmark">
   <div class="container">
-    <h2>Performance <span class="accent">Benchmark</span></h2>
-    <p class="section-lead">10 × 4656×3520 frames, star-detection mode. Measured on an RTX 30/40-series GPU with double-buffered stream overlap.</p>
+    <h2>Benchmark</h2>
+    <p class="section-lead">10 &times; 4656&times;3520 frames, star-detection mode. RTX 30/40-series GPU.</p>
 
-    <div class="bench-grid reveal">
+    <div class="bench-grid">
       <div class="bench-card">
         <div class="bench-label">GPU (CUDA)</div>
         <div class="bench-value" style="color:var(--accent)">~2.6s</div>
-        <div class="bench-sub">Double-buffered CUDA stream overlap</div>
+        <div class="bench-sub">Double-buffered stream overlap</div>
       </div>
       <div class="bench-card">
         <div class="bench-label">CPU (OpenMP)</div>
         <div class="bench-value" style="color:var(--text-dim)">~11.5s</div>
-        <div class="bench-sub">All stages parallelized · full OpenMP</div>
+        <div class="bench-sub">All stages parallelized</div>
       </div>
     </div>
 
-    <div class="bar-wrap reveal">
+    <div class="bar-wrap">
       <div class="bar-row">
         <span class="bar-name">GPU</span>
         <div class="bar-track"><div class="bar-fill" style="width:23%;background:var(--accent)"></div></div>
@@ -1120,192 +553,109 @@ cmake --build build --parallel
       </div>
     </div>
 
-    <div class="callout callout-info reveal" style="margin-top:1.5rem">
-      <span class="callout-icon">📊</span>
-      <div>
-        <strong>Output agreement:</strong> PSNR ≈ 82.4 dB · Mean relative error ≈ 0.02% in image interior.
-        Differences arise from distinct floating-point paths (NPPI Lanczos vs hand-coded CPU, GPU mini-batch vs single-pass kappa-sigma, slight homography differences from Moffat conv precision).
-      </div>
+    <div class="callout callout-info" style="margin-top:1.25rem">
+      <div><strong>Output agreement:</strong> PSNR &asymp; 82.4 dB, mean relative error &asymp; 0.02% in image interior. Differences arise from distinct floating-point paths.</div>
     </div>
   </div>
 </section>
 
-<!-- ─── GUI ───────────────────────────────────────────────────────────── -->
+<!-- GUI -->
 <section id="gui">
   <div class="container">
-    <h2>Desktop <span class="accent">GUI</span></h2>
-    <p class="section-lead">A PySide6 desktop app wrapping the CLI. Drag-and-drop frame management, all stacking options, and YAML project save/load.</p>
+    <h2>Desktop GUI</h2>
+    <p class="section-lead">A PySide6 desktop app wrapping the CLI. Drag-and-drop frames, all stacking options, YAML project save/load.</p>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2.5rem;align-items:start">
+    <div class="gui-layout" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start">
       <div>
-        <ul style="list-style:none;display:flex;flex-direction:column;gap:.9rem;margin-bottom:2rem">
-          <li class="reveal" style="display:flex;gap:.75rem;align-items:flex-start">
-            <span style="color:var(--accent3);font-size:1.1rem;flex-shrink:0">✓</span>
-            <div><strong style="color:#fff">Drag-and-drop frames</strong><br /><span style="font-size:.85rem;color:var(--text-dim)">Drop FITS or RAW camera files onto Light, Dark, Flat, Bias, or Darkflat tabs</span></div>
-          </li>
-          <li class="reveal" style="display:flex;gap:.75rem;align-items:flex-start">
-            <span style="color:var(--accent3);font-size:1.1rem;flex-shrink:0">✓</span>
-            <div><strong style="color:#fff">Async image metadata</strong><br /><span style="font-size:.85rem;color:var(--text-dim)">Filename, path, size, and W×H loaded in background from FITS headers or RAW metadata — UI never blocks</span></div>
-          </li>
-          <li class="reveal" style="display:flex;gap:.75rem;align-items:flex-start">
-            <span style="color:var(--accent3);font-size:1.1rem;flex-shrink:0">✓</span>
-            <div><strong style="color:#fff">Conditional options</strong><br /><span style="font-size:.85rem;color:var(--text-dim)">Kappa/iterations hidden for mean integration; compression hidden for non-TIFF; stretch bounds hidden for FP output</span></div>
-          </li>
-          <li class="reveal" style="display:flex;gap:.75rem;align-items:flex-start">
-            <span style="color:var(--accent3);font-size:1.1rem;flex-shrink:0">✓</span>
-            <div><strong style="color:#fff">YAML project files</strong><br /><span style="font-size:.85rem;color:var(--text-dim)">Save and reload complete project state — all frame lists and every option</span></div>
-          </li>
-          <li class="reveal" style="display:flex;gap:.75rem;align-items:flex-start">
-            <span style="color:var(--accent3);font-size:1.1rem;flex-shrink:0">✓</span>
-            <div><strong style="color:#fff">Live log + Abort</strong><br /><span style="font-size:.85rem;color:var(--text-dim)">Subprocess stdout/stderr streamed to collapsible log panel; Abort terminates without zombie processes</span></div>
-          </li>
+        <ul style="list-style:none;display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.5rem">
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Drag-and-drop FITS or RAW files onto Light, Dark, Flat, Bias, or Darkflat tabs</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Async FITS metadata loading &mdash; UI never blocks</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Conditional option visibility based on integration method and output format</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> YAML project files &mdash; save and reload complete state</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Live log output + abort support</li>
         </ul>
 
-        <div class="code-block reveal">
+        <div class="code-block">
           <pre><span class="comment"># Install Python deps</span>
 pip install PySide6 pyyaml
 
 <span class="comment"># Launch</span>
 python src/GUI/main.py</pre>
         </div>
-        <p style="font-size:.8rem;color:var(--text-dim)">Or download a pre-built GUI bundle from <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases</a> — no Python required.</p>
+        <p style="font-size:.8rem;color:var(--text-dim)">Or download a pre-built GUI bundle from <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases</a>.</p>
       </div>
 
-      <!-- GUI screenshot -->
-      <div class="gui-screenshot reveal">
-        <img src="example_screenshot.png" alt="DSO Stacker GUI — PySide6 desktop application showing the Light tab with loaded FITS frames and stacking options" loading="lazy" />
+      <div class="gui-screenshot">
+        <img src="example_screenshot.png" alt="DSO Stacker GUI" loading="lazy" />
       </div>
     </div>
   </div>
 </section>
 
-<!-- ─── Tests ─────────────────────────────────────────────────────────── -->
+<!-- Tests -->
 <section id="tests">
   <div class="container">
-    <h2>Test <span class="accent">Coverage</span></h2>
-    <p class="section-lead">180+ tests across 12 suites. GPU test suites return CTest exit code 77 (SKIP) when no CUDA device is found.</p>
-    <div class="table-wrap reveal">
+    <h2>Test Coverage</h2>
+    <p class="section-lead">180+ tests across 12 suites. GPU tests auto-skip (exit 77) when no CUDA device is found.</p>
+    <div class="table-wrap">
       <table>
-        <thead>
-          <tr><th>Suite</th><th>Tests</th><th>What it covers</th></tr>
-        </thead>
+        <thead><tr><th>Suite</th><th>Tests</th><th>Coverage</th></tr></thead>
         <tbody>
-          <tr><td><code>test_cpu</code></td><td>29</td><td>CSV parser · FITS I/O · integration · Lanczos CPU</td></tr>
-          <tr><td><code>test_gpu</code></td><td>5</td><td>GPU Lanczos (auto-skipped without GPU)</td></tr>
-          <tr><td><code>test_star_detect</code></td><td>21</td><td>CCL + CoM · Moffat conv + threshold</td></tr>
-          <tr><td><code>test_ransac</code></td><td>13</td><td>DLT homography · triangle matching · RANSAC</td></tr>
-          <tr><td><code>test_debayer_cpu</code></td><td>10</td><td>VNG debayer: all 4 Bayer patterns, edge cases</td></tr>
+          <tr><td><code>test_cpu</code></td><td>29</td><td>CSV parser, FITS I/O, integration, Lanczos CPU</td></tr>
+          <tr><td><code>test_gpu</code></td><td>5</td><td>GPU Lanczos</td></tr>
+          <tr><td><code>test_star_detect</code></td><td>21</td><td>CCL + CoM, Moffat conv + threshold</td></tr>
+          <tr><td><code>test_ransac</code></td><td>13</td><td>DLT homography, triangle matching, RANSAC</td></tr>
+          <tr><td><code>test_debayer_cpu</code></td><td>10</td><td>VNG debayer: all 4 Bayer patterns + edge cases</td></tr>
           <tr><td><code>test_integration_gpu</code></td><td>9</td><td>GPU mini-batch kappa-sigma</td></tr>
-          <tr><td><code>test_calibration</code></td><td>26</td><td>Dark/flat apply · masters · winsorized mean · median · flat normalization</td></tr>
-          <tr><td><code>test_color</code></td><td>33</td><td>OSC color output · <code>fits_save_rgb</code> · Bayer pattern detection</td></tr>
-          <tr><td><code>test_image_io</code></td><td>21</td><td>Format detection · FITS · TIFF · PNG · auto-stretch</td></tr>
-          <tr><td><code>test_pipeline_backend</code></td><td>—</td><td>Backend dispatch validation</td></tr>
-          <tr><td><code>test_audit</code></td><td>4</td><td>Integration stability · CCL large-frame · Lanczos baseline · RANSAC non-determinism</td></tr>
-          <tr><td><code>test_raw_io</code></td><td>10</td><td>Extension detection · FITS fallback · RAW dispatch · LibRaw error handling</td></tr>
+          <tr><td><code>test_calibration</code></td><td>26</td><td>Dark/flat apply, masters, winsorized mean, median</td></tr>
+          <tr><td><code>test_color</code></td><td>33</td><td>Color output, fits_save_rgb, Bayer detection</td></tr>
+          <tr><td><code>test_image_io</code></td><td>21</td><td>Format detection, FITS, TIFF, PNG, auto-stretch</td></tr>
+          <tr><td><code>test_audit</code></td><td>4</td><td>Integration stability, CCL large-frame, Lanczos baseline</td></tr>
+          <tr><td><code>test_raw_io</code></td><td>10</td><td>Extension detection, FITS fallback, RAW dispatch</td></tr>
         </tbody>
       </table>
     </div>
-    <div class="code-block reveal" style="margin-top:1.25rem">
+    <div class="code-block" style="margin-top:.75rem">
       <pre>cd build && ctest --output-on-failure -V</pre>
     </div>
   </div>
 </section>
 
-<!-- ─── Footer ────────────────────────────────────────────────────────── -->
+<!-- Footer -->
 <footer>
   <div class="container">
     <div class="footer-inner">
       <div class="footer-brand">
-        <span class="logo">⊙ gpu-dso-stacker</span>
-        <p>High-performance deep sky object image stacker with CUDA, Metal, and CPU backends.</p>
+        <span class="logo">gpu-dso-stacker</span>
+        <p>GPU-accelerated deep sky object image stacker with CUDA, Metal, and CPU backends.</p>
       </div>
-      <div class="footer-col">
-        <h4>Project</h4>
-        <ul>
-          <li><a href="https://github.com/gs18113/gpu-dso-stacker" target="_blank">GitHub Repository</a></li>
-          <li><a href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">Releases</a></li>
-          <li><a href="https://github.com/gs18113/gpu-dso-stacker/actions" target="_blank">CI Status</a></li>
-          <li><a href="https://github.com/gs18113/gpu-dso-stacker/issues" target="_blank">Issues</a></li>
-        </ul>
-      </div>
-      <div class="footer-col">
-        <h4>Links</h4>
-        <ul>
-          <li><a href="#features">Features</a></li>
-          <li><a href="#pipeline">Pipeline</a></li>
-          <li><a href="#install">Install</a></li>
-          <li><a href="#usage">Usage</a></li>
-          <li><a href="#benchmark">Benchmark</a></li>
-          <li><a href="#gui">GUI</a></li>
-        </ul>
+      <div class="footer-links">
+        <a href="https://github.com/gs18113/gpu-dso-stacker" target="_blank">GitHub</a>
+        <a href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">Releases</a>
+        <a href="https://github.com/gs18113/gpu-dso-stacker/actions" target="_blank">CI</a>
+        <a href="https://github.com/gs18113/gpu-dso-stacker/issues" target="_blank">Issues</a>
       </div>
     </div>
     <p class="footer-copy">
-      Licensed under <a href="https://github.com/gs18113/gpu-dso-stacker/blob/main/LICENSE" target="_blank">GPLv3</a> ·
-      Built with C11, CUDA 12, and OpenMP ·
-      <a href="https://github.com/gs18113/gpu-dso-stacker" target="_blank">github.com/gs18113/gpu-dso-stacker</a>
+      Licensed under <a href="https://github.com/gs18113/gpu-dso-stacker/blob/main/LICENSE" target="_blank">GPLv3</a> &middot;
+      Built with C11, CUDA 12, and OpenMP
     </p>
   </div>
 </footer>
 
-<!-- ─── Scripts ───────────────────────────────────────────────────────── -->
 <script>
-/* Starfield */
-(function () {
-  const canvas = document.getElementById('stars-canvas');
-  const ctx = canvas.getContext('2d');
-  let stars = [];
-
-  function resize() {
-    canvas.width  = window.innerWidth;
-    canvas.height = window.innerHeight;
-  }
-
-  function init() {
-    resize();
-    stars = Array.from({ length: 200 }, () => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      r: Math.random() * 1.2 + 0.2,
-      a: Math.random(),
-      da: (Math.random() - 0.5) * 0.005,
-    }));
-  }
-
-  function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const s of stars) {
-      s.a += s.da;
-      if (s.a < 0 || s.a > 1) s.da *= -1;
-      ctx.globalAlpha = Math.max(0, Math.min(1, s.a));
-      ctx.fillStyle = '#c9d1e0';
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-    requestAnimationFrame(draw);
-  }
-
-  window.addEventListener('resize', init);
-  init();
-  draw();
-})();
-
 /* Nav hamburger */
 document.getElementById('hamburger').addEventListener('click', function () {
   document.getElementById('nav-links').classList.toggle('open');
 });
 
-/* Tab switcher — scoped to sibling .tabs group to support nested tabs */
+/* Tab switcher */
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', function () {
     const tabsRow = this.closest('.tabs');
     if (!tabsRow) return;
-    /* Only affect buttons in the same .tabs row */
     tabsRow.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
     this.classList.add('active');
-    /* Find sibling panels: they follow the .tabs row in the same parent */
     const parent = tabsRow.parentElement;
     const allPanels = parent.querySelectorAll(':scope > .tab-panel');
     allPanels.forEach(p => p.classList.remove('active'));
@@ -1326,24 +676,6 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     });
   });
 });
-
-/* Scroll reveal */
-const observer = new IntersectionObserver(entries => {
-  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
-}, { threshold: 0.08 });
-document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
-
-/* Animate bars on scroll */
-const barObserver = new IntersectionObserver(entries => {
-  entries.forEach(e => {
-    if (e.isIntersecting) {
-      e.target.querySelectorAll('.bar-fill').forEach(fill => {
-        fill.style.width = fill.getAttribute('data-w') || fill.style.width;
-      });
-    }
-  });
-}, { threshold: 0.3 });
-document.querySelectorAll('.bar-wrap').forEach(el => barObserver.observe(el));
 </script>
 </body>
 </html>
