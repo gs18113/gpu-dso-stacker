@@ -192,10 +192,10 @@
     <ul class="nav-links" id="nav-links">
       <li><a href="#install">Install</a></li>
       <li><a href="#features">Features</a></li>
-      <li><a href="#pipeline">Pipeline</a></li>
-      <li><a href="#usage">Usage</a></li>
-      <li><a href="#benchmark">Benchmark</a></li>
       <li><a href="#gui">GUI</a></li>
+      <li><a href="#benchmark">Benchmark</a></li>
+      <li><a href="#usage">CLI</a></li>
+      <li><a href="#pipeline">Pipeline</a></li>
       <li><a href="https://github.com/gs18113/gpu-dso-stacker" target="_blank" class="nav-cta">GitHub</a></li>
     </ul>
   </div>
@@ -400,59 +400,76 @@ cmake --build build --parallel
   </div>
 </section>
 
-<!-- Pipeline -->
-<section id="pipeline">
+<!-- GUI -->
+<section id="gui">
   <div class="container">
-    <h2>Processing Pipeline</h2>
-    <p class="section-lead">Six stages, two execution paths. Pass <code>--cpu</code> to run everything with OpenMP instead of CUDA.</p>
+    <h2>Desktop GUI</h2>
+    <p class="section-lead">A PySide6 desktop app wrapping the CLI. Drag-and-drop frame management, all stacking options, and YAML project save/load.</p>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr><th>#</th><th>Stage</th><th>GPU path (default)</th><th>CPU path (<code>--cpu</code>)</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>1</td><td><strong>Debayering</strong></td>
-            <td>VNG demosaic &rarr; luminance <span class="pipe-tag tag-cuda">CUDA</span></td>
-            <td>VNG demosaic &rarr; luminance <span class="pipe-tag tag-omp">OpenMP</span></td>
-          </tr>
-          <tr>
-            <td>2</td><td><strong>Star Detection</strong></td>
-            <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-cuda">CUDA</span></td>
-            <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-omp">OpenMP</span></td>
-          </tr>
-          <tr>
-            <td>3</td><td><strong>Alignment</strong></td>
-            <td>Triangle matching + DLT <span class="pipe-tag tag-cpu">CPU</span> <span class="pipe-tag tag-cuda">CUDA</span></td>
-            <td>Triangle matching + DLT <span class="pipe-tag tag-cpu">CPU</span></td>
-          </tr>
-          <tr>
-            <td>4</td><td><strong>Debayering (warp)</strong></td>
-            <td>VNG &rarr; lum or R/G/B <span class="pipe-tag tag-cuda">CUDA</span></td>
-            <td>VNG &rarr; lum or R/G/B <span class="pipe-tag tag-omp">OpenMP</span></td>
-          </tr>
-          <tr>
-            <td>5</td><td><strong>Lanczos-3 Warp</strong></td>
-            <td><code>nppiRemap</code> + coord-map kernel <span class="pipe-tag tag-cuda">CUDA</span></td>
-            <td>6-tap backward-map warp <span class="pipe-tag tag-omp">OpenMP</span></td>
-          </tr>
-          <tr>
-            <td>6</td><td><strong>Integration</strong></td>
-            <td>Mini-batch &kappa;-&sigma; clipping <span class="pipe-tag tag-cuda">CUDA</span></td>
-            <td>Full &kappa;-&sigma; clipping <span class="pipe-tag tag-omp">OpenMP</span></td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="gui-layout" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start">
+      <div>
+        <p style="font-size:.9rem;color:var(--text);margin-bottom:1rem">Pre-built GUI bundles are available on the <a href="https://github.com/gs18113/gpu-dso-stacker/releases/latest" style="color:var(--accent)" target="_blank">Releases page</a> for Linux, Windows, and macOS. No Python installation required &mdash; just download, extract, and run.</p>
+
+        <ul style="list-style:none;display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.5rem">
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Drag-and-drop FITS or RAW files onto Light, Dark, Flat, Bias, or Darkflat tabs</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Async FITS metadata loading &mdash; UI never blocks</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Conditional option visibility based on integration method and output format</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> YAML project files &mdash; save and reload complete state</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Live log output + abort support</li>
+        </ul>
+
+        <h3 style="font-size:.9rem;font-weight:600;color:#fff;margin-bottom:.5rem">Running from source</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.5rem">If you built the CLI from source, you can run the GUI directly with Python:</p>
+        <div class="code-block">
+          <pre><span class="comment"># Install Python deps</span>
+pip install PySide6 pyyaml
+
+<span class="comment"># Launch (expects ./build/dso_stacker to exist)</span>
+python src/GUI/main.py</pre>
+        </div>
+      </div>
+
+      <div class="gui-screenshot">
+        <img src="example_screenshot.png" alt="DSO Stacker GUI" loading="lazy" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Benchmark -->
+<section id="benchmark">
+  <div class="container">
+    <h2>Benchmark</h2>
+    <p class="section-lead">10 &times; 4656&times;3520 frames, star-detection mode. RTX 30/40-series GPU.</p>
+
+    <div class="bench-grid">
+      <div class="bench-card">
+        <div class="bench-label">GPU (CUDA)</div>
+        <div class="bench-value" style="color:var(--accent)">~2.6s</div>
+        <div class="bench-sub">Double-buffered stream overlap</div>
+      </div>
+      <div class="bench-card">
+        <div class="bench-label">CPU (OpenMP)</div>
+        <div class="bench-value" style="color:var(--text-dim)">~11.5s</div>
+        <div class="bench-sub">All stages parallelized</div>
+      </div>
     </div>
 
-    <div style="margin-top:1.25rem;display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
-      <div class="callout callout-info">
-        <div><strong>Single-pass loading</strong> &mdash; each frame file is opened exactly once. Star detection, alignment, and warping all complete before the next frame is loaded.</div>
+    <div class="bar-wrap">
+      <div class="bar-row">
+        <span class="bar-name">GPU</span>
+        <div class="bar-track"><div class="bar-fill" style="width:23%;background:var(--accent)"></div></div>
+        <span class="bar-time">2.6 s</span>
       </div>
-      <div class="callout callout-warn">
-        <div><strong>Mismatch handling</strong> &mdash; frames that fail alignment (too few stars or triangle-matching mismatch) are skipped gracefully.</div>
+      <div class="bar-row">
+        <span class="bar-name">CPU</span>
+        <div class="bar-track"><div class="bar-fill" style="width:100%;background:var(--text-dim)"></div></div>
+        <span class="bar-time">11.5 s</span>
       </div>
+    </div>
+
+    <div class="callout callout-info" style="margin-top:1.25rem">
+      <div><strong>Output agreement:</strong> PSNR &asymp; 82.4 dB, mean relative error &asymp; 0.02% in image interior. Differences arise from distinct floating-point paths.</div>
     </div>
   </div>
 </section>
@@ -521,72 +538,58 @@ cmake --build build --parallel
   </div>
 </section>
 
-<!-- Benchmark -->
-<section id="benchmark">
+<!-- Pipeline -->
+<section id="pipeline">
   <div class="container">
-    <h2>Benchmark</h2>
-    <p class="section-lead">10 &times; 4656&times;3520 frames, star-detection mode. RTX 30/40-series GPU.</p>
+    <h2>Processing Pipeline</h2>
+    <p class="section-lead">Six stages, two execution paths. Pass <code>--cpu</code> to run everything with OpenMP instead of CUDA.</p>
 
-    <div class="bench-grid">
-      <div class="bench-card">
-        <div class="bench-label">GPU (CUDA)</div>
-        <div class="bench-value" style="color:var(--accent)">~2.6s</div>
-        <div class="bench-sub">Double-buffered stream overlap</div>
-      </div>
-      <div class="bench-card">
-        <div class="bench-label">CPU (OpenMP)</div>
-        <div class="bench-value" style="color:var(--text-dim)">~11.5s</div>
-        <div class="bench-sub">All stages parallelized</div>
-      </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Stage</th><th>GPU path (default)</th><th>CPU path (<code>--cpu</code>)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td><td><strong>Debayering</strong></td>
+            <td>VNG demosaic &rarr; luminance <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>VNG demosaic &rarr; luminance <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+          <tr>
+            <td>2</td><td><strong>Star Detection</strong></td>
+            <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+          <tr>
+            <td>3</td><td><strong>Alignment</strong></td>
+            <td>Triangle matching + DLT <span class="pipe-tag tag-cpu">CPU</span> <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>Triangle matching + DLT <span class="pipe-tag tag-cpu">CPU</span></td>
+          </tr>
+          <tr>
+            <td>4</td><td><strong>Debayering (warp)</strong></td>
+            <td>VNG &rarr; lum or R/G/B <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>VNG &rarr; lum or R/G/B <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+          <tr>
+            <td>5</td><td><strong>Lanczos-3 Warp</strong></td>
+            <td><code>nppiRemap</code> + coord-map kernel <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>6-tap backward-map warp <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+          <tr>
+            <td>6</td><td><strong>Integration</strong></td>
+            <td>Mini-batch &kappa;-&sigma; clipping <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>Full &kappa;-&sigma; clipping <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
-    <div class="bar-wrap">
-      <div class="bar-row">
-        <span class="bar-name">GPU</span>
-        <div class="bar-track"><div class="bar-fill" style="width:23%;background:var(--accent)"></div></div>
-        <span class="bar-time">2.6 s</span>
+    <div style="margin-top:1.25rem;display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+      <div class="callout callout-info">
+        <div><strong>Single-pass loading</strong> &mdash; each frame file is opened exactly once. Star detection, alignment, and warping all complete before the next frame is loaded.</div>
       </div>
-      <div class="bar-row">
-        <span class="bar-name">CPU</span>
-        <div class="bar-track"><div class="bar-fill" style="width:100%;background:var(--text-dim)"></div></div>
-        <span class="bar-time">11.5 s</span>
-      </div>
-    </div>
-
-    <div class="callout callout-info" style="margin-top:1.25rem">
-      <div><strong>Output agreement:</strong> PSNR &asymp; 82.4 dB, mean relative error &asymp; 0.02% in image interior. Differences arise from distinct floating-point paths.</div>
-    </div>
-  </div>
-</section>
-
-<!-- GUI -->
-<section id="gui">
-  <div class="container">
-    <h2>Desktop GUI</h2>
-    <p class="section-lead">A PySide6 desktop app wrapping the CLI. Drag-and-drop frames, all stacking options, YAML project save/load.</p>
-
-    <div class="gui-layout" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start">
-      <div>
-        <ul style="list-style:none;display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.5rem">
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Drag-and-drop FITS or RAW files onto Light, Dark, Flat, Bias, or Darkflat tabs</li>
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Async FITS metadata loading &mdash; UI never blocks</li>
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Conditional option visibility based on integration method and output format</li>
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> YAML project files &mdash; save and reload complete state</li>
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Live log output + abort support</li>
-        </ul>
-
-        <div class="code-block">
-          <pre><span class="comment"># Install Python deps</span>
-pip install PySide6 pyyaml
-
-<span class="comment"># Launch</span>
-python src/GUI/main.py</pre>
-        </div>
-        <p style="font-size:.8rem;color:var(--text-dim)">Or download a pre-built GUI bundle from <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases</a>.</p>
-      </div>
-
-      <div class="gui-screenshot">
-        <img src="example_screenshot.png" alt="DSO Stacker GUI" loading="lazy" />
+      <div class="callout callout-warn">
+        <div><strong>Mismatch handling</strong> &mdash; frames that fail alignment (too few stars or triangle-matching mismatch) are skipped gracefully.</div>
       </div>
     </div>
   </div>
