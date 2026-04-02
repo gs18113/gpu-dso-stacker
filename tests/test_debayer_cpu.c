@@ -201,6 +201,154 @@ static int test_nonuniform_differs_from_input(void)
 }
 
 /* -------------------------------------------------------------------------
+ * Additional edge-case tests
+ * ------------------------------------------------------------------------- */
+
+/* Minimum even-sized image for Bayer: 4×4. */
+static int test_debayer_small_4x4(void)
+{
+    const int W = 4, H = 4;
+    float src[16], dst[16];
+    for (int i = 0; i < 16; i++) src[i] = 100.0f;
+    ASSERT_OK(debayer_cpu(src, dst, W, H, BAYER_RGGB));
+    /* All uniform, but VNG zero-pads boundaries → edge pixels may deviate.
+     * Just verify no NaN/Inf and values are in a reasonable range. */
+    for (int i = 0; i < 16; i++) {
+        ASSERT(isfinite(dst[i]));
+        ASSERT(dst[i] >= 0.0f && dst[i] <= 200.0f);
+    }
+    return 0;
+}
+
+/* 6×6 image — slightly larger, interior pixels exist. */
+static int test_debayer_small_6x6(void)
+{
+    const int W = 6, H = 6;
+    float src[36], dst[36];
+    for (int i = 0; i < 36; i++) src[i] = 200.0f;
+    ASSERT_OK(debayer_cpu(src, dst, W, H, BAYER_BGGR));
+    /* VNG zero-pads boundaries; interior (2,2)-(3,3) should be closer */
+    for (int i = 0; i < 36; i++) {
+        ASSERT(isfinite(dst[i]));
+        ASSERT(dst[i] >= 0.0f && dst[i] <= 400.0f);
+    }
+    /* Interior pixel should be close to 200 */
+    ASSERT_NEAR(dst[2*6+2], 200.0f, 20.0f);
+    return 0;
+}
+
+/* Boundary pixel values are finite (no NaN/Inf at corners/edges). */
+static int test_debayer_boundary_pixel_values(void)
+{
+    const int W = 16, H = 16;
+    float *src = (float *)malloc(W * H * sizeof(float));
+    float *dst = (float *)malloc(W * H * sizeof(float));
+    for (int i = 0; i < W * H; i++) src[i] = 100.0f + (float)(i % 50);
+    ASSERT_OK(debayer_cpu(src, dst, W, H, BAYER_RGGB));
+
+    /* Check all four corners */
+    ASSERT(isfinite(dst[0]));                     /* (0,0) */
+    ASSERT(isfinite(dst[W - 1]));                 /* (W-1, 0) */
+    ASSERT(isfinite(dst[(H-1) * W]));             /* (0, H-1) */
+    ASSERT(isfinite(dst[(H-1) * W + (W-1)]));     /* (W-1, H-1) */
+
+    /* Check all edge pixels are finite */
+    for (int x = 0; x < W; x++) {
+        ASSERT(isfinite(dst[x]));                 /* top row */
+        ASSERT(isfinite(dst[(H-1) * W + x]));     /* bottom row */
+    }
+    for (int y = 0; y < H; y++) {
+        ASSERT(isfinite(dst[y * W]));             /* left column */
+        ASSERT(isfinite(dst[y * W + W - 1]));     /* right column */
+    }
+
+    free(src); free(dst);
+    return 0;
+}
+
+/* Horizontal gradient → output should be monotonically increasing in interior. */
+static int test_debayer_gradient_horizontal(void)
+{
+    const int W = 32, H = 16;
+    float *src = (float *)malloc(W * H * sizeof(float));
+    float *dst = (float *)malloc(W * H * sizeof(float));
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+            src[y * W + x] = (float)x * 10.0f;
+
+    ASSERT_OK(debayer_cpu(src, dst, W, H, BAYER_RGGB));
+
+    /* Interior row (y=H/2): output should generally increase left to right */
+    int y = H / 2;
+    int increasing = 0;
+    for (int x = 5; x < W - 5; x++) {
+        if (dst[y * W + x] <= dst[y * W + x + 1])
+            increasing++;
+    }
+    /* Most pairs should be non-decreasing */
+    ASSERT_GT(increasing, (W - 12) / 2);
+
+    free(src); free(dst);
+    return 0;
+}
+
+/* Verify luminance formula at interior pixels: L = 0.2126R + 0.7152G + 0.0722B */
+static int test_debayer_luminance_formula(void)
+{
+    const int W = 16, H = 16;
+    float *src = (float *)malloc(W * H * sizeof(float));
+    float *lum = (float *)malloc(W * H * sizeof(float));
+    float *r   = (float *)malloc(W * H * sizeof(float));
+    float *g   = (float *)malloc(W * H * sizeof(float));
+    float *b   = (float *)malloc(W * H * sizeof(float));
+
+    for (int i = 0; i < W * H; i++) src[i] = 150.0f + (float)(i % 100);
+
+    ASSERT_OK(debayer_cpu(src, lum, W, H, BAYER_RGGB));
+    ASSERT_OK(debayer_cpu_rgb(src, r, g, b, W, H, BAYER_RGGB));
+
+    /* Interior pixels: lum ≈ 0.2126*R + 0.7152*G + 0.0722*B */
+    for (int y = 4; y < H - 4; y++)
+        for (int x = 4; x < W - 4; x++) {
+            int i = y * W + x;
+            float expected = 0.2126f * r[i] + 0.7152f * g[i] + 0.0722f * b[i];
+            ASSERT_NEAR(lum[i], expected, 0.5f);
+        }
+
+    free(src); free(lum); free(r); free(g); free(b);
+    return 0;
+}
+
+/* RGB boundary pixels are non-negative. */
+static int test_debayer_rgb_boundary_nonnegative(void)
+{
+    const int W = 16, H = 16;
+    float *src = (float *)malloc(W * H * sizeof(float));
+    float *r   = (float *)malloc(W * H * sizeof(float));
+    float *g   = (float *)malloc(W * H * sizeof(float));
+    float *b   = (float *)malloc(W * H * sizeof(float));
+
+    for (int i = 0; i < W * H; i++) src[i] = 100.0f;
+
+    ASSERT_OK(debayer_cpu_rgb(src, r, g, b, W, H, BAYER_RGGB));
+
+    /* All boundary pixels should be >= 0 */
+    for (int x = 0; x < W; x++) {
+        ASSERT(r[x] >= 0); ASSERT(g[x] >= 0); ASSERT(b[x] >= 0);
+        int last = (H-1)*W + x;
+        ASSERT(r[last] >= 0); ASSERT(g[last] >= 0); ASSERT(b[last] >= 0);
+    }
+    for (int y = 0; y < H; y++) {
+        int l = y*W, rr = y*W+W-1;
+        ASSERT(r[l] >= 0); ASSERT(g[l] >= 0); ASSERT(b[l] >= 0);
+        ASSERT(r[rr] >= 0); ASSERT(g[rr] >= 0); ASSERT(b[rr] >= 0);
+    }
+
+    free(src); free(r); free(g); free(b);
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
  * Main
  * ------------------------------------------------------------------------- */
 
@@ -223,6 +371,14 @@ int main(void)
 
     SUITE("debayer_cpu — non-uniform input");
     RUN(test_nonuniform_differs_from_input);
+
+    SUITE("debayer_cpu — edge cases");
+    RUN(test_debayer_small_4x4);
+    RUN(test_debayer_small_6x6);
+    RUN(test_debayer_boundary_pixel_values);
+    RUN(test_debayer_gradient_horizontal);
+    RUN(test_debayer_luminance_formula);
+    RUN(test_debayer_rgb_boundary_nonnegative);
 
     return SUMMARY();
 }

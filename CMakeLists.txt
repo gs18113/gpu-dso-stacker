@@ -323,3 +323,21 @@ add_executable(test_raw_io tests/test_raw_io.c)
 target_include_directories(test_raw_io PRIVATE tests)
 target_link_libraries(test_raw_io PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_raw_io COMMAND test_raw_io)
+
+# End-to-end CPU pipeline tests
+add_executable(test_pipeline_cpu tests/test_pipeline_cpu.c)
+target_include_directories(test_pipeline_cpu PRIVATE tests)
+target_link_libraries(test_pipeline_cpu PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_pipeline_cpu COMMAND test_pipeline_cpu)
+
+# Cross-stage integration tests
+add_executable(test_cross_stage tests/test_cross_stage.c test/star_coords_generator.c)
+target_include_directories(test_cross_stage PRIVATE tests test)
+target_link_libraries(test_cross_stage PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_cross_stage COMMAND test_cross_stage)
+
+# Numerical edge case tests (NaN/Inf/precision)
+add_executable(test_numerical tests/test_numerical.c)
+target_include_directories(test_numerical PRIVATE tests)
+target_link_libraries(test_numerical PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_numerical COMMAND test_numerical)

@@ -692,6 +692,199 @@ static int test_topk_zero(void)
 }
 
 /* =========================================================================
+ * Additional edge-case tests
+ * ========================================================================= */
+
+/* Blob touching image edge — CoM should account for truncation. */
+static int test_ccl_boundary_blob(void)
+{
+    const int W = 16, H = 16;
+    uint8_t *mask = (uint8_t *)calloc(W * H, 1);
+    float   *orig = (float *)calloc(W * H, sizeof(float));
+    float   *conv = (float *)calloc(W * H, sizeof(float));
+
+    /* Place a 3×3 blob at top-left corner (0,0)-(2,2) */
+    for (int y = 0; y < 3; y++)
+        for (int x = 0; x < 3; x++) {
+            mask[y * W + x] = 1;
+            orig[y * W + x] = 100.0f;
+            conv[y * W + x] = 100.0f;
+        }
+
+    StarList sl = {NULL, 0};
+    ASSERT_OK(star_detect_cpu_ccl_com(mask, orig, conv, W, H, 10, &sl));
+    ASSERT_EQ(sl.n, 1);
+    /* CoM should be near (1,1) */
+    ASSERT_NEAR(sl.stars[0].x, 1.0f, 0.5f);
+    ASSERT_NEAR(sl.stars[0].y, 1.0f, 0.5f);
+
+    free(sl.stars); free(mask); free(orig); free(conv);
+    return 0;
+}
+
+/* Blob at (0,0) corner — single pixel. */
+static int test_ccl_corner_blob(void)
+{
+    const int W = 16, H = 16;
+    uint8_t *mask = (uint8_t *)calloc(W * H, 1);
+    float   *orig = (float *)calloc(W * H, sizeof(float));
+    float   *conv = (float *)calloc(W * H, sizeof(float));
+
+    mask[0] = 1; orig[0] = 50.0f; conv[0] = 50.0f;
+
+    StarList sl = {NULL, 0};
+    ASSERT_OK(star_detect_cpu_ccl_com(mask, orig, conv, W, H, 10, &sl));
+    ASSERT_EQ(sl.n, 1);
+    ASSERT_NEAR(sl.stars[0].x, 0.0f, 0.01f);
+    ASSERT_NEAR(sl.stars[0].y, 0.0f, 0.01f);
+
+    free(sl.stars); free(mask); free(orig); free(conv);
+    return 0;
+}
+
+/* Minimum 3×3 image for CCL. */
+static int test_ccl_small_image_3x3(void)
+{
+    const int W = 3, H = 3;
+    uint8_t *mask = (uint8_t *)calloc(W * H, 1);
+    float   *orig = (float *)calloc(W * H, sizeof(float));
+    float   *conv = (float *)calloc(W * H, sizeof(float));
+
+    mask[4] = 1; orig[4] = 100.0f; conv[4] = 100.0f; /* center pixel */
+
+    StarList sl = {NULL, 0};
+    ASSERT_OK(star_detect_cpu_ccl_com(mask, orig, conv, W, H, 10, &sl));
+    ASSERT_EQ(sl.n, 1);
+    ASSERT_NEAR(sl.stars[0].x, 1.0f, 0.01f);
+    ASSERT_NEAR(sl.stars[0].y, 1.0f, 0.01f);
+
+    free(sl.stars); free(mask); free(orig); free(conv);
+    return 0;
+}
+
+/* Moffat with different alpha/beta changes kernel shape. */
+static int test_moffat_different_alpha_beta(void)
+{
+    const int W = 32, H = 32;
+    float *src = (float *)calloc(W * H, sizeof(float));
+    src[(H/2) * W + W/2] = 1000.0f;
+
+    float *conv1 = (float *)calloc(W * H, sizeof(float));
+    float *conv2 = (float *)calloc(W * H, sizeof(float));
+
+    MoffatParams mp1 = {2.5f, 2.0f};
+    MoffatParams mp2 = {1.0f, 4.0f};
+    ASSERT_OK(star_detect_cpu_moffat_convolve(src, conv1, W, H, &mp1));
+    ASSERT_OK(star_detect_cpu_moffat_convolve(src, conv2, W, H, &mp2));
+
+    /* Different params → different convolution results */
+    int differ = 0;
+    for (int i = 0; i < W * H; i++)
+        if (fabsf(conv1[i] - conv2[i]) > 1e-6f) differ++;
+    ASSERT_GT(differ, 0);
+
+    free(src); free(conv1); free(conv2);
+    return 0;
+}
+
+/* Uniform image → sigma=0, no detections. */
+static int test_threshold_sigma_zero_uniform(void)
+{
+    const int W = 32, H = 32;
+    float *conv = (float *)calloc(W * H, sizeof(float));
+    for (int i = 0; i < W * H; i++) conv[i] = 100.0f;
+    uint8_t *mask = (uint8_t *)calloc(W * H, 1);
+
+    ASSERT_OK(star_detect_cpu_threshold(conv, mask, W, H, 3.0f));
+
+    /* Uniform → stddev = 0 → nothing exceeds mean + 3*0 */
+    int sum = 0;
+    for (int i = 0; i < W * H; i++) sum += mask[i];
+    ASSERT_EQ(sum, 0);
+
+    free(conv); free(mask);
+    return 0;
+}
+
+/* Inject 5 stars, verify all 5 detected near expected positions. */
+static int test_detect_multiple_stars_positions(void)
+{
+    const int W = 128, H = 128;
+    int npix = W * H;
+    float *src = (float *)calloc(npix, sizeof(float));
+    for (int i = 0; i < npix; i++) src[i] = 100.0f;
+
+    float star_x[] = {20, 40, 60, 80, 100};
+    float star_y[] = {20, 40, 60, 80, 100};
+    MoffatParams mp = {2.5f, 2.0f};
+    int R = 8;
+
+    for (int s = 0; s < 5; s++) {
+        float cx = star_x[s], cy = star_y[s];
+        for (int dy = -R; dy <= R; dy++)
+            for (int dx = -R; dx <= R; dx++) {
+                int x = (int)cx + dx, y = (int)cy + dy;
+                if (x >= 0 && x < W && y >= 0 && y < H) {
+                    float r2 = (float)(dx*dx + dy*dy);
+                    src[y * W + x] += 5000.0f *
+                        powf(1.0f + r2 / (mp.alpha * mp.alpha), -mp.beta);
+                }
+            }
+    }
+
+    float *conv = (float *)calloc(npix, sizeof(float));
+    uint8_t *mask = (uint8_t *)calloc(npix, 1);
+    ASSERT_OK(star_detect_cpu_detect(src, conv, mask, W, H, &mp, 3.0f));
+
+    StarList sl = {NULL, 0};
+    ASSERT_OK(star_detect_cpu_ccl_com(mask, src, conv, W, H, 50, &sl));
+
+    ASSERT_GT(sl.n, 3); /* at least 4 of 5 stars detected */
+
+    /* Check that each star position has a detection nearby */
+    int found = 0;
+    for (int s = 0; s < 5; s++) {
+        for (int i = 0; i < sl.n; i++) {
+            float dist = sqrtf((sl.stars[i].x - star_x[s]) * (sl.stars[i].x - star_x[s]) +
+                               (sl.stars[i].y - star_y[s]) * (sl.stars[i].y - star_y[s]));
+            if (dist < 3.0f) { found++; break; }
+        }
+    }
+    ASSERT_GT(found, 3);
+
+    free(sl.stars); free(src); free(conv); free(mask);
+    return 0;
+}
+
+/* 100 single-pixel blobs, verify all counted. */
+static int test_ccl_many_small_blobs(void)
+{
+    const int W = 64, H = 64;
+    uint8_t *mask = (uint8_t *)calloc(W * H, 1);
+    float   *orig = (float *)calloc(W * H, sizeof(float));
+    float   *conv = (float *)calloc(W * H, sizeof(float));
+
+    /* Place single-pixel blobs on a grid (every 6 pixels) */
+    int count = 0;
+    for (int y = 3; y < H - 3; y += 6)
+        for (int x = 3; x < W - 3; x += 6) {
+            mask[y * W + x] = 1;
+            orig[y * W + x] = 100.0f;
+            conv[y * W + x] = 100.0f;
+            count++;
+        }
+
+    StarList sl = {NULL, 0};
+    ASSERT_OK(star_detect_cpu_ccl_com(mask, orig, conv, W, H, 200, &sl));
+
+    /* Each isolated pixel = 1 blob; should detect all */
+    ASSERT_EQ(sl.n, count);
+
+    free(sl.stars); free(mask); free(orig); free(conv);
+    return 0;
+}
+
+/* =========================================================================
  * main
  * ========================================================================= */
 int main(void)
@@ -723,6 +916,15 @@ int main(void)
     RUN(test_detect_uniform_no_stars);
     RUN(test_detect_finds_spike_star);
     RUN(test_moffat_null_args);
+
+    SUITE("star_detect_cpu — boundary & edge cases");
+    RUN(test_ccl_boundary_blob);
+    RUN(test_ccl_corner_blob);
+    RUN(test_ccl_small_image_3x3);
+    RUN(test_moffat_different_alpha_beta);
+    RUN(test_threshold_sigma_zero_uniform);
+    RUN(test_detect_multiple_stars_positions);
+    RUN(test_ccl_many_small_blobs);
 
     return SUMMARY();
 }

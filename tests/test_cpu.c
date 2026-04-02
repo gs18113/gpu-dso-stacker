@@ -620,6 +620,208 @@ static int test_lanczos_cpu_subpixel_range(void)
 }
 
 /* =========================================================================
+ * INTEGRATION — NaN handling
+ * ====================================================================== */
+
+/* NaN pixels excluded from mean (valid frames only contribute). */
+static int test_integrate_mean_nan_skipped(void)
+{
+    const int W = 4, H = 3;
+    Image f1 = make_image_const(W, H, 10.0f);
+    Image f2 = make_image_const(W, H, 20.0f);
+    Image f3 = make_image_const(W, H, NAN);   /* entire frame NaN */
+
+    const Image *ptrs[3] = {&f1, &f2, &f3};
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_mean(ptrs, 3, &out));
+    /* Mean of [10, 20] (NaN skipped) = 15 */
+    ASSERT_NEAR(out.data[0], 15.0f, 0.01f);
+
+    image_free(&f1); image_free(&f2); image_free(&f3); image_free(&out);
+    return 0;
+}
+
+/* All frames NaN at a pixel → output NaN. */
+static int test_integrate_mean_all_nan_pixel(void)
+{
+    const int W = 4, H = 3;
+    Image f1 = make_image_const(W, H, 5.0f);
+    Image f2 = make_image_const(W, H, 5.0f);
+    f1.data[0] = NAN;
+    f2.data[0] = NAN;
+
+    const Image *ptrs[2] = {&f1, &f2};
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_mean(ptrs, 2, &out));
+    ASSERT(isnan(out.data[0]));
+    ASSERT_NEAR(out.data[1], 5.0f, 0.01f);
+
+    image_free(&f1); image_free(&f2); image_free(&out);
+    return 0;
+}
+
+/* Single frame → output = input. */
+static int test_integrate_mean_single_frame(void)
+{
+    const int W = 4, H = 3;
+    Image f1 = make_image_const(W, H, 42.0f);
+    f1.data[0] = 99.0f;
+
+    const Image *ptrs[1] = {&f1};
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_mean(ptrs, 1, &out));
+    ASSERT_NEAR(out.data[0], 99.0f, 0.01f);
+    ASSERT_NEAR(out.data[1], 42.0f, 0.01f);
+
+    image_free(&f1); image_free(&out);
+    return 0;
+}
+
+/* NaN frames excluded from kappa-sigma. */
+static int test_kappa_sigma_nan_handling(void)
+{
+    const int W = 4, H = 3;
+    Image f1 = make_image_const(W, H, 10.0f);
+    Image f2 = make_image_const(W, H, 10.0f);
+    Image f3 = make_image_const(W, H, NAN);
+
+    const Image *ptrs[3] = {&f1, &f2, &f3};
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_kappa_sigma(ptrs, 3, &out, 3.0f, 3));
+    ASSERT_NEAR(out.data[0], 10.0f, 0.01f);
+
+    image_free(&f1); image_free(&f2); image_free(&f3); image_free(&out);
+    return 0;
+}
+
+/* n=1 kappa-sigma → no clipping, output = input. */
+static int test_kappa_sigma_single_frame(void)
+{
+    const int W = 4, H = 3;
+    Image f1 = make_image_const(W, H, 77.0f);
+
+    const Image *ptrs[1] = {&f1};
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_kappa_sigma(ptrs, 1, &out, 3.0f, 3));
+    ASSERT_NEAR(out.data[0], 77.0f, 0.01f);
+
+    image_free(&f1); image_free(&out);
+    return 0;
+}
+
+/* n=2 kappa-sigma. */
+static int test_kappa_sigma_two_frames(void)
+{
+    const int W = 4, H = 3;
+    Image f1 = make_image_const(W, H, 10.0f);
+    Image f2 = make_image_const(W, H, 20.0f);
+
+    const Image *ptrs[2] = {&f1, &f2};
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_kappa_sigma(ptrs, 2, &out, 3.0f, 3));
+    /* With only 2 values, kappa=3 is very generous — both survive */
+    ASSERT_NEAR(out.data[0], 15.0f, 0.1f);
+
+    image_free(&f1); image_free(&f2); image_free(&out);
+    return 0;
+}
+
+/* =========================================================================
+ * LANCZOS CPU — additional edge cases
+ * ====================================================================== */
+
+/* Minimum viable 2×2 image. */
+static int test_lanczos_cpu_small_image_2x2(void)
+{
+    Image src = make_image_const(2, 2, 50.0f);
+    Image dst = make_image_const(2, 2, 0.0f);
+    Homography hom = {{ 1,0,0, 0,1,0, 0,0,1 }};
+    ASSERT_OK(lanczos_transform_cpu(&src, &dst, &hom));
+    /* With identity H, interior (or all for 2×2) should be near 50 */
+    /* Small image — boundary effects dominate, just check no crash */
+    image_free(&src); image_free(&dst);
+    return 0;
+}
+
+/* Shift larger than image → all NaN output. */
+static int test_lanczos_cpu_large_shift_all_oob(void)
+{
+    const int W = 8, H = 8;
+    Image src = make_image_const(W, H, 100.0f);
+    Image dst = make_image_const(W, H, 0.0f);
+    /* Shift by 1000 pixels — everything OOB */
+    Homography hom = {{ 1,0,1000, 0,1,1000, 0,0,1 }};
+    ASSERT_OK(lanczos_transform_cpu(&src, &dst, &hom));
+    /* All output should be NaN (OOB sentinel) */
+    for (int i = 0; i < W * H; i++)
+        ASSERT(isnan(dst.data[i]));
+    image_free(&src); image_free(&dst);
+    return 0;
+}
+
+/* 0.25px shift — verify interpolation accuracy. */
+static int test_lanczos_cpu_fractional_shift_accuracy(void)
+{
+    const int W = 30, H = 20;
+    Image src = make_image_gradient(W, H);
+    Image dst = make_image_const(W, H, 0.0f);
+    /* H = [[1,0,-0.25],[0,1,0],[0,0,1]]: dst(x,y) samples src(x-0.25, y) */
+    Homography hom = {{ 1,0,-0.25, 0,1,0, 0,0,1 }};
+    ASSERT_OK(lanczos_transform_cpu(&src, &dst, &hom));
+
+    /* Interior pixel (10,10): src(9.75, 10) ≈ 0.75*src[10*W+9] + 0.25*src[10*W+10] */
+    float expected_approx = 0.75f * src.data[10*W+9] + 0.25f * src.data[10*W+10];
+    float actual = dst.data[10*W+10];
+    ASSERT_NEAR(actual, expected_approx, 1.0f); /* Lanczos not linear interp, allow tolerance */
+
+    image_free(&src); image_free(&dst);
+    return 0;
+}
+
+/* =========================================================================
+ * CSV — additional edge cases
+ * ====================================================================== */
+
+/* CSV with path containing spaces. */
+static int test_csv_whitespace_in_path(void)
+{
+    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_ws_test.csv");
+    FILE *fp = fopen(csv_path, "w");
+    ASSERT_NOT_NULL(fp);
+    fprintf(fp, "filepath, is_reference\n");
+    fprintf(fp, "%s/path with spaces/frame.fits, 1\n", test_tmpdir());
+    fclose(fp);
+
+    FrameInfo *f = NULL; int n = 0;
+    ASSERT_OK(csv_parse(csv_path, &f, &n));
+    ASSERT_EQ(n, 1);
+    /* Path should contain the space */
+    ASSERT(strstr(f[0].filepath, "path with spaces") != NULL);
+    free(f);
+    return 0;
+}
+
+/* Multiple is_reference=1 rows. */
+static int test_csv_multiple_references(void)
+{
+    char csv_path[512]; TEST_TMPPATH(csv_path, "dso_multiref.csv");
+    FILE *fp = fopen(csv_path, "w");
+    ASSERT_NOT_NULL(fp);
+    fprintf(fp, "filepath, is_reference\n");
+    fprintf(fp, "%s/frame1.fits, 1\n", test_tmpdir());
+    fprintf(fp, "%s/frame2.fits, 1\n", test_tmpdir());
+    fclose(fp);
+
+    FrameInfo *f = NULL; int n = 0;
+    ASSERT_OK(csv_parse(csv_path, &f, &n));
+    ASSERT_EQ(n, 2);
+    ASSERT_EQ(f[0].is_reference, 1);
+    ASSERT_EQ(f[1].is_reference, 1);
+    free(f);
+    return 0;
+}
+
+/* =========================================================================
  * main
  * ====================================================================== */
 
@@ -660,6 +862,23 @@ int main(void)
     RUN(test_lanczos_cpu_singular_h);
     RUN(test_lanczos_cpu_null_args);
     RUN(test_lanczos_cpu_subpixel_range);
+
+    SUITE("Integration — NaN handling");
+    RUN(test_integrate_mean_nan_skipped);
+    RUN(test_integrate_mean_all_nan_pixel);
+    RUN(test_integrate_mean_single_frame);
+    RUN(test_kappa_sigma_nan_handling);
+    RUN(test_kappa_sigma_single_frame);
+    RUN(test_kappa_sigma_two_frames);
+
+    SUITE("Lanczos CPU — edge cases");
+    RUN(test_lanczos_cpu_small_image_2x2);
+    RUN(test_lanczos_cpu_large_shift_all_oob);
+    RUN(test_lanczos_cpu_fractional_shift_accuracy);
+
+    SUITE("CSV — edge cases");
+    RUN(test_csv_whitespace_in_path);
+    RUN(test_csv_multiple_references);
 
     return SUMMARY();
 }
