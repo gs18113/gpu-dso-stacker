@@ -1,15 +1,16 @@
 <!DOCTYPE html>
-<html lang="en">
+<!-- Sync structure with index.html -->
+<html lang="ko">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>gpu-dso-stacker &mdash; GPU-Accelerated Deep Sky Object Stacker</title>
-  <meta name="description" content="High-performance DSO image stacker with CUDA, Metal, and CPU backends." />
+  <title>gpu-dso-stacker &mdash; GPU 가속 딥스카이 천체 스태커</title>
+  <meta name="description" content="C/CUDA 기반 고성능 딥스카이 천체 이미지 스태커. CUDA, Metal, CPU 백엔드 지원." />
   <link rel="alternate" hreflang="en" href="index.html" />
   <link rel="alternate" hreflang="ko" href="index.ko.html" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -27,7 +28,7 @@
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: 'Inter', system-ui, sans-serif;
+      font-family: 'Noto Sans KR', 'Inter', system-ui, sans-serif;
       line-height: 1.7;
     }
 
@@ -197,14 +198,14 @@
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links" id="nav-links">
-      <li><a href="#install">Install</a></li>
-      <li><a href="#features">Features</a></li>
+      <li><a href="#install">설치</a></li>
+      <li><a href="#features">기능</a></li>
       <li><a href="#gui">GUI</a></li>
-      <li><a href="#benchmark">Benchmark</a></li>
+      <li><a href="#benchmark">벤치마크</a></li>
       <li><a href="#usage">CLI</a></li>
-      <li><a href="#pipeline">Pipeline</a></li>
+      <li><a href="#pipeline">파이프라인</a></li>
       <li><a href="https://github.com/gs18113/gpu-dso-stacker" target="_blank" class="nav-cta">GitHub</a></li>
-      <li class="lang-switch"><a href="index.ko.html">한국어</a></li>
+      <li class="lang-switch"><a href="index.html">English</a></li>
     </ul>
   </div>
 </nav>
@@ -213,19 +214,19 @@
 <section id="intro">
   <div class="container">
     <div class="intro">
-      <h1>GPU-Accelerated Deep Sky<br />Object Stacker</h1>
+      <h1>GPU 가속 딥스카이<br />천체 스태커</h1>
       <p class="intro-sub">
-        A high-performance image stacker for DSO astrophotography, written in C/CUDA.
-        VNG debayering, Moffat star detection, Lanczos-3 warp,
-        and kappa-sigma integration &mdash; with CUDA, Metal, and CPU backends.
+        C/CUDA로 작성된 고성능 딥스카이 천체사진 이미지 스태커.
+        VNG 디베이어링, Moffat 별 검출, Lanczos-3 워프,
+        kappa-sigma 적분까지 &mdash; CUDA, Metal, CPU 백엔드를 모두 지원합니다.
       </p>
       <div class="intro-actions">
         <a class="btn btn-primary" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
           <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7C6.73 19.91 6.14 18 6.14 18c-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.56 9.56 0 0 1 12 6.8c.85.004 1.71.115 2.51.337 1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg>
-          Download
+          다운로드
         </a>
         <a class="btn btn-secondary" href="https://github.com/gs18113/gpu-dso-stacker" target="_blank">
-          View Source
+          소스 보기
         </a>
       </div>
       <div class="badge-row">
@@ -241,11 +242,11 @@
 <!-- Install -->
 <section id="install">
   <div class="container">
-    <h2>Getting Started</h2>
-    <p class="section-lead">Pre-built binaries available, or build from source for your exact GPU architecture.</p>
+    <h2>시작하기</h2>
+    <p class="section-lead">빌드된 바이너리를 바로 사용하거나, GPU 아키텍처에 맞게 소스에서 직접 빌드할 수 있습니다.</p>
 
     <div class="tabs">
-      <button class="tab-btn active" data-tab="prebuilt">Pre-built</button>
+      <button class="tab-btn active" data-tab="prebuilt">빌드 바이너리</button>
       <button class="tab-btn" data-tab="linux">Linux</button>
       <button class="tab-btn" data-tab="windows">Windows</button>
       <button class="tab-btn" data-tab="macos">macOS</button>
@@ -253,7 +254,7 @@
 
     <div class="tab-panel active" id="tab-prebuilt">
       <div class="callout callout-info">
-        <div>Download the archive for your platform from the <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases page</a>. GPU builds require an NVIDIA GPU and CUDA 12.x runtime. CPU builds have no GPU dependency.</div>
+        <div>사용 중인 플랫폼에 맞는 압축 파일을 <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases 페이지</a>에서 다운로드하세요. GPU 빌드에는 NVIDIA GPU와 CUDA 12.x 런타임이 필요합니다. CPU 빌드는 GPU 없이 실행됩니다.</div>
       </div>
       <div class="tabs" style="margin-bottom:.75rem">
         <button class="tab-btn active" data-tab="cuda-linux">Linux</button>
@@ -262,11 +263,11 @@
       </div>
 
       <div class="tab-panel active" id="tab-cuda-linux">
-        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA Runtime Setup (GPU builds only)</h3>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">GPU builds require the NVIDIA CUDA 12.x runtime. Any CUDA 12.x minor version works.</p>
+        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA 런타임 설정 (GPU 빌드 전용)</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">GPU 빌드에는 NVIDIA CUDA 12.x 런타임이 필요합니다. CUDA 12.x의 어떤 마이너 버전이든 사용 가능합니다.</p>
         <p style="font-size:.85rem;font-weight:600;color:#fff;margin-bottom:.4rem">Debian / Ubuntu</p>
         <div class="code-block">
-          <button class="copy-btn" data-target="code-cuda-linux">Copy</button>
+          <button class="copy-btn" data-target="code-cuda-linux">복사</button>
           <pre id="code-cuda-linux"><span class="comment"># Install the cuda-keyring package (sets up the NVIDIA apt repository)</span>
 <span class="comment"># Replace &lt;distro&gt; with: ubuntu2404, ubuntu2204, debian12, etc.</span>
 wget https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-keyring_1.1-1_all.deb
@@ -278,7 +279,7 @@ sudo apt-get install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre
         </div>
         <p style="font-size:.85rem;font-weight:600;color:#fff;margin:.75rem 0 .4rem">RHEL / Fedora</p>
         <div class="code-block">
-          <button class="copy-btn" data-target="code-cuda-linux-rhel">Copy</button>
+          <button class="copy-btn" data-target="code-cuda-linux-rhel">복사</button>
           <pre id="code-cuda-linux-rhel">sudo dnf config-manager --add-repo \
   https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-<span class="str">&lt;distro&gt;</span>.repo
 sudo dnf install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
@@ -286,38 +287,38 @@ sudo dnf install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
       </div>
 
       <div class="tab-panel" id="tab-cuda-windows">
-        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA Runtime Setup (GPU builds only)</h3>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">Download a CUDA Toolkit 12.x installer from the <a href="https://developer.nvidia.com/cuda-toolkit-archive" style="color:var(--accent)" target="_blank">CUDA Toolkit Archive</a>. During installation, select <strong style="color:#fff">Custom</strong> and enable at minimum:</p>
+        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA 런타임 설정 (GPU 빌드 전용)</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem"><a href="https://developer.nvidia.com/cuda-toolkit-archive" style="color:var(--accent)" target="_blank">CUDA Toolkit Archive</a>에서 CUDA Toolkit 12.x 설치 프로그램을 다운로드하세요. 설치 시 <strong style="color:#fff">사용자 지정(Custom)</strong>을 선택하고 최소한 다음 항목을 활성화하세요:</p>
         <ul style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem;padding-left:1.5rem;line-height:1.8">
           <li><strong style="color:#fff">CUDA Runtime</strong> (<code>cudart</code>)</li>
           <li><strong style="color:#fff">NPP</strong> (NVIDIA Performance Primitives)</li>
-          <li><strong style="color:#fff">Display Driver</strong> (if not already installed)</li>
+          <li><strong style="color:#fff">Display Driver</strong> (아직 설치되지 않은 경우)</li>
         </ul>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">Alternatively, install silently from PowerShell after downloading the installer:</p>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">또는 설치 프로그램을 다운로드한 후 PowerShell에서 자동 설치할 수도 있습니다:</p>
         <div class="code-block">
-          <button class="copy-btn" data-target="code-cuda-windows">Copy</button>
+          <button class="copy-btn" data-target="code-cuda-windows">복사</button>
           <pre id="code-cuda-windows">cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
         </div>
       </div>
 
       <div class="tab-panel" id="tab-cuda-macos">
-        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">Gatekeeper Workaround</h3>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">macOS quarantines files downloaded from the internet. Since the binaries are not Apple-notarized, you need to clear the quarantine attribute before macOS will allow them to run.</p>
+        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">Gatekeeper 우회 방법</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">macOS는 인터넷에서 다운로드한 파일을 격리합니다. 바이너리가 Apple 공증을 받지 않았기 때문에, 실행하려면 먼저 격리 속성을 해제해야 합니다.</p>
         <div class="code-block">
-          <button class="copy-btn" data-target="code-macos-gk">Copy</button>
+          <button class="copy-btn" data-target="code-macos-gk">복사</button>
           <pre id="code-macos-gk">mkdir -p ~/DSOStacker && curl -fL \
   https://github.com/gs18113/gpu-dso-stacker/releases/latest/download/dso-stacker-gui-macos-arm64-metal.tar.gz \
   | tar xz -C ~/DSOStacker \
   && xattr -cr ~/DSOStacker \
   && chmod +x ~/DSOStacker/DSOStacker ~/DSOStacker/_internal/bin/dso_stacker</pre>
         </div>
-        <p style="font-size:.82rem;color:var(--text-dim)">Replace <code>metal</code> with <code>cpu</code> in the URL if you don't need Metal acceleration.</p>
+        <p style="font-size:.82rem;color:var(--text-dim)">Metal 가속이 필요 없다면 URL에서 <code>metal</code>을 <code>cpu</code>로 변경하세요.</p>
       </div>
     </div>
 
     <div class="tab-panel" id="tab-linux">
       <div class="code-block">
-        <button class="copy-btn" data-target="code-linux">Copy</button>
+        <button class="copy-btn" data-target="code-linux">복사</button>
         <pre id="code-linux"><span class="comment"># GPU build (CUDA 12 toolkit required)</span>
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
@@ -330,12 +331,12 @@ cmake --build build --parallel $(nproc)
 <span class="comment"># Enable RAW camera file support (requires libraw-dev)</span>
 cmake -B build ... <span class="flag">-DDSO_ENABLE_LIBRAW=ON</span></pre>
       </div>
-      <p style="font-size:.82rem;color:var(--text-dim)">Prerequisites: CUDA Toolkit 12.x, CFITSIO, libtiff, libpng, CMake &ge; 3.18, LibRaw (optional)</p>
+      <p style="font-size:.82rem;color:var(--text-dim)">필수 요구사항: CUDA Toolkit 12.x, CFITSIO, libtiff, libpng, CMake &ge; 3.18, LibRaw (선택)</p>
     </div>
 
     <div class="tab-panel" id="tab-windows">
       <div class="code-block">
-        <button class="copy-btn" data-target="code-windows">Copy</button>
+        <button class="copy-btn" data-target="code-windows">복사</button>
         <pre id="code-windows"><span class="comment"># Install dependencies via vcpkg</span>
 vcpkg install cfitsio tiff libpng libraw --triplet x64-windows
 
@@ -347,12 +348,12 @@ cmake -B build -G <span class="str">"Visual Studio 17 2022"</span> -A x64 `
 <span class="comment"># Build</span>
 cmake --build build --config Release --parallel</pre>
       </div>
-      <p style="font-size:.82rem;color:var(--text-dim)">Prerequisites: Visual Studio 2022, CUDA Toolkit 12.x, <a href="https://vcpkg.io" style="color:var(--accent)">vcpkg</a></p>
+      <p style="font-size:.82rem;color:var(--text-dim)">필수 요구사항: Visual Studio 2022, CUDA Toolkit 12.x, <a href="https://vcpkg.io" style="color:var(--accent)">vcpkg</a></p>
     </div>
 
     <div class="tab-panel" id="tab-macos">
       <div class="code-block">
-        <button class="copy-btn" data-target="code-macos">Copy</button>
+        <button class="copy-btn" data-target="code-macos">복사</button>
         <pre id="code-macos"><span class="comment"># Apple Silicon &mdash; Metal scaffold backend</span>
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       <span class="flag">-DDSO_ENABLE_CUDA=OFF</span> \
@@ -363,7 +364,7 @@ cmake --build build --parallel
 ./build/dso_stacker -f frames.csv -o stacked.fits <span class="flag">--backend metal</span></pre>
       </div>
       <div class="callout callout-warn">
-        <div><strong>Metal backend is scaffolded.</strong> Currently falls back to the CPU pipeline while Metal kernels are ported incrementally.</div>
+        <div><strong>Metal 백엔드는 아직 스캐폴드 단계입니다.</strong> 현재는 Metal 커널이 순차적으로 포팅되는 동안 CPU 파이프라인으로 폴백됩니다.</div>
       </div>
     </div>
   </div>
@@ -372,37 +373,37 @@ cmake --build build --parallel
 <!-- Features -->
 <section id="features">
   <div class="container">
-    <h2>Features</h2>
-    <p class="section-lead">From raw FITS or camera RAW files to a finished stack &mdash; debayering, alignment, calibration, and integration in one pipeline.</p>
+    <h2>기능</h2>
+    <p class="section-lead">FITS 또는 카메라 RAW 파일에서 완성된 스택까지 &mdash; 디베이어링, 정렬, 보정, 적분을 하나의 파이프라인으로 처리합니다.</p>
 
     <div class="features-grid">
       <div class="feature-card">
-        <h3>GPU-Accelerated Pipeline</h3>
-        <p>Every compute-heavy stage runs on CUDA &mdash; VNG debayer, Moffat convolution, Lanczos warp, and kappa-sigma integration use double-buffered stream overlap for maximum GPU utilization.</p>
+        <h3>GPU 가속 파이프라인</h3>
+        <p>연산이 집중되는 모든 단계가 CUDA에서 실행됩니다 &mdash; VNG 디베이어, Moffat 컨볼루션, Lanczos 워프, kappa-sigma 적분 모두 더블 버퍼 스트림 오버랩으로 GPU 활용률을 극대화합니다.</p>
       </div>
       <div class="feature-card">
-        <h3>Automatic Star Alignment</h3>
-        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Triangle-matching + DLT computes a full homography &mdash; no manual reference or pre-computed transforms required.</p>
+        <h3>자동 별 정렬</h3>
+        <p>적응형 시그마 임계값을 적용한 Moffat PSF 컨볼루션으로 프레임별 별을 검출합니다. 삼각형 매칭 + DLT로 호모그래피를 자동 계산하며, 수동 기준 설정이나 사전 변환이 필요 없습니다.</p>
       </div>
       <div class="feature-card">
-        <h3>RAW Camera File Support</h3>
-        <p>Load CR2, NEF, ARW, DNG, and 12 other RAW formats directly via LibRaw. Raw Bayer mosaic extraction with per-channel black subtraction. Build with <code>-DDSO_ENABLE_LIBRAW=ON</code>.</p>
+        <h3>RAW 카메라 파일 지원</h3>
+        <p>CR2, NEF, ARW, DNG 등 15종 이상의 RAW 포맷을 LibRaw를 통해 직접 로드합니다. 채널별 블랙 보정이 적용된 Bayer 모자이크 추출. <code>-DDSO_ENABLE_LIBRAW=ON</code>으로 빌드하세요.</p>
       </div>
       <div class="feature-card">
-        <h3>Full Color Output</h3>
-        <p>Bayer pattern auto-detection from FITS BAYERPAT keyword or RAW metadata. VNG demosaic produces separate R, G, B planes; all warp and integration stages run per-channel.</p>
+        <h3>풀 컬러 출력</h3>
+        <p>FITS BAYERPAT 키워드 또는 RAW 메타데이터에서 Bayer 패턴을 자동 감지합니다. VNG 디모자이크로 R, G, B 평면을 분리하고, 워프와 적분을 채널별로 수행합니다.</p>
       </div>
       <div class="feature-card">
-        <h3>Calibration Frames</h3>
-        <p>Dark, flat, bias, and darkflat master generation via winsorized mean, median, or kappa-sigma stacking. Applied before debayering. Dead-pixel guard and flat normalization built-in.</p>
+        <h3>보정 프레임</h3>
+        <p>윈저 평균, 중앙값, kappa-sigma 스태킹을 통한 Dark, Flat, Bias, Darkflat 마스터 생성. 디베이어링 전에 적용됩니다. 불량 픽셀 보호 및 Flat 정규화가 기본 내장되어 있습니다.</p>
       </div>
       <div class="feature-card">
-        <h3>Flexible Output Formats</h3>
-        <p>FITS (FP32), TIFF (FP32/FP16/INT16/INT8 + none/zip/lzw/rle), PNG (8/16-bit). Format detected from file extension.</p>
+        <h3>다양한 출력 포맷</h3>
+        <p>FITS (FP32), TIFF (FP32/FP16/INT16/INT8 + none/zip/lzw/rle), PNG (8/16비트). 파일 확장자로 포맷을 자동 결정합니다.</p>
       </div>
       <div class="feature-card">
         <h3>CPU &amp; Apple Silicon</h3>
-        <p>Full OpenMP-parallelized CPU path via <code>--cpu</code>. Metal backend scaffolded for Apple Silicon. CPU-only builds require no NVIDIA GPU or CUDA runtime.</p>
+        <p><code>--cpu</code> 플래그로 OpenMP 병렬화된 CPU 경로를 사용할 수 있습니다. Apple Silicon용 Metal 백엔드도 준비 중입니다. CPU 전용 빌드는 NVIDIA GPU나 CUDA 런타임이 필요 없습니다.</p>
       </div>
     </div>
   </div>
@@ -411,23 +412,23 @@ cmake --build build --parallel
 <!-- GUI -->
 <section id="gui">
   <div class="container">
-    <h2>Desktop GUI</h2>
-    <p class="section-lead">A PySide6 desktop app wrapping the CLI. Drag-and-drop frame management, all stacking options, and YAML project save/load.</p>
+    <h2>데스크톱 GUI</h2>
+    <p class="section-lead">CLI를 감싼 PySide6 데스크톱 앱. 드래그 앤 드롭 프레임 관리, 모든 스태킹 옵션, YAML 프로젝트 저장/불러오기를 지원합니다.</p>
 
     <div class="gui-layout" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start">
       <div>
-        <p style="font-size:.9rem;color:var(--text);margin-bottom:1rem">Pre-built GUI bundles are available on the <a href="https://github.com/gs18113/gpu-dso-stacker/releases/latest" style="color:var(--accent)" target="_blank">Releases page</a> for Linux, Windows, and macOS. No Python installation required &mdash; just download, extract, and run.</p>
+        <p style="font-size:.9rem;color:var(--text);margin-bottom:1rem">Linux, Windows, macOS용 빌드된 GUI 번들을 <a href="https://github.com/gs18113/gpu-dso-stacker/releases/latest" style="color:var(--accent)" target="_blank">Releases 페이지</a>에서 다운로드할 수 있습니다. Python 설치 없이 &mdash; 다운로드, 압축 해제, 실행만 하면 됩니다.</p>
 
         <ul style="list-style:none;display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.5rem">
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Drag-and-drop FITS or RAW files onto Light, Dark, Flat, Bias, or Darkflat tabs</li>
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Async FITS metadata loading &mdash; UI never blocks</li>
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Conditional option visibility based on integration method and output format</li>
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> YAML project files &mdash; save and reload complete state</li>
-          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> Live log output + abort support</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> FITS 또는 RAW 파일을 Light, Dark, Flat, Bias, Darkflat 탭에 드래그 앤 드롭</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> 비동기 FITS 메타데이터 로딩 &mdash; UI가 멈추지 않음</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> 적분 방식과 출력 포맷에 따른 옵션 조건부 표시</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> YAML 프로젝트 파일 &mdash; 전체 상태 저장 및 불러오기</li>
+          <li style="display:flex;gap:.6rem;font-size:.88rem;color:var(--text-dim)"><span style="color:var(--accent);">&bull;</span> 실시간 로그 출력 + 작업 중단 지원</li>
         </ul>
 
-        <h3 style="font-size:.9rem;font-weight:600;color:#fff;margin-bottom:.5rem">Running from source</h3>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.5rem">If you built the CLI from source, you can run the GUI directly with Python:</p>
+        <h3 style="font-size:.9rem;font-weight:600;color:#fff;margin-bottom:.5rem">소스에서 실행</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.5rem">CLI를 소스에서 빌드한 경우, Python으로 GUI를 직접 실행할 수 있습니다:</p>
         <div class="code-block">
           <pre><span class="comment"># Install Python deps</span>
 pip install PySide6 pyyaml
@@ -438,7 +439,7 @@ python src/GUI/main.py</pre>
       </div>
 
       <div class="gui-screenshot">
-        <img src="example_screenshot.png" alt="DSO Stacker GUI" loading="lazy" />
+        <img src="example_screenshot.png" alt="DSO Stacker GUI 스크린샷" loading="lazy" />
       </div>
     </div>
   </div>
@@ -447,19 +448,19 @@ python src/GUI/main.py</pre>
 <!-- Benchmark -->
 <section id="benchmark">
   <div class="container">
-    <h2>Benchmark</h2>
-    <p class="section-lead">10 &times; 4656&times;3520 frames, star-detection mode. RTX 30/40-series GPU.</p>
+    <h2>벤치마크</h2>
+    <p class="section-lead">10 &times; 4656&times;3520 프레임, 별 검출 모드. RTX 30/40 시리즈 GPU 기준.</p>
 
     <div class="bench-grid">
       <div class="bench-card">
         <div class="bench-label">GPU (CUDA)</div>
         <div class="bench-value" style="color:var(--accent)">~2.6s</div>
-        <div class="bench-sub">Double-buffered stream overlap</div>
+        <div class="bench-sub">더블 버퍼 스트림 오버랩</div>
       </div>
       <div class="bench-card">
         <div class="bench-label">CPU (OpenMP)</div>
         <div class="bench-value" style="color:var(--text-dim)">~11.5s</div>
-        <div class="bench-sub">All stages parallelized</div>
+        <div class="bench-sub">전 단계 병렬 처리</div>
       </div>
     </div>
 
@@ -477,7 +478,7 @@ python src/GUI/main.py</pre>
     </div>
 
     <div class="callout callout-info" style="margin-top:1.25rem">
-      <div><strong>Output agreement:</strong> PSNR &asymp; 82.4 dB, mean relative error &asymp; 0.02% in image interior. Differences arise from distinct floating-point paths.</div>
+      <div><strong>출력 일치도:</strong> PSNR &asymp; 82.4 dB, 이미지 내부 평균 상대 오차 &asymp; 0.02%. 부동소수점 연산 경로 차이에서 비롯됩니다.</div>
     </div>
   </div>
 </section>
@@ -485,10 +486,10 @@ python src/GUI/main.py</pre>
 <!-- Usage -->
 <section id="usage">
   <div class="container">
-    <h2>CLI Usage</h2>
-    <p class="section-lead">Point it at a 2-column CSV frame list and choose your options.</p>
+    <h2>CLI 사용법</h2>
+    <p class="section-lead">2열 CSV 프레임 목록을 지정하고 옵션을 선택하세요.</p>
 
-    <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin-bottom:.5rem">Input CSV format</h3>
+    <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin-bottom:.5rem">입력 CSV 형식</h3>
     <div class="code-block" style="margin-bottom:1.5rem">
       <pre><span class="comment">filepath, is_reference</span>
 /data/frame1.fits, <span class="flag">1</span>
@@ -496,29 +497,29 @@ python src/GUI/main.py</pre>
 /data/frame3.fits, 0</pre>
     </div>
 
-    <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin-bottom:.5rem">Examples</h3>
+    <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin-bottom:.5rem">예제</h3>
 
-    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">GPU stack (default)</p>
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">GPU 스택 (기본값)</p>
     <div class="code-block">
-      <button class="copy-btn" data-target="ex1">Copy</button>
+      <button class="copy-btn" data-target="ex1">복사</button>
       <pre id="ex1">dso_stacker -f frames.csv -o stacked.fits</pre>
     </div>
 
-    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">CPU-only</p>
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">CPU 전용</p>
     <div class="code-block">
-      <button class="copy-btn" data-target="ex2">Copy</button>
+      <button class="copy-btn" data-target="ex2">복사</button>
       <pre id="ex2">dso_stacker -f frames.csv -o stacked.fits <span class="flag">--cpu</span></pre>
     </div>
 
-    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">Color OSC camera (RGGB sensor)</p>
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">컬러 OSC 카메라 (RGGB 센서)</p>
     <div class="code-block">
-      <button class="copy-btn" data-target="ex3">Copy</button>
+      <button class="copy-btn" data-target="ex3">복사</button>
       <pre id="ex3">dso_stacker -f frames.csv -o stacked.fits <span class="flag">--bayer rggb</span> --kappa 2.5 --iterations 5</pre>
     </div>
 
-    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">With calibration frames</p>
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">보정 프레임 사용</p>
     <div class="code-block">
-      <button class="copy-btn" data-target="ex4">Copy</button>
+      <button class="copy-btn" data-target="ex4">복사</button>
       <pre id="ex4">dso_stacker -f frames.csv -o stacked.fits \
     <span class="flag">--bias</span>  bias_frames.txt \
     <span class="flag">--dark</span>  dark_frames.txt \
@@ -526,20 +527,20 @@ python src/GUI/main.py</pre>
     --save-master-frames ./masters</pre>
     </div>
 
-    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">16-bit TIFF with ZIP compression</p>
+    <p style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);font-weight:600;margin-bottom:.3rem">16비트 TIFF (ZIP 압축)</p>
     <div class="code-block">
-      <button class="copy-btn" data-target="ex5">Copy</button>
+      <button class="copy-btn" data-target="ex5">복사</button>
       <pre id="ex5">dso_stacker -f frames.csv -o stacked.tiff <span class="flag">--bit-depth 16 --tiff-compression zip</span></pre>
     </div>
 
-    <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:1.5rem 0 .5rem">Output Formats</h3>
+    <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:1.5rem 0 .5rem">출력 포맷</h3>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Extension</th><th>Format</th><th>Bit depths</th><th>Compression</th></tr></thead>
+        <thead><tr><th>확장자</th><th>포맷</th><th>비트 심도</th><th>압축</th></tr></thead>
         <tbody>
-          <tr><td><code>.fits</code> <code>.fit</code> <code>.fts</code></td><td>FITS</td><td>f32 (always)</td><td>none</td></tr>
-          <tr><td><code>.tif</code> <code>.tiff</code></td><td>TIFF</td><td>f32, f16, 16, 8</td><td>none / zip / lzw / rle</td></tr>
-          <tr><td><code>.png</code></td><td>PNG</td><td>16, 8</td><td>lossless DEFLATE</td></tr>
+          <tr><td><code>.fits</code> <code>.fit</code> <code>.fts</code></td><td>FITS</td><td>f32 (항상)</td><td>없음</td></tr>
+          <tr><td><code>.tif</code> <code>.tiff</code></td><td>TIFF</td><td>f32, f16, 16, 8</td><td>없음 / zip / lzw / rle</td></tr>
+          <tr><td><code>.png</code></td><td>PNG</td><td>16, 8</td><td>무손실 DEFLATE</td></tr>
         </tbody>
       </table>
     </div>
@@ -549,42 +550,42 @@ python src/GUI/main.py</pre>
 <!-- Pipeline -->
 <section id="pipeline">
   <div class="container">
-    <h2>Processing Pipeline</h2>
-    <p class="section-lead">Six stages, two execution paths. Pass <code>--cpu</code> to run everything with OpenMP instead of CUDA.</p>
+    <h2>처리 파이프라인</h2>
+    <p class="section-lead">6단계, 2가지 실행 경로. <code>--cpu</code> 플래그로 CUDA 대신 OpenMP로 전체를 실행할 수 있습니다.</p>
 
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>#</th><th>Stage</th><th>GPU path (default)</th><th>CPU path (<code>--cpu</code>)</th></tr>
+          <tr><th>#</th><th>단계</th><th>GPU 경로 (기본값)</th><th>CPU 경로 (<code>--cpu</code>)</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>1</td><td><strong>Debayering</strong></td>
+            <td>1</td><td><strong>디베이어링</strong></td>
             <td>VNG demosaic &rarr; luminance <span class="pipe-tag tag-cuda">CUDA</span></td>
             <td>VNG demosaic &rarr; luminance <span class="pipe-tag tag-omp">OpenMP</span></td>
           </tr>
           <tr>
-            <td>2</td><td><strong>Star Detection</strong></td>
+            <td>2</td><td><strong>별 검출</strong></td>
             <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-cuda">CUDA</span></td>
             <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-omp">OpenMP</span></td>
           </tr>
           <tr>
-            <td>3</td><td><strong>Alignment</strong></td>
+            <td>3</td><td><strong>정렬</strong></td>
             <td>Triangle matching + DLT <span class="pipe-tag tag-cpu">CPU</span> <span class="pipe-tag tag-cuda">CUDA</span></td>
             <td>Triangle matching + DLT <span class="pipe-tag tag-cpu">CPU</span></td>
           </tr>
           <tr>
-            <td>4</td><td><strong>Debayering (warp)</strong></td>
+            <td>4</td><td><strong>디베이어링 (워프)</strong></td>
             <td>VNG &rarr; lum or R/G/B <span class="pipe-tag tag-cuda">CUDA</span></td>
             <td>VNG &rarr; lum or R/G/B <span class="pipe-tag tag-omp">OpenMP</span></td>
           </tr>
           <tr>
-            <td>5</td><td><strong>Lanczos-3 Warp</strong></td>
+            <td>5</td><td><strong>Lanczos-3 워프</strong></td>
             <td><code>nppiRemap</code> + coord-map kernel <span class="pipe-tag tag-cuda">CUDA</span></td>
             <td>6-tap backward-map warp <span class="pipe-tag tag-omp">OpenMP</span></td>
           </tr>
           <tr>
-            <td>6</td><td><strong>Integration</strong></td>
+            <td>6</td><td><strong>적분</strong></td>
             <td>Mini-batch &kappa;-&sigma; clipping <span class="pipe-tag tag-cuda">CUDA</span></td>
             <td>Full &kappa;-&sigma; clipping <span class="pipe-tag tag-omp">OpenMP</span></td>
           </tr>
@@ -594,10 +595,10 @@ python src/GUI/main.py</pre>
 
     <div style="margin-top:1.25rem;display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
       <div class="callout callout-info">
-        <div><strong>Single-pass loading</strong> &mdash; each frame file is opened exactly once. Star detection, alignment, and warping all complete before the next frame is loaded.</div>
+        <div><strong>싱글 패스 로딩</strong> &mdash; 각 프레임 파일은 정확히 한 번만 열립니다. 별 검출, 정렬, 워핑이 모두 완료된 후 다음 프레임을 로드합니다.</div>
       </div>
       <div class="callout callout-warn">
-        <div><strong>Mismatch handling</strong> &mdash; frames that fail alignment (too few stars or triangle-matching mismatch) are skipped gracefully.</div>
+        <div><strong>정렬 실패 처리</strong> &mdash; 정렬에 실패한 프레임(별이 너무 적거나 삼각형 매칭 불일치)은 오류 없이 건너뜁니다.</div>
       </div>
     </div>
   </div>
@@ -606,11 +607,11 @@ python src/GUI/main.py</pre>
 <!-- Tests -->
 <section id="tests">
   <div class="container">
-    <h2>Test Coverage</h2>
-    <p class="section-lead">180+ tests across 12 suites. GPU tests auto-skip (exit 77) when no CUDA device is found.</p>
+    <h2>테스트 커버리지</h2>
+    <p class="section-lead">12개 테스트 스위트, 180개 이상의 테스트. CUDA 디바이스가 없으면 GPU 테스트는 자동으로 건너뜁니다 (exit 77).</p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Suite</th><th>Tests</th><th>Coverage</th></tr></thead>
+        <thead><tr><th>스위트</th><th>테스트 수</th><th>커버리지</th></tr></thead>
         <tbody>
           <tr><td><code>test_cpu</code></td><td>29</td><td>CSV parser, FITS I/O, integration, Lanczos CPU</td></tr>
           <tr><td><code>test_gpu</code></td><td>5</td><td>GPU Lanczos</td></tr>
@@ -638,7 +639,7 @@ python src/GUI/main.py</pre>
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="logo">gpu-dso-stacker</span>
-        <p>GPU-accelerated deep sky object image stacker with CUDA, Metal, and CPU backends.</p>
+        <p>CUDA, Metal, CPU 백엔드를 지원하는 GPU 가속 딥스카이 천체 이미지 스태커.</p>
       </div>
       <div class="footer-links">
         <a href="https://github.com/gs18113/gpu-dso-stacker" target="_blank">GitHub</a>
@@ -648,8 +649,8 @@ python src/GUI/main.py</pre>
       </div>
     </div>
     <p class="footer-copy">
-      Licensed under <a href="https://github.com/gs18113/gpu-dso-stacker/blob/main/LICENSE" target="_blank">GPLv3</a> &middot;
-      Built with C11, CUDA 12, and OpenMP
+      <a href="https://github.com/gs18113/gpu-dso-stacker/blob/main/LICENSE" target="_blank">GPLv3</a> 라이선스 &middot;
+      C11, CUDA 12, OpenMP로 제작
     </p>
   </div>
 </footer>
@@ -681,9 +682,9 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     const target = document.getElementById(this.dataset.target);
     if (!target) return;
     navigator.clipboard.writeText(target.innerText).then(() => {
-      this.textContent = 'Copied!';
+      this.textContent = '복사됨!';
       this.classList.add('copied');
-      setTimeout(() => { this.textContent = 'Copy'; this.classList.remove('copied'); }, 1800);
+      setTimeout(() => { this.textContent = '복사'; this.classList.remove('copied'); }, 1800);
     });
   });
 });
