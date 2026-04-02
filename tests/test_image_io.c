@@ -696,6 +696,87 @@ static int test_tiff_int16_auto_stretch(void)
 }
 
 /* -------------------------------------------------------------------------
+ * Additional edge-case tests
+ * ------------------------------------------------------------------------- */
+
+/* Case-insensitive format detection. */
+static int test_detect_format_case_insensitive(void)
+{
+    ASSERT_EQ(image_detect_format("out.FITS"), FMT_FITS);
+    ASSERT_EQ(image_detect_format("out.Tiff"), FMT_TIFF);
+    ASSERT_EQ(image_detect_format("out.PNG"),  FMT_PNG);
+    ASSERT_EQ(image_detect_format("out.FIT"),  FMT_FITS);
+    ASSERT_EQ(image_detect_format("out.TIF"),  FMT_TIFF);
+    return 0;
+}
+
+/* No extension → FMT_UNKNOWN. */
+static int test_detect_format_no_extension(void)
+{
+    ASSERT_EQ(image_detect_format("output"), FMT_UNKNOWN);
+    return 0;
+}
+
+/* INT16 with stretch_min = stretch_max → black image (no crash). */
+static int test_tiff_int16_stretch_min_eq_max(void)
+{
+    char path[512]; TEST_TMPPATH(path, "test_io_stretch_eq.tiff");
+    int W = 4, H = 4;
+    Image img = make_gradient(W, H, 100.0f);
+    ImageSaveOptions opts = {TIFF_COMPRESS_NONE, OUT_BITS_INT16, 50.0f, 50.0f};
+    ASSERT_OK(image_save(path, &img, &opts));
+
+    int rW, rH;
+    uint16_t *got = tiff_read_mono_u16(path, &rW, &rH);
+    ASSERT_NOT_NULL(got);
+    /* When min==max, all values should be 0 (black) */
+    for (int i = 0; i < W * H; i++)
+        ASSERT_EQ((int)got[i], 0);
+
+    free(got); free(img.data); rm(path);
+    return 0;
+}
+
+/* Negative floats preserved in TIFF FP32. */
+static int test_tiff_fp32_negative_values(void)
+{
+    char path[512]; TEST_TMPPATH(path, "test_io_neg.tiff");
+    int W = 4, H = 4;
+    Image img = {NULL, W, H};
+    img.data = (float *)malloc((size_t)W * H * sizeof(float));
+    for (int i = 0; i < W * H; i++) img.data[i] = -100.0f + (float)i * 10.0f;
+
+    ImageSaveOptions opts = {TIFF_COMPRESS_NONE, OUT_BITS_FP32, NAN, NAN};
+    ASSERT_OK(image_save(path, &img, &opts));
+
+    /* Read back and verify via libtiff */
+    TIFF *tif = TIFFOpen(path, "r");
+    ASSERT_NOT_NULL(tif);
+    uint32_t w, h;
+    TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &w);
+    TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &h);
+    ASSERT_EQ((int)w, W);
+    ASSERT_EQ((int)h, H);
+
+    float *row = (float *)_TIFFmalloc(W * sizeof(float));
+    TIFFReadScanline(tif, row, 0, 0);
+    ASSERT_NEAR(row[0], -100.0f, 0.01f);
+    _TIFFfree(row);
+    TIFFClose(tif);
+
+    free(img.data); rm(path);
+    return 0;
+}
+
+/* NULL image pointer → error. */
+static int test_save_null_image(void)
+{
+    char path[512]; TEST_TMPPATH(path, "test_io_null.fits");
+    ASSERT_ERR(image_save(path, NULL, NULL), DSO_ERR_INVALID_ARG);
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
  * Main
  * ------------------------------------------------------------------------- */
 
@@ -724,6 +805,13 @@ int main(void)
     RUN(test_png_fp32_returns_error);
     RUN(test_unknown_ext_returns_error);
     RUN(test_tiff_int16_auto_stretch);
+
+    SUITE("image_io — edge cases");
+    RUN(test_detect_format_case_insensitive);
+    RUN(test_detect_format_no_extension);
+    RUN(test_tiff_int16_stretch_min_eq_max);
+    RUN(test_tiff_fp32_negative_values);
+    RUN(test_save_null_image);
 
     return SUMMARY();
 }

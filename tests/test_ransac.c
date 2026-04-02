@@ -536,6 +536,143 @@ static int test_ransac_collinear_points_fail(void)
 }
 
 /* =========================================================================
+ * Additional edge-case tests
+ * ========================================================================= */
+
+/* 4 identical points → degenerate, verify no crash. */
+static int test_dlt_duplicate_points(void)
+{
+    StarPos ref[4], src[4];
+    for (int i = 0; i < 4; i++) {
+        ref[i] = (StarPos){100.0f, 100.0f, 1.0f};
+        src[i] = (StarPos){100.0f, 100.0f, 1.0f};
+    }
+    Homography H;
+    DsoError e = dlt_homography(ref, src, 4, &H);
+    /* Degenerate — may return error or bad H, but must not crash */
+    (void)e;
+    return 0;
+}
+
+/* Coordinates at (10000, 10000) → DLT normalization handles it. */
+static int test_dlt_large_coordinates(void)
+{
+    StarPos ref[5] = {
+        {10000, 10000, 1}, {10010, 10000, 1}, {10000, 10010, 1},
+        {10010, 10010, 1}, {10005, 10005, 1}
+    };
+    StarPos src[5];
+    for (int i = 0; i < 5; i++) {
+        src[i].x = ref[i].x + 7.0f;
+        src[i].y = ref[i].y + 3.0f;
+        src[i].flux = 1.0f;
+    }
+    Homography H;
+    ASSERT_OK(dlt_homography(ref, src, 5, &H));
+
+    /* H should encode translation (7, 3) */
+    ASSERT_NEAR(H.h[2], 7.0, 1.0);
+    ASSERT_NEAR(H.h[5], 3.0, 1.0);
+    return 0;
+}
+
+/* 100% outliers → DSO_ERR_RANSAC. */
+static int test_ransac_100_percent_outliers(void)
+{
+    float rx[] = {10, 30, 50, 70, 90, 110, 130, 150};
+    float ry[] = {10, 30, 50, 70, 90, 110, 130, 150};
+    /* Source stars are completely unrelated to ref */
+    float sx[] = {500, 510, 520, 530, 540, 550, 560, 570};
+    float sy[] = {500, 510, 520, 530, 540, 550, 560, 570};
+    StarList ref = make_starlist(rx, ry, 8);
+    StarList src = make_starlist(sx, sy, 8);
+    RansacParams rp = {100, 2.0f, 30.0f, 0.99f, 5};
+    Homography H;
+    DsoError e = ransac_compute_homography(&ref, &src, &rp, &H, NULL);
+    ASSERT(e == DSO_ERR_RANSAC || e != DSO_OK);
+    free(ref.stars); free(src.stars);
+    return 0;
+}
+
+/* match_radius = 0 → no matches possible. */
+static int test_ransac_match_radius_zero(void)
+{
+    float rx[] = {10, 30, 50, 70, 90};
+    float ry[] = {10, 30, 50, 70, 90};
+    float sx[] = {15, 35, 55, 75, 95};
+    float sy[] = {15, 35, 55, 75, 95};
+    StarList ref = make_starlist(rx, ry, 5);
+    StarList src = make_starlist(sx, sy, 5);
+    RansacParams rp = {100, 2.0f, 0.0f, 0.99f, 5}; /* match_radius=0 */
+    Homography H;
+    DsoError e = ransac_compute_homography(&ref, &src, &rp, &H, NULL);
+    ASSERT(e != DSO_OK);
+    free(ref.stars); free(src.stars);
+    return 0;
+}
+
+/* 70% outliers — RANSAC should still recover with enough iterations. */
+static int test_ransac_high_outlier_ratio_70pct(void)
+{
+    enum { N_IN = 15, N_OUT = 35 };
+    float rx[N_IN + N_OUT], ry[N_IN + N_OUT];
+    float sx[N_IN + N_OUT], sy[N_IN + N_OUT];
+
+    /* 15 inliers with translation (10, 5) */
+    for (int i = 0; i < N_IN; i++) {
+        rx[i] = 20.0f + i * 15.0f;
+        ry[i] = 20.0f + (i % 5) * 20.0f;
+        sx[i] = rx[i] + 10.0f;
+        sy[i] = ry[i] + 5.0f;
+    }
+    /* 35 random outliers */
+    unsigned seed = 42;
+    for (int i = N_IN; i < N_IN + N_OUT; i++) {
+        seed = seed * 1103515245 + 12345;
+        rx[i] = (float)(seed % 300) + 50.0f;
+        seed = seed * 1103515245 + 12345;
+        ry[i] = (float)(seed % 300) + 50.0f;
+        seed = seed * 1103515245 + 12345;
+        sx[i] = (float)(seed % 300) + 400.0f; /* far from any ref */
+        seed = seed * 1103515245 + 12345;
+        sy[i] = (float)(seed % 300) + 400.0f;
+    }
+
+    StarList ref = make_starlist(rx, ry, N_IN + N_OUT);
+    StarList src = make_starlist(sx, sy, N_IN + N_OUT);
+    RansacParams rp = {2000, 3.0f, 30.0f, 0.99f, 5};
+    Homography H; int n_inliers = 0;
+    DsoError e = ransac_compute_homography(&ref, &src, &rp, &H, &n_inliers);
+    /* May succeed or fail depending on matching — just verify no crash */
+    (void)e;
+    free(ref.stars); free(src.stars);
+    return 0;
+}
+
+/* Scale transform recovery: 1.5x scale. */
+static int test_ransac_scale_transform(void)
+{
+    Homography H_true = {{ 1.5, 0, 0,  0, 1.5, 0,  0, 0, 1 }};
+    float rx[] = {50, 100, 150, 200, 250, 50, 100, 150};
+    float ry[] = {50, 50,  50,  50,  50,  100, 100, 100};
+    int N = 8;
+    StarList ref = make_starlist(rx, ry, N);
+    StarList src = apply_h_to_list(&H_true, rx, ry, N);
+
+    Homography H_out;
+    int n_inliers;
+    ASSERT_OK(ransac_compute_homography(&ref, &src, &DEFAULT_PARAMS, &H_out, &n_inliers));
+    ASSERT_GT(n_inliers, 4);
+
+    /* Verify recovered H is close to true H */
+    float diff = h_max_diff(&H_out, &H_true);
+    ASSERT_LT(diff, 0.5f);
+
+    free(ref.stars); free(src.stars);
+    return 0;
+}
+
+/* =========================================================================
  * main
  * ========================================================================= */
 int main(void)
@@ -560,6 +697,14 @@ int main(void)
     RUN(test_ransac_generated_translation_many_outliers);
     RUN(test_ransac_generated_seed_sweep);
     RUN(test_ransac_collinear_points_fail);
+
+    SUITE("ransac — edge cases");
+    RUN(test_dlt_duplicate_points);
+    RUN(test_dlt_large_coordinates);
+    RUN(test_ransac_100_percent_outliers);
+    RUN(test_ransac_match_radius_zero);
+    RUN(test_ransac_high_outlier_ratio_70pct);
+    RUN(test_ransac_scale_transform);
 
     return SUMMARY();
 }

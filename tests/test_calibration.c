@@ -747,6 +747,117 @@ static int test_kappa_sigma_identical_frames(void)
 }
 
 /* =========================================================================
+ * Additional edge-case tests
+ * ========================================================================= */
+
+/* Flat with all zeros → all output zero (dead pixel guard). */
+static int test_apply_all_zero_flat_guard(void)
+{
+    float pix[4] = {100, 200, 300, 400};
+    float flat[4] = {0, 0, 0, 0};
+    Image img = {pix, 2, 2};
+    CalibFrames c = make_calib_inline(NULL, 0, 0, flat, 2, 2);
+    ASSERT_OK(calib_apply_cpu(&img, &c));
+    /* All flat < 1e-6 → output should be 0 */
+    for (int i = 0; i < 4; i++)
+        ASSERT_NEAR(pix[i], 0.0f, 1e-6f);
+    return 0;
+}
+
+/* NaN in dark frame → NaN propagates to output. */
+static int test_apply_nan_in_dark(void)
+{
+    float pix[4] = {100, 200, 300, 400};
+    float dark[4] = {10, NAN, 10, 10};
+    Image img = {pix, 2, 2};
+    CalibFrames c = make_calib_inline(dark, 2, 2, NULL, 0, 0);
+    ASSERT_OK(calib_apply_cpu(&img, &c));
+    ASSERT_NEAR(pix[0], 90.0f, 0.01f);
+    ASSERT(isnan(pix[1])); /* NaN dark → NaN output */
+    ASSERT_NEAR(pix[2], 290.0f, 0.01f);
+    return 0;
+}
+
+/* Winsorized mean with single frame → output = input. */
+static int test_winsorized_mean_single_frame(void)
+{
+    char path[512]; snprintf(path, sizeof(path),
+                             "%s/dso_wsor_single.fits", test_tmpdir());
+    ASSERT_OK(make_fits_const(path, 1, 1, 42.0f));
+
+    const char *pp[] = {path};
+    char lst[512]; TEST_TMPPATH(lst, "dso_wsor_single_list.txt");
+    ASSERT_OK(write_framelist(lst, pp, 1));
+
+    CalibFrames c = {0};
+    ASSERT_OK(calib_load_or_generate(lst, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, 0.1f, 2.5f, 5, &c));
+    ASSERT_EQ(c.has_dark, 1);
+    ASSERT_NEAR(c.dark.data[0], 42.0f, 0.01f);
+    calib_free(&c);
+    return 0;
+}
+
+/* Median of 4 frames → average of middle 2. */
+static int test_median_even_count(void)
+{
+    enum { N = 4 };
+    char paths[N][512]; const char *pptrs[N];
+    float vals[] = {10, 20, 30, 40};
+    for (int i = 0; i < N; i++) {
+        snprintf(paths[i], sizeof(paths[i]),
+                 "%s/dso_med_even_%d.fits", test_tmpdir(), i);
+        ASSERT_OK(make_fits_const(paths[i], 1, 1, vals[i]));
+        pptrs[i] = paths[i];
+    }
+    char lst[512]; TEST_TMPPATH(lst, "dso_med_even_list.txt");
+    ASSERT_OK(write_framelist(lst, pptrs, N));
+
+    CalibFrames c = {0};
+    ASSERT_OK(calib_load_or_generate(lst, CALIB_MEDIAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, 0.1f, 2.5f, 5, &c));
+    ASSERT_EQ(c.has_dark, 1);
+    /* Median of [10,20,30,40] = (20+30)/2 = 25 */
+    ASSERT_NEAR(c.dark.data[0], 25.0f, 0.01f);
+    calib_free(&c);
+    return 0;
+}
+
+/* Median of 5 frames → middle value. */
+static int test_median_odd_count(void)
+{
+    enum { N = 5 };
+    char paths[N][512]; const char *pptrs[N];
+    float vals[] = {10, 20, 30, 40, 50};
+    for (int i = 0; i < N; i++) {
+        snprintf(paths[i], sizeof(paths[i]),
+                 "%s/dso_med_odd_%d.fits", test_tmpdir(), i);
+        ASSERT_OK(make_fits_const(paths[i], 1, 1, vals[i]));
+        pptrs[i] = paths[i];
+    }
+    char lst[512]; TEST_TMPPATH(lst, "dso_med_odd_list.txt");
+    ASSERT_OK(write_framelist(lst, pptrs, N));
+
+    CalibFrames c = {0};
+    ASSERT_OK(calib_load_or_generate(lst, CALIB_MEDIAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, CALIB_WINSORIZED_MEAN,
+                                     NULL, 0.1f, 2.5f, 5, &c));
+    ASSERT_EQ(c.has_dark, 1);
+    /* Median of [10,20,30,40,50] = 30 */
+    ASSERT_NEAR(c.dark.data[0], 30.0f, 0.01f);
+    calib_free(&c);
+    return 0;
+}
+
+/* =========================================================================
  * main
  * ========================================================================= */
 
@@ -800,6 +911,13 @@ int main(void)
     SUITE("calib_load_or_generate — end-to-end");
     RUN(test_end_to_end_dark_and_flat);
     RUN(test_end_to_end_dead_pixels_zeroed);
+
+    SUITE("calib — edge cases");
+    RUN(test_apply_all_zero_flat_guard);
+    RUN(test_apply_nan_in_dark);
+    RUN(test_winsorized_mean_single_frame);
+    RUN(test_median_even_count);
+    RUN(test_median_odd_count);
 
     return SUMMARY();
 }
