@@ -143,18 +143,6 @@
     .bar-fill { height: 100%; border-radius: 99px; }
     .bar-time { color: var(--text-dim); width: 50px; text-align: right; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }
 
-    /* Download cards */
-    .dl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .75rem; }
-    .dl-card {
-      background: var(--bg3); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 1rem 1.25rem;
-      display: flex; align-items: center; gap: .75rem; text-decoration: none;
-    }
-    .dl-card:hover { border-color: var(--accent); }
-    .dl-icon { font-size: 1.4rem; flex-shrink: 0; }
-    .dl-info h4 { font-size: .9rem; font-weight: 600; color: #fff; margin-bottom: .15rem; }
-    .dl-info p { font-size: .75rem; color: var(--text-dim); }
-
     /* GUI screenshot */
     .gui-screenshot { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
     .gui-screenshot img { width: 100%; height: auto; display: block; }
@@ -202,9 +190,9 @@
       <span></span><span></span><span></span>
     </button>
     <ul class="nav-links" id="nav-links">
+      <li><a href="#install">Install</a></li>
       <li><a href="#features">Features</a></li>
       <li><a href="#pipeline">Pipeline</a></li>
-      <li><a href="#install">Install</a></li>
       <li><a href="#usage">Usage</a></li>
       <li><a href="#benchmark">Benchmark</a></li>
       <li><a href="#gui">GUI</a></li>
@@ -237,6 +225,136 @@
         <img src="https://img.shields.io/badge/CUDA-12.x-76b900?style=flat-square&logo=nvidia" alt="CUDA 12" />
         <img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="GPLv3" />
         <img src="https://img.shields.io/badge/C11-blue?style=flat-square" alt="C11" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Install -->
+<section id="install">
+  <div class="container">
+    <h2>Getting Started</h2>
+    <p class="section-lead">Pre-built binaries available, or build from source for your exact GPU architecture.</p>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="prebuilt">Pre-built</button>
+      <button class="tab-btn" data-tab="linux">Linux</button>
+      <button class="tab-btn" data-tab="windows">Windows</button>
+      <button class="tab-btn" data-tab="macos">macOS</button>
+    </div>
+
+    <div class="tab-panel active" id="tab-prebuilt">
+      <div class="callout callout-info">
+        <div>Download the archive for your platform from the <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases page</a>. GPU builds require an NVIDIA GPU and CUDA 12.x runtime. CPU builds have no GPU dependency.</div>
+      </div>
+      <div class="tabs" style="margin-bottom:.75rem">
+        <button class="tab-btn active" data-tab="cuda-linux">Linux</button>
+        <button class="tab-btn" data-tab="cuda-windows">Windows</button>
+        <button class="tab-btn" data-tab="cuda-macos">macOS</button>
+      </div>
+
+      <div class="tab-panel active" id="tab-cuda-linux">
+        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA Runtime Setup (GPU builds only)</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">GPU builds require the NVIDIA CUDA 12.x runtime. Any CUDA 12.x minor version works.</p>
+        <p style="font-size:.85rem;font-weight:600;color:#fff;margin-bottom:.4rem">Debian / Ubuntu</p>
+        <div class="code-block">
+          <button class="copy-btn" data-target="code-cuda-linux">Copy</button>
+          <pre id="code-cuda-linux"><span class="comment"># Install the cuda-keyring package (sets up the NVIDIA apt repository)</span>
+<span class="comment"># Replace &lt;distro&gt; with: ubuntu2404, ubuntu2204, debian12, etc.</span>
+wget https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt-get update
+
+<span class="comment"># Install the runtime libraries (no compiler needed)</span>
+sudo apt-get install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
+        </div>
+        <p style="font-size:.85rem;font-weight:600;color:#fff;margin:.75rem 0 .4rem">RHEL / Fedora</p>
+        <div class="code-block">
+          <button class="copy-btn" data-target="code-cuda-linux-rhel">Copy</button>
+          <pre id="code-cuda-linux-rhel">sudo dnf config-manager --add-repo \
+  https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-<span class="str">&lt;distro&gt;</span>.repo
+sudo dnf install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-cuda-windows">
+        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA Runtime Setup (GPU builds only)</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">Download the CUDA Toolkit 12.x installer from <a href="https://developer.nvidia.com/cuda-downloads" style="color:var(--accent)" target="_blank">developer.nvidia.com/cuda-downloads</a>. During installation, select Custom and enable CUDA Runtime, NPP, and Display Driver.</p>
+        <div class="code-block">
+          <button class="copy-btn" data-target="code-cuda-windows">Copy</button>
+          <pre id="code-cuda-windows"><span class="comment"># Unattended installation (PowerShell)</span>
+cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-cuda-macos">
+        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">Gatekeeper Workaround</h3>
+        <div class="code-block">
+          <button class="copy-btn" data-target="code-macos-gk">Copy</button>
+          <pre id="code-macos-gk">mkdir -p ~/DSOStacker && curl -fL \
+  https://github.com/gs18113/gpu-dso-stacker/releases/latest/download/dso-stacker-gui-macos-arm64-metal.tar.gz \
+  | tar xz -C ~/DSOStacker \
+  && xattr -cr ~/DSOStacker \
+  && chmod +x ~/DSOStacker/DSOStacker ~/DSOStacker/_internal/bin/dso_stacker</pre>
+        </div>
+        <p style="font-size:.82rem;color:var(--text-dim)">Replace <code>metal</code> with <code>cpu</code> in the URL if you don't need Metal acceleration.</p>
+      </div>
+
+      <p style="margin-top:1.25rem;font-size:.9rem">
+        <a href="https://github.com/gs18113/gpu-dso-stacker/releases/latest" style="color:var(--accent);font-weight:600" target="_blank">Download latest release</a>
+        &mdash; Linux, Windows, and macOS builds available (GPU and CPU variants).
+      </p>
+    </div>
+
+    <div class="tab-panel" id="tab-linux">
+      <div class="code-block">
+        <button class="copy-btn" data-target="code-linux">Copy</button>
+        <pre id="code-linux"><span class="comment"># GPU build (CUDA 12 toolkit required)</span>
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+cmake --build build --parallel $(nproc)
+
+<span class="comment"># CPU-only build (no CUDA toolkit needed)</span>
+cmake -B build -DCMAKE_BUILD_TYPE=Release <span class="flag">-DDSO_ENABLE_CUDA=OFF</span>
+cmake --build build --parallel $(nproc)
+
+<span class="comment"># Enable RAW camera file support (requires libraw-dev)</span>
+cmake -B build ... <span class="flag">-DDSO_ENABLE_LIBRAW=ON</span></pre>
+      </div>
+      <p style="font-size:.82rem;color:var(--text-dim)">Prerequisites: CUDA Toolkit 12.x, CFITSIO, libtiff, libpng, CMake &ge; 3.18, LibRaw (optional)</p>
+    </div>
+
+    <div class="tab-panel" id="tab-windows">
+      <div class="code-block">
+        <button class="copy-btn" data-target="code-windows">Copy</button>
+        <pre id="code-windows"><span class="comment"># Install dependencies via vcpkg</span>
+vcpkg install cfitsio tiff libpng libraw --triplet x64-windows
+
+<span class="comment"># Configure</span>
+cmake -B build -G <span class="str">"Visual Studio 17 2022"</span> -A x64 `
+      -DCMAKE_TOOLCHAIN_FILE=<span class="str">"$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"</span> `
+      -DCMAKE_CUDA_COMPILER=<span class="str">"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/bin/nvcc.exe"</span>
+
+<span class="comment"># Build</span>
+cmake --build build --config Release --parallel</pre>
+      </div>
+      <p style="font-size:.82rem;color:var(--text-dim)">Prerequisites: Visual Studio 2022, CUDA Toolkit 12.x, <a href="https://vcpkg.io" style="color:var(--accent)">vcpkg</a></p>
+    </div>
+
+    <div class="tab-panel" id="tab-macos">
+      <div class="code-block">
+        <button class="copy-btn" data-target="code-macos">Copy</button>
+        <pre id="code-macos"><span class="comment"># Apple Silicon &mdash; Metal scaffold backend</span>
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      <span class="flag">-DDSO_ENABLE_CUDA=OFF</span> \
+      <span class="flag">-DDSO_ENABLE_METAL=ON</span>
+cmake --build build --parallel
+
+<span class="comment"># Select Metal backend at runtime</span>
+./build/dso_stacker -f frames.csv -o stacked.fits <span class="flag">--backend metal</span></pre>
+      </div>
+      <div class="callout callout-warn">
+        <div><strong>Metal backend is scaffolded.</strong> Currently falls back to the CPU pipeline while Metal kernels are ported incrementally.</div>
       </div>
     </div>
   </div>
@@ -333,155 +451,6 @@
       </div>
       <div class="callout callout-warn">
         <div><strong>Mismatch handling</strong> &mdash; frames that fail alignment (too few stars or triangle-matching mismatch) are skipped gracefully.</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Install -->
-<section id="install">
-  <div class="container">
-    <h2>Getting Started</h2>
-    <p class="section-lead">Pre-built binaries available, or build from source for your exact GPU architecture.</p>
-
-    <div class="tabs">
-      <button class="tab-btn active" data-tab="prebuilt">Pre-built</button>
-      <button class="tab-btn" data-tab="linux">Linux</button>
-      <button class="tab-btn" data-tab="windows">Windows</button>
-      <button class="tab-btn" data-tab="macos">macOS</button>
-    </div>
-
-    <div class="tab-panel active" id="tab-prebuilt">
-      <div class="callout callout-info">
-        <div>Download the archive for your platform from the <a href="https://github.com/gs18113/gpu-dso-stacker/releases" style="color:var(--accent)">Releases page</a>. GPU builds require an NVIDIA GPU and CUDA 12.x runtime. CPU builds have no GPU dependency.</div>
-      </div>
-      <div class="tabs" style="margin-bottom:.75rem">
-        <button class="tab-btn active" data-tab="cuda-linux">Linux</button>
-        <button class="tab-btn" data-tab="cuda-windows">Windows</button>
-        <button class="tab-btn" data-tab="cuda-macos">macOS</button>
-      </div>
-
-      <div class="tab-panel active" id="tab-cuda-linux">
-        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA Runtime Setup (GPU builds only)</h3>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">GPU builds require the NVIDIA CUDA 12.x runtime. Any CUDA 12.x minor version works.</p>
-        <p style="font-size:.85rem;font-weight:600;color:#fff;margin-bottom:.4rem">Debian / Ubuntu</p>
-        <div class="code-block">
-          <button class="copy-btn" data-target="code-cuda-linux">Copy</button>
-          <pre id="code-cuda-linux"><span class="comment"># Install the cuda-keyring package (sets up the NVIDIA apt repository)</span>
-<span class="comment"># Replace &lt;distro&gt; with: ubuntu2404, ubuntu2204, debian12, etc.</span>
-wget https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-keyring_1.1-1_all.deb
-sudo dpkg -i cuda-keyring_1.1-1_all.deb
-sudo apt-get update
-
-<span class="comment"># Install the runtime libraries (no compiler needed)</span>
-sudo apt-get install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
-        </div>
-        <p style="font-size:.85rem;font-weight:600;color:#fff;margin:.75rem 0 .4rem">RHEL / Fedora</p>
-        <div class="code-block">
-          <button class="copy-btn" data-target="code-cuda-linux-rhel">Copy</button>
-          <pre id="code-cuda-linux-rhel">sudo dnf config-manager --add-repo \
-  https://developer.download.nvidia.com/compute/cuda/repos/<span class="str">&lt;distro&gt;</span>/x86_64/cuda-<span class="str">&lt;distro&gt;</span>.repo
-sudo dnf install <span class="flag">cuda-cudart-12-9 libnpp-12-9</span></pre>
-        </div>
-      </div>
-
-      <div class="tab-panel" id="tab-cuda-windows">
-        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">CUDA Runtime Setup (GPU builds only)</h3>
-        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">Download the CUDA Toolkit 12.x installer from <a href="https://developer.nvidia.com/cuda-downloads" style="color:var(--accent)" target="_blank">developer.nvidia.com/cuda-downloads</a>. During installation, select Custom and enable CUDA Runtime, NPP, and Display Driver.</p>
-        <div class="code-block">
-          <button class="copy-btn" data-target="code-cuda-windows">Copy</button>
-          <pre id="code-cuda-windows"><span class="comment"># Unattended installation (PowerShell)</span>
-cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
-        </div>
-      </div>
-
-      <div class="tab-panel" id="tab-cuda-macos">
-        <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">Gatekeeper Workaround</h3>
-        <div class="code-block">
-          <button class="copy-btn" data-target="code-macos-gk">Copy</button>
-          <pre id="code-macos-gk">mkdir -p ~/DSOStacker && curl -fL \
-  https://github.com/gs18113/gpu-dso-stacker/releases/latest/download/dso-stacker-gui-macos-arm64-metal.tar.gz \
-  | tar xz -C ~/DSOStacker \
-  && xattr -cr ~/DSOStacker \
-  && chmod +x ~/DSOStacker/DSOStacker ~/DSOStacker/_internal/bin/dso_stacker</pre>
-        </div>
-        <p style="font-size:.82rem;color:var(--text-dim)">Replace <code>metal</code> with <code>cpu</code> in the URL if you don't need Metal acceleration.</p>
-      </div>
-
-      <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:1.5rem 0 .6rem">Downloads</h3>
-      <div class="dl-grid">
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">&#x1F427;</span>
-          <div class="dl-info"><h4>Linux x86_64 &mdash; GPU</h4><p>CUDA 12 runtime required</p></div>
-        </a>
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">&#x1F427;</span>
-          <div class="dl-info"><h4>Linux x86_64 &mdash; CPU</h4><p>No GPU required</p></div>
-        </a>
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">&#x1FA9F;</span>
-          <div class="dl-info"><h4>Windows x86_64 &mdash; GPU</h4><p>CUDA 12 runtime required</p></div>
-        </a>
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">&#x1FA9F;</span>
-          <div class="dl-info"><h4>Windows x86_64 &mdash; CPU</h4><p>No GPU required</p></div>
-        </a>
-        <a class="dl-card" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
-          <span class="dl-icon">&#x1F34E;</span>
-          <div class="dl-info"><h4>macOS arm64 &mdash; CPU / Metal</h4><p>Apple Silicon</p></div>
-        </a>
-      </div>
-    </div>
-
-    <div class="tab-panel" id="tab-linux">
-      <div class="code-block">
-        <button class="copy-btn" data-target="code-linux">Copy</button>
-        <pre id="code-linux"><span class="comment"># GPU build (CUDA 12 toolkit required)</span>
-cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
-cmake --build build --parallel $(nproc)
-
-<span class="comment"># CPU-only build (no CUDA toolkit needed)</span>
-cmake -B build -DCMAKE_BUILD_TYPE=Release <span class="flag">-DDSO_ENABLE_CUDA=OFF</span>
-cmake --build build --parallel $(nproc)
-
-<span class="comment"># Enable RAW camera file support (requires libraw-dev)</span>
-cmake -B build ... <span class="flag">-DDSO_ENABLE_LIBRAW=ON</span></pre>
-      </div>
-      <p style="font-size:.82rem;color:var(--text-dim)">Prerequisites: CUDA Toolkit 12.x, CFITSIO, libtiff, libpng, CMake &ge; 3.18, LibRaw (optional)</p>
-    </div>
-
-    <div class="tab-panel" id="tab-windows">
-      <div class="code-block">
-        <button class="copy-btn" data-target="code-windows">Copy</button>
-        <pre id="code-windows"><span class="comment"># Install dependencies via vcpkg</span>
-vcpkg install cfitsio tiff libpng libraw --triplet x64-windows
-
-<span class="comment"># Configure</span>
-cmake -B build -G <span class="str">"Visual Studio 17 2022"</span> -A x64 `
-      -DCMAKE_TOOLCHAIN_FILE=<span class="str">"$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"</span> `
-      -DCMAKE_CUDA_COMPILER=<span class="str">"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/bin/nvcc.exe"</span>
-
-<span class="comment"># Build</span>
-cmake --build build --config Release --parallel</pre>
-      </div>
-      <p style="font-size:.82rem;color:var(--text-dim)">Prerequisites: Visual Studio 2022, CUDA Toolkit 12.x, <a href="https://vcpkg.io" style="color:var(--accent)">vcpkg</a></p>
-    </div>
-
-    <div class="tab-panel" id="tab-macos">
-      <div class="code-block">
-        <button class="copy-btn" data-target="code-macos">Copy</button>
-        <pre id="code-macos"><span class="comment"># Apple Silicon &mdash; Metal scaffold backend</span>
-cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      <span class="flag">-DDSO_ENABLE_CUDA=OFF</span> \
-      <span class="flag">-DDSO_ENABLE_METAL=ON</span>
-cmake --build build --parallel
-
-<span class="comment"># Select Metal backend at runtime</span>
-./build/dso_stacker -f frames.csv -o stacked.fits <span class="flag">--backend metal</span></pre>
-      </div>
-      <div class="callout callout-warn">
-        <div><strong>Metal backend is scaffolded.</strong> Currently falls back to the CPU pipeline while Metal kernels are ported incrementally.</div>
       </div>
     </div>
   </div>
