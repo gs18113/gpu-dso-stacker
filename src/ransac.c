@@ -234,9 +234,11 @@ DsoError dlt_homography(const StarPos *ref_pts,
     {
         double sc = H_raw[8];
         if (fabs(sc) < 1e-12) {
-            sc = 0.0;
-            for (i = 0; i < 9; i++) if (fabs(H_raw[i]) > fabs(sc)) sc = H_raw[i];
-            if (fabs(sc) < 1e-12) return DSO_ERR_INVALID_ARG;
+            /* Frobenius norm fallback — more stable than max-element */
+            double frob = 0.0;
+            for (i = 0; i < 9; i++) frob += H_raw[i] * H_raw[i];
+            sc = sqrt(frob);
+            if (sc < 1e-12) return DSO_ERR_INVALID_ARG;
         }
         for (i = 0; i < 9; i++) H_out->h[i] = H_raw[i] / sc;
     }

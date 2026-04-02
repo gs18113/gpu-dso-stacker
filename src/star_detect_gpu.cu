@@ -199,6 +199,15 @@ __global__ static void threshold_auto_kernel(
  * Build Moffat kernel on CPU and upload to constant memory
  * ------------------------------------------------------------------------- */
 
+/* Cached Moffat parameters to avoid redundant per-frame uploads */
+static float s_cached_alpha = -1.f;
+static float s_cached_beta  = -1.f;
+static int   s_cached_R     = 0;
+
+/* Pre-allocated reduction scratch buffer (persists across frames) */
+static double *s_reduce_scratch      = NULL;
+static size_t  s_reduce_scratch_size = 0;
+
 static DsoError upload_moffat_kernel(const MoffatParams *params,
                                       int *radius_out)
 {
@@ -215,9 +224,15 @@ static DsoError upload_moffat_kernel(const MoffatParams *params,
     }
     if (R < 1) R = 1;
 
+    /* Skip re-upload if parameters haven't changed */
+    if (params->alpha == s_cached_alpha && params->beta == s_cached_beta) {
+        *radius_out = s_cached_R;
+        return DSO_OK;
+    }
+
     int kw = 2 * R + 1;
     float kbuf[MOFFAT_MAX_ELEMS];
-    float ksum = 0.f;
+    double ksum = 0.0;
 
     float alpha2 = params->alpha * params->alpha;
     float neg_beta = -params->beta;
@@ -227,12 +242,13 @@ static DsoError upload_moffat_kernel(const MoffatParams *params,
             float r2 = (float)(i*i + j*j);
             float v = powf(1.0f + r2 / alpha2, neg_beta);
             kbuf[(j+R) * kw + (i+R)] = v;
-            ksum += v;
+            ksum += (double)v;
         }
     }
 
-    /* Normalise kernel to sum = 1. */
-    for (int k = 0; k < kw * kw; k++) kbuf[k] /= ksum;
+    /* Normalise kernel to sum = 1 (double division for accuracy). */
+    double inv_ksum = 1.0 / ksum;
+    for (int k = 0; k < kw * kw; k++) kbuf[k] = (float)((double)kbuf[k] * inv_ksum);
 
     /* Upload to constant memory. */
     cudaError_t cerr;
@@ -246,6 +262,11 @@ static DsoError upload_moffat_kernel(const MoffatParams *params,
         fprintf(stderr, "upload_moffat_kernel (radius): %s\n", cudaGetErrorString(cerr));
         return DSO_ERR_CUDA;
     }
+
+    /* Cache the parameters */
+    s_cached_alpha = params->alpha;
+    s_cached_beta  = params->beta;
+    s_cached_R     = R;
 
     *radius_out = R;
     return DSO_OK;
@@ -286,20 +307,28 @@ DsoError star_detect_gpu_d2d(const float        *d_src,
         return DSO_ERR_CUDA;
     }
 
-    /* Compute mean and sigma fully on GPU (Asynchronously) */
+    /* Compute mean and sigma fully on GPU (Asynchronously).
+     * The reduction scratch buffer is pre-allocated and reused across frames
+     * to avoid per-frame cudaMalloc + cudaStreamSynchronize + cudaFree. */
     int N = W * H;
     int n_partials = (N + REDUCE_BLOCK - 1) / REDUCE_BLOCK;
-    
-    /* We need device scratch for: partials, mean, sq_sum */
-    double *d_partials = NULL;
-    double *d_mean     = NULL;
-    double *d_sq_sum   = NULL;
-    
-    /* Using a single allocation for all 3 device vars to be efficient */
-    cerr = cudaMalloc(&d_partials, (size_t)n_partials * sizeof(double) + 2 * sizeof(double));
-    if (cerr != cudaSuccess) return DSO_ERR_ALLOC;
-    d_mean   = d_partials + n_partials;
-    d_sq_sum = d_mean + 1;
+    size_t needed = (size_t)n_partials * sizeof(double) + 2 * sizeof(double);
+
+    /* Grow the persistent scratch buffer if needed */
+    if (needed > s_reduce_scratch_size) {
+        if (s_reduce_scratch) cudaFree(s_reduce_scratch);
+        cerr = cudaMalloc(&s_reduce_scratch, needed);
+        if (cerr != cudaSuccess) {
+            s_reduce_scratch = NULL;
+            s_reduce_scratch_size = 0;
+            return DSO_ERR_ALLOC;
+        }
+        s_reduce_scratch_size = needed;
+    }
+
+    double *d_partials = s_reduce_scratch;
+    double *d_mean     = d_partials + n_partials;
+    double *d_sq_sum   = d_mean + 1;
 
     /* 1. Sum partials */
     reduce_sum_kernel<<<n_partials, REDUCE_BLOCK, 0, stream>>>(d_conv, d_partials, N);
@@ -316,12 +345,6 @@ DsoError star_detect_gpu_d2d(const float        *d_src,
     dim3 blk_t(REDUCE_BLOCK);
     dim3 grd_t((N + REDUCE_BLOCK - 1) / REDUCE_BLOCK);
     threshold_auto_kernel<<<grd_t, blk_t, 0, stream>>>(d_conv, d_mask, d_mean, d_sq_sum, sigma_k, N);
-    
-    /* Note: Ideally we would avoid cudaFree here to keep it async, 
-     * but we don't have a way to defer free in this library without API change.
-     * We synchronize here to safely free. Still better than 3 syncs + 2 host copies. */
-    cudaStreamSynchronize(stream);
-    cudaFree(d_partials);
 
     cerr = cudaGetLastError();
     if (cerr != cudaSuccess) {
@@ -444,4 +467,20 @@ cleanup:
         return DSO_ERR_CUDA;
     }
     return DSO_OK;
+}
+
+/* -------------------------------------------------------------------------
+ * star_detect_gpu_cleanup — free persistent GPU resources.
+ * ------------------------------------------------------------------------- */
+
+void star_detect_gpu_cleanup(void)
+{
+    if (s_reduce_scratch) {
+        cudaFree(s_reduce_scratch);
+        s_reduce_scratch = NULL;
+        s_reduce_scratch_size = 0;
+    }
+    s_cached_alpha = -1.f;
+    s_cached_beta  = -1.f;
+    s_cached_R     = 0;
 }

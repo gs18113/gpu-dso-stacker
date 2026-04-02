@@ -130,8 +130,8 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
              * weight sum is renormalised, so the filter degrades gracefully
              * at image boundaries rather than ringing or clamping.
              */
-            float accum      = 0.f;
-            float weight_sum = 0.f;
+            double accum      = 0.0;
+            double weight_sum = 0.0;
 
             /* Pre-calculate 6 weights for x and 6 for y */
             float wx_arr[6], wy_arr[6];
@@ -156,7 +156,7 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
                 }
             }
 
-            dst->data[dy * DW + dx] = (fabsf(weight_sum) < 1e-6f) ? NAN : accum / weight_sum;
+            dst->data[dy * DW + dx] = (fabs(weight_sum) < 1e-6) ? NAN : (float)(accum / weight_sum);
         }
     }
 

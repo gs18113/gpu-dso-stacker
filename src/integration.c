@@ -59,13 +59,13 @@ DsoError integrate_mean(const Image **frames, int n, Image *out)
      * NaN-valued pixels (OOB sentinel from Lanczos warp) are skipped. */
 #pragma omp parallel for schedule(static)
     for (p = 0; p < npix; p++) {
-        float sum = 0.f;
+        double sum = 0.0;
         int   valid = 0;
         for (int i = 0; i < n; i++) {
             float v = frames[i]->data[p];
-            if (!isnan(v)) { sum += v; valid++; }
+            if (!isnan(v)) { sum += (double)v; valid++; }
         }
-        out->data[p] = (valid > 0) ? sum / (float)valid : NAN;
+        out->data[p] = (valid > 0) ? (float)(sum / (double)valid) : NAN;
     }
 
     return DSO_OK;

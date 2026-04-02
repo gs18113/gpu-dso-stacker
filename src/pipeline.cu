@@ -246,11 +246,10 @@ static DsoError phase_detect_warp_integrate(
         CUDA_CHECK(cudaMalloc(&d_ch_b, npix_f), cleanup, "d_ch_b");
     }
 
-    /* --- Host staging buffers for D2H --- */
-    lum_host  = (float   *)malloc(npix_f);
-    conv_host = (float   *)malloc(npix_f);
-    mask_host = (uint8_t *)malloc(npix_b);
-    if (!lum_host || !conv_host || !mask_host) { err = DSO_ERR_ALLOC; goto cleanup; }
+    /* --- Host staging buffers for D2H (pinned for faster transfers) --- */
+    CUDA_CHECK(cudaMallocHost(&lum_host,  npix_f), cleanup, "lum_host pinned");
+    CUDA_CHECK(cudaMallocHost(&conv_host, npix_f), cleanup, "conv_host pinned");
+    CUDA_CHECK(cudaMallocHost(&mask_host, npix_b), cleanup, "mask_host pinned");
 
     /* --- Processing order: reference frame first --- */
     order = (int *)malloc((size_t)n_frames * sizeof(int));
@@ -464,7 +463,9 @@ cleanup:
     *skipped_frames_out = skipped_frames;
     free(order);
     free(ref_stars.stars);
-    free(lum_host); free(conv_host); free(mask_host);
+    if (lum_host)  cudaFreeHost(lum_host);
+    if (conv_host) cudaFreeHost(conv_host);
+    if (mask_host) cudaFreeHost(mask_host);
     if (pinned[0]) cudaFreeHost(pinned[0]);
     if (pinned[1]) cudaFreeHost(pinned[1]);
     cudaFree(d_raw[0]); cudaFree(d_raw[1]);
@@ -581,6 +582,7 @@ done:
     integration_gpu_cleanup(ctx_r);
     integration_gpu_cleanup(ctx_g);
     integration_gpu_cleanup(ctx_b);
+    star_detect_gpu_cleanup();
     lanczos_gpu_cleanup();
 
     if (err == DSO_OK)
