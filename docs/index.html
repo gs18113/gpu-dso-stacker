@@ -289,6 +289,7 @@ cuda_12.9.1_windows.exe -s cudart_12.9 npp_12.9 Display.Driver -n</pre>
 
       <div class="tab-panel" id="tab-cuda-macos">
         <h3 style="font-size:.95rem;font-weight:600;color:#fff;margin:0 0 .6rem">Gatekeeper Workaround</h3>
+        <p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.75rem">macOS quarantines files downloaded from the internet. Since the binaries are not Apple-notarized, you need to clear the quarantine attribute before macOS will allow them to run.</p>
         <div class="code-block">
           <button class="copy-btn" data-target="code-macos-gk">Copy</button>
           <pre id="code-macos-gk">mkdir -p ~/DSOStacker && curl -fL \
