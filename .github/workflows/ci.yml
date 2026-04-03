@@ -52,7 +52,7 @@ jobs:
           cmake -B build-gpu \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
-            -DDSO_CUDA_ARCHITECTURES="89" \
+            -DDSO_CUDA_ARCHITECTURES="61;70;75;80;86;89" \
             -DDSO_ENABLE_LIBRAW=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
@@ -164,7 +164,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DCMAKE_CUDA_COMPILER="${{ steps.cuda-toolkit.outputs.CUDA_PATH }}/bin/nvcc.exe" `
-            -DDSO_CUDA_ARCHITECTURES="89" `
+            -DDSO_CUDA_ARCHITECTURES="61;70;75;80;86;89" `
             -DDSO_ENABLE_LIBRAW=ON `
             -DCMAKE_C_COMPILER_LAUNCHER=sccache `
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
