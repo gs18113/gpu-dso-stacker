@@ -23,13 +23,13 @@
       --code-bg:  #1c1c30;
       --radius:   8px;
     }
-    html { scroll-behavior: smooth; font-size: 16px; overflow-x: hidden; }
+    html, body { overflow-x: hidden; }
+    html { scroll-behavior: smooth; font-size: 16px; }
     body {
       background: var(--bg);
       color: var(--text);
       font-family: 'Inter', system-ui, sans-serif;
       line-height: 1.7;
-      overflow-x: hidden;
     }
 
     .container { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
@@ -179,12 +179,10 @@
       .hamburger { display: flex; }
       .bench-grid { grid-template-columns: 1fr; }
       .gui-layout { grid-template-columns: 1fr !important; }
+      .callout-grid { grid-template-columns: 1fr !important; }
+      .features-grid { grid-template-columns: 1fr; }
       h2 { font-size: 1.4rem; }
       section { padding: 3rem 0; }
-    }
-    @media (max-width: 480px) {
-      .dl-grid { grid-template-columns: 1fr; }
-      .features-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -593,7 +591,7 @@ python src/GUI/main.py</pre>
       </table>
     </div>
 
-    <div style="margin-top:1.25rem;display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
+    <div class="callout-grid" style="margin-top:1.25rem;display:grid;grid-template-columns:1fr 1fr;gap:.75rem;">
       <div class="callout callout-info">
         <div><strong>Single-pass loading</strong> &mdash; each frame file is opened exactly once. Star detection, alignment, and warping all complete before the next frame is loaded.</div>
       </div>
