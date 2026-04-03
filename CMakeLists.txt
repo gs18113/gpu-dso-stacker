@@ -216,8 +216,6 @@ endif()
 if(DSO_ENABLE_CUDA)
     set_target_properties(dso_stacker_lib PROPERTIES
         CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
-        CUDA_SEPARABLE_COMPILATION ON
-        CUDA_RESOLVE_DEVICE_SYMBOLS ON
     )
 endif()
 
@@ -250,8 +248,7 @@ if(DSO_ENABLE_CUDA)
     # GPU tests (CUDA): lanczos_gpu init/transform vs CPU baseline
     add_executable(test_gpu tests/test_gpu.cu)
     set_target_properties(test_gpu PROPERTIES
-        CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
-        CUDA_SEPARABLE_COMPILATION ON)
+        CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}")
     target_include_directories(test_gpu PRIVATE tests)
     target_link_libraries(test_gpu PRIVATE dso_stacker_lib)
     add_test(NAME test_gpu COMMAND test_gpu)
@@ -298,8 +295,7 @@ if(DSO_ENABLE_CUDA)
     # GPU tests for mini-batch kappa-sigma integration
     add_executable(test_integration_gpu tests/test_integration_gpu.cu)
     set_target_properties(test_integration_gpu PROPERTIES
-        CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}"
-        CUDA_SEPARABLE_COMPILATION ON)
+        CUDA_ARCHITECTURES "${DSO_CUDA_ARCHITECTURES}")
     target_include_directories(test_integration_gpu PRIVATE tests)
     target_link_libraries(test_integration_gpu PRIVATE dso_stacker_lib)
     add_test(NAME test_integration_gpu COMMAND test_integration_gpu)
