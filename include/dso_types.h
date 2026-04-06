@@ -61,6 +61,7 @@ typedef struct {
     int        width;
     int        height;
     int        pattern;
+    float      quality_score;   /* normalized quality score (ref=100); 0 if not computed */
 } FrameInfo;
 
 /*

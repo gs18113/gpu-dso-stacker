@@ -240,6 +240,7 @@ Star detection (2-column CSV only):
       --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
       --top-stars <int>          Top-K stars for matching (default: 50)
       --min-stars <int>          Minimum stars for triangle matching (default: 6)
+      --min-quality <float>      Min quality as fraction of reference (0=disabled, default: 0)
 
 Triangle matching (2-column CSV only):
       --triangle-iters <int>     Max triangle-matching iterations (default: 1000)

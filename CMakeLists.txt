@@ -102,6 +102,7 @@ set(LIB_SOURCES
     src/integration.c
     src/debayer_cpu.c
     src/star_detect_cpu.c
+    src/frame_quality.c
     src/ransac.c
     src/calibration.c
     src/pipeline_dispatch.c
@@ -264,6 +265,11 @@ add_executable(test_star_detect tests/test_star_detect.c)
 target_include_directories(test_star_detect PRIVATE tests)
 target_link_libraries(test_star_detect PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_star_detect COMMAND test_star_detect)
+
+add_executable(test_frame_quality tests/test_frame_quality.c)
+target_include_directories(test_frame_quality PRIVATE tests)
+target_link_libraries(test_frame_quality PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_frame_quality COMMAND test_frame_quality)
 
 add_executable(test_ransac tests/test_ransac.c test/star_coords_generator.c)
 target_include_directories(test_ransac PRIVATE tests test)
