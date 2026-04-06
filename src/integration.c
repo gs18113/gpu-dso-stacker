@@ -1,5 +1,5 @@
 /*
- * integration.c — Frame integration (mean and kappa-sigma clipping)
+ * integration.c — Frame integration (mean, median, and kappa-sigma clipping)
  *
  * Combines N float32 images of identical dimensions into one.
  *
@@ -68,6 +68,80 @@ DsoError integrate_mean(const Image **frames, int n, Image *out)
         out->data[p] = (valid > 0) ? (float)(sum / (double)valid) : NAN;
     }
 
+    return DSO_OK;
+}
+
+DsoError integrate_median(const Image **frames, int n, Image *out)
+{
+    if (!frames || n <= 0 || !out) return DSO_ERR_INVALID_ARG;
+
+    int W = frames[0]->width;
+    int H = frames[0]->height;
+
+    for (int i = 1; i < n; i++) {
+        if (frames[i]->width != W || frames[i]->height != H) {
+            fprintf(stderr,
+                    "integrate_median: frame %d size mismatch (%dx%d vs %dx%d)\n",
+                    i, frames[i]->width, frames[i]->height, W, H);
+            return DSO_ERR_INVALID_ARG;
+        }
+    }
+
+    out->data = (float *)malloc((size_t)W * H * sizeof(float));
+    if (!out->data) return DSO_ERR_ALLOC;
+    out->width  = W;
+    out->height = H;
+
+    long npix = (long)W * H;
+
+    int max_threads = 1;
+#ifdef _OPENMP
+    max_threads = omp_get_max_threads();
+#endif
+
+    /* Per-thread workspace to avoid VLAs on stack */
+    float *all_vals = (float *)malloc((size_t)max_threads * n * sizeof(float));
+    if (!all_vals) {
+        free(out->data); out->data = NULL;
+        return DSO_ERR_ALLOC;
+    }
+
+    long p;
+#pragma omp parallel for schedule(dynamic, 64)
+    for (p = 0; p < npix; p++) {
+        int tid = 0;
+#ifdef _OPENMP
+        tid = omp_get_thread_num();
+#endif
+        float *vals = &all_vals[tid * n];
+
+        int n_valid = 0;
+        for (int i = 0; i < n; i++) {
+            float v = frames[i]->data[p];
+            if (!isnan(v)) vals[n_valid++] = v;
+        }
+
+        if (n_valid == 0) { out->data[p] = NAN; continue; }
+
+        /* Insertion sort — fast for small N (typically < 100 frames) */
+        for (int i = 1; i < n_valid; i++) {
+            float key = vals[i];
+            int   j   = i - 1;
+            while (j >= 0 && vals[j] > key) {
+                vals[j + 1] = vals[j];
+                j--;
+            }
+            vals[j + 1] = key;
+        }
+
+        if (n_valid & 1) {
+            out->data[p] = vals[n_valid / 2];
+        } else {
+            out->data[p] = (vals[n_valid / 2 - 1] + vals[n_valid / 2]) / 2.0f;
+        }
+    }
+
+    free(all_vals);
     return DSO_OK;
 }
 
