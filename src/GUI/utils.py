@@ -214,6 +214,15 @@ def build_command(
     if opts.get("bayer", "auto") != "auto":
         argv += ["--bayer", opts["bayer"]]
 
+    # --- white balance ---
+    wb = opts.get("white_balance", "none")
+    if wb != "none":
+        argv += ["--white-balance", wb]
+        if wb == "manual":
+            argv += ["--wb-red", str(opts.get("wb_red", 1.0))]
+            argv += ["--wb-green", str(opts.get("wb_green", 1.0))]
+            argv += ["--wb-blue", str(opts.get("wb_blue", 1.0))]
+
     # --- output format ---
     argv += ["--bit-depth", opts["bit_depth"]]
     fmt = detect_output_format(opts["output_path"])

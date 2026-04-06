@@ -107,6 +107,8 @@ Replace `metal` with `cpu` in the URL if you don't need Metal acceleration.
 
 **Color output**: when a Bayer pattern is active (from `--bayer` or the FITS `BAYERPAT` keyword), stage 4 debayers to separate R, G, B planes; stages 5–6 run once per channel; the output FITS has `NAXIS=3` with planes R=1/G=2/B=3. Star detection (stages 1–2) always uses luminance regardless of color mode.
 
+**White balance** (`--white-balance`): optional per-channel multiplier correction applied to the raw Bayer mosaic after calibration and before debayering. Three modes: `camera` (from RAW file metadata), `auto` (gray-world: equalise R/G/B channel means), `manual` (user-specified multipliers via `--wb-red/green/blue`). Multipliers are computed once from the reference frame and applied consistently to all frames.
+
 **Triangle-matching mismatch handling**: if a non-reference frame cannot be aligned (too few stars or triangle-matching mismatch), that frame is skipped and processing continues. At the end, the CLI prints a summary with successful and skipped frame counts.
 
 **Calibration pre-processing** (applied to every raw frame before debayering when `--dark`/`--flat` are provided):
@@ -266,6 +268,15 @@ Calibration (applied before debayering; bias and darkflat are mutually exclusive
 Sensor:
       --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg
                                  (default: auto-detect from FITS BAYERPAT keyword)
+
+White balance (applied to raw Bayer mosaic before debayering):
+      --white-balance <mode>     none | camera | auto | manual (default: none)
+                                 camera: use metadata from RAW files / FITS keywords
+                                 auto: gray-world assumption (mean R ~ G ~ B)
+                                 manual: use --wb-red/green/blue multipliers
+      --wb-red <float>           Red channel multiplier (default: 1.0)
+      --wb-green <float>         Green channel multiplier (default: 1.0)
+      --wb-blue <float>          Blue channel multiplier (default: 1.0)
 
 Output format (format inferred from --output extension):
       --bit-depth <depth>        8 | 16 | f16 | f32  (default: f32)

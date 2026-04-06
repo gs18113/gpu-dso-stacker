@@ -23,6 +23,7 @@
 #include "dso_types.h"         /* MoffatParams lives here */
 #include "ransac.h"            /* RansacParams */
 #include "image_io.h"          /* ImageSaveOptions */
+#include "white_balance.h"     /* WbParams, WbMode */
 
 /* Forward declaration — include calibration.h where the full type is needed */
 typedef struct CalibFrames CalibFrames;
@@ -85,6 +86,9 @@ typedef struct {
 
     /* --- Color output --- */
     int color_output;  /* 1 = produce 3-plane RGB output; 0 = luminance (default) */
+
+    /* --- White balance --- */
+    WbParams wb;       /* white balance mode + manual multipliers (default: WB_NONE) */
 
     /* --- Output format --- */
     ImageSaveOptions save_opts; /* bit depth, compression, stretch; see image_io.h */

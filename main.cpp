@@ -110,6 +110,11 @@ enum {
     OPT_TIFF_COMPRESSION,
     OPT_STRETCH_MIN,
     OPT_STRETCH_MAX,
+    /* White balance */
+    OPT_WHITE_BALANCE,
+    OPT_WB_RED,
+    OPT_WB_GREEN,
+    OPT_WB_BLUE,
     /* Query */
     OPT_LIST_BACKENDS,
 };
@@ -182,6 +187,15 @@ static void usage(const char *prog)
         "      --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg\n"
         "                                 (default: auto-detect from FITS BAYERPAT keyword)\n"
         "\n"
+        "White balance (applied to raw Bayer mosaic before debayering):\n"
+        "      --white-balance <mode>     none | camera | auto | manual (default: none)\n"
+        "                                 camera: use metadata from RAW files / FITS keywords\n"
+        "                                 auto: gray-world assumption (mean R ~ G ~ B)\n"
+        "                                 manual: use --wb-red/green/blue multipliers\n"
+        "      --wb-red <float>           Red channel multiplier (default: 1.0)\n"
+        "      --wb-green <float>         Green channel multiplier (default: 1.0)\n"
+        "      --wb-blue <float>          Blue channel multiplier (default: 1.0)\n"
+        "\n"
         "Output format (format inferred from --output extension):\n"
         "      --bit-depth <depth>        8 | 16 | f16 | f32  (default: f32)\n"
         "                                 f16 is TIFF only; 8/16 require TIFF or PNG;\n"
@@ -250,6 +264,10 @@ int main(int argc, char **argv)
     cfg.output_file     = "output.fits";
     cfg.backend         = DSO_BACKEND_AUTO;
     cfg.bayer_override  = BAYER_NONE;   /* auto-detect */
+    cfg.wb.mode   = WB_NONE;
+    cfg.wb.r_mul  = 1.0f;
+    cfg.wb.g_mul  = 1.0f;
+    cfg.wb.b_mul  = 1.0f;
     cfg.use_gpu_lanczos = 1;
     cfg.use_gpu_ransac  = -1; /* auto: follow stacking device */
     cfg.calib           = nullptr;
@@ -308,6 +326,11 @@ int main(int argc, char **argv)
         {"wsor-clip",         required_argument, nullptr, OPT_WSOR_CLIP},
         {"calib-kappa",       required_argument, nullptr, OPT_CALIB_KAPPA},
         {"calib-iterations",  required_argument, nullptr, OPT_CALIB_ITERATIONS},
+        /* White balance */
+        {"white-balance",     required_argument, nullptr, OPT_WHITE_BALANCE},
+        {"wb-red",            required_argument, nullptr, OPT_WB_RED},
+        {"wb-green",          required_argument, nullptr, OPT_WB_GREEN},
+        {"wb-blue",           required_argument, nullptr, OPT_WB_BLUE},
         /* Output format */
         {"bit-depth",         required_argument, nullptr, OPT_BIT_DEPTH},
         {"tiff-compression",  required_argument, nullptr, OPT_TIFF_COMPRESSION},
@@ -381,6 +404,22 @@ int main(int argc, char **argv)
                 return 1;
             }
             break;
+
+        /* White balance options */
+        case OPT_WHITE_BALANCE:
+            if      (strcmp(optarg, "none")   == 0) cfg.wb.mode = WB_NONE;
+            else if (strcmp(optarg, "camera") == 0) cfg.wb.mode = WB_CAMERA;
+            else if (strcmp(optarg, "auto")   == 0) cfg.wb.mode = WB_AUTO;
+            else if (strcmp(optarg, "manual") == 0) cfg.wb.mode = WB_MANUAL;
+            else {
+                fprintf(stderr, "Error: unknown --white-balance '%s'; "
+                        "use none, camera, auto, or manual\n", optarg);
+                return 1;
+            }
+            break;
+        case OPT_WB_RED:   cfg.wb.r_mul = strtof(optarg, nullptr); break;
+        case OPT_WB_GREEN: cfg.wb.g_mul = strtof(optarg, nullptr); break;
+        case OPT_WB_BLUE:  cfg.wb.b_mul = strtof(optarg, nullptr); break;
 
         /* Calibration options */
         case OPT_DARK:               dark_path       = optarg; break;
@@ -718,6 +757,14 @@ int main(int argc, char **argv)
         printf("Calibration: dark=%s flat=%s\n",
                calib.has_dark ? "yes" : "no",
                calib.has_flat ? "yes" : "no");
+    }
+    if (cfg.wb.mode != WB_NONE) {
+        static const char *wb_mode_names[] = {"none", "camera", "auto", "manual"};
+        printf("White balance: %s", wb_mode_names[cfg.wb.mode]);
+        if (cfg.wb.mode == WB_MANUAL)
+            printf(" (R=%.3f G=%.3f B=%.3f)",
+                   (double)cfg.wb.r_mul, (double)cfg.wb.g_mul, (double)cfg.wb.b_mul);
+        printf("\n");
     }
 
     /* ---- Run pipeline ---- */

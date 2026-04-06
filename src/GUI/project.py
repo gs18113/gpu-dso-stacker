@@ -47,6 +47,10 @@ _DEFAULT_OPTIONS: dict = {
     "bias_method": "kappa-sigma",
     "flat_method": "kappa-sigma",
     "darkflat_method": "kappa-sigma",
+    "white_balance": "none",
+    "wb_red": 1.0,
+    "wb_green": 1.0,
+    "wb_blue": 1.0,
 }
 
 

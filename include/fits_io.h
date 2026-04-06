@@ -76,6 +76,18 @@ DsoError fits_save_rgb(const char *filepath,
  */
 DsoError fits_get_bayer_pattern(const char *filepath, BayerPattern *pattern_out);
 
+/*
+ * fits_get_wb_multipliers — read white balance multipliers from a FITS header.
+ *
+ * Reads WB_RMUL, WB_GMUL, WB_BMUL keywords.  If any keyword is absent,
+ * defaults to (1.0, 1.0, 1.0) and returns DSO_OK — missing keywords are
+ * not an error.
+ *
+ * Returns DSO_OK or DSO_ERR_FITS / DSO_ERR_INVALID_ARG.
+ */
+DsoError fits_get_wb_multipliers(const char *filepath,
+                                  float *r_mul, float *g_mul, float *b_mul);
+
 #ifdef __cplusplus
 }
 #endif

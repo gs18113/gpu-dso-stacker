@@ -63,6 +63,16 @@ DsoError frame_get_bayer_pattern(const char *filepath, BayerPattern *pattern_out
  */
 DsoError frame_get_dimensions(const char *filepath, int *width_out, int *height_out);
 
+/*
+ * frame_get_wb_multipliers — read camera white balance multipliers.
+ *
+ * For RAW: extracts cam_mul from LibRaw, normalized so green = 1.0.
+ * For FITS: reads WB_RMUL / WB_GMUL / WB_BMUL keywords; defaults to
+ *           (1.0, 1.0, 1.0) if absent.
+ */
+DsoError frame_get_wb_multipliers(const char *filepath,
+                                   float *r_mul, float *g_mul, float *b_mul);
+
 #ifdef __cplusplus
 }
 #endif
