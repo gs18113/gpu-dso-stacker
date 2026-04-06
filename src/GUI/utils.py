@@ -212,6 +212,11 @@ def build_command(
         argv += ["--calib-kappa", str(opts.get("calib_kappa", 2.5))]
         argv += ["--calib-iterations", str(opts.get("calib_iterations", 5))]
 
+    # --- background normalization ---
+    bg = opts.get("bg_calibration", "none")
+    if bg != "none":
+        argv += ["--bg-calibration", bg]
+
     # --- sensor ---
     if opts.get("bayer", "auto") != "auto":
         argv += ["--bayer", opts["bayer"]]

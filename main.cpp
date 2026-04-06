@@ -111,6 +111,8 @@ enum {
     OPT_TIFF_COMPRESSION,
     OPT_STRETCH_MIN,
     OPT_STRETCH_MAX,
+    /* Background normalization */
+    OPT_BG_CALIBRATION,
     /* Query */
     OPT_LIST_BACKENDS,
 };
@@ -194,6 +196,12 @@ static void usage(const char *prog)
         "      --stretch-min <float>      Lower bound for integer scaling (default: auto)\n"
         "      --stretch-max <float>      Upper bound for integer scaling (default: auto)\n"
         "                                 stretch-min/max are ignored for f16/f32 output\n"
+        "\n"
+        "Background normalization:\n"
+        "      --bg-calibration <mode>    none | per-channel | rgb (default: none)\n"
+        "                                 Normalizes each frame's background to match the\n"
+        "                                 reference before integration.  per-channel treats\n"
+        "                                 R/G/B independently; rgb uses luminance stats.\n"
         "\n",
         prog);
 }
@@ -318,6 +326,8 @@ int main(int argc, char **argv)
         {"tiff-compression",  required_argument, nullptr, OPT_TIFF_COMPRESSION},
         {"stretch-min",       required_argument, nullptr, OPT_STRETCH_MIN},
         {"stretch-max",       required_argument, nullptr, OPT_STRETCH_MAX},
+        /* Background normalization */
+        {"bg-calibration",    required_argument, nullptr, OPT_BG_CALIBRATION},
         {"list-backends",     no_argument,       nullptr, OPT_LIST_BACKENDS},
         {nullptr, 0, nullptr, 0}
     };
@@ -476,6 +486,18 @@ int main(int argc, char **argv)
 
         case OPT_STRETCH_MIN: cfg.save_opts.stretch_min = strtof(optarg, nullptr); break;
         case OPT_STRETCH_MAX: cfg.save_opts.stretch_max = strtof(optarg, nullptr); break;
+
+        case OPT_BG_CALIBRATION:
+            if      (strcmp(optarg, "none")        == 0) cfg.bg_calibration = DSO_BG_NONE;
+            else if (strcmp(optarg, "per-channel") == 0) cfg.bg_calibration = DSO_BG_PER_CHANNEL;
+            else if (strcmp(optarg, "rgb")         == 0) cfg.bg_calibration = DSO_BG_RGB;
+            else {
+                fprintf(stderr,
+                        "Error: unknown --bg-calibration '%s'; "
+                        "use none, per-channel, or rgb\n", optarg);
+                return 1;
+            }
+            break;
 
         case OPT_LIST_BACKENDS: list_backends = true; break;
 

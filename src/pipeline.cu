@@ -29,6 +29,8 @@
 #include "pipeline.h"
 #include "calibration.h"
 #include "calibration_gpu.h"
+#include "background.h"
+#include "background_gpu.h"
 #include "image_io.h"
 #include "fits_io.h"
 #include "frame_load.h"
@@ -246,6 +248,13 @@ static DsoError phase_detect_warp_integrate(
     uint8_t     *mask_host     = NULL;
     StarList     ref_stars      = {NULL, 0};
 
+    /* Background normalization state */
+    BgStats      ref_bg_r  = {0.0f, 0.0f};
+    BgStats      ref_bg_g  = {0.0f, 0.0f};
+    BgStats      ref_bg_b  = {0.0f, 0.0f};
+    int          ref_bg_ok = 0;
+    float       *bg_host_buf  = NULL;
+
     /* Frame quality scoring */
     FrameQuality *frame_qualities  = NULL;
     int          *quality_indices  = NULL;
@@ -277,6 +286,11 @@ static DsoError phase_detect_warp_integrate(
     CUDA_CHECK(cudaMallocHost(&lum_host,  npix_f), cleanup, "lum_host pinned");
     CUDA_CHECK(cudaMallocHost(&conv_host, npix_f), cleanup, "conv_host pinned");
     CUDA_CHECK(cudaMallocHost(&mask_host, npix_b), cleanup, "mask_host pinned");
+
+    /* --- Background normalization host buffer (per-channel color D2H) --- */
+    if (config->bg_calibration == DSO_BG_PER_CHANNEL && color) {
+        CUDA_CHECK(cudaMallocHost(&bg_host_buf, npix_f), cleanup, "bg_host_buf pinned");
+    }
 
     /* --- Frame quality arrays --- */
     frame_qualities  = (FrameQuality *)calloc((size_t)n_frames, sizeof(FrameQuality));
@@ -478,6 +492,110 @@ static DsoError phase_detect_warp_integrate(
                                    W, H, color, pat, &fi->H, batch_n,
                                    ctx_r, ctx_g, ctx_b, stream_compute, fi->filepath),
                        cleanup, fi->filepath);
+
+            /* --- Background normalization --- */
+            if (config->bg_calibration != DSO_BG_NONE) {
+                int npix = W * H;
+                if (!ref_bg_ok) {
+                    /* Reference frame: compute and store stats.
+                     * Use lum_host (pre-warp luminance, already D2H'd). */
+                    bg_compute_stats(lum_host, npix, &ref_bg_r);
+                    if (color && config->bg_calibration == DSO_BG_PER_CHANNEL) {
+                        /* Per-channel: sync warp, D2H each channel for stats */
+                        CUDA_CHECK(cudaStreamSynchronize(stream_compute),
+                                   cleanup, "bg ref sync");
+                        CUDA_CHECK(cudaMemcpy(bg_host_buf,
+                                              ctx_r->d_frames[batch_n], npix_f,
+                                              cudaMemcpyDeviceToHost),
+                                   cleanup, "bg ref D2H R");
+                        bg_compute_stats(bg_host_buf, npix, &ref_bg_r);
+                        CUDA_CHECK(cudaMemcpy(bg_host_buf,
+                                              ctx_g->d_frames[batch_n], npix_f,
+                                              cudaMemcpyDeviceToHost),
+                                   cleanup, "bg ref D2H G");
+                        bg_compute_stats(bg_host_buf, npix, &ref_bg_g);
+                        CUDA_CHECK(cudaMemcpy(bg_host_buf,
+                                              ctx_b->d_frames[batch_n], npix_f,
+                                              cudaMemcpyDeviceToHost),
+                                   cleanup, "bg ref D2H B");
+                        bg_compute_stats(bg_host_buf, npix, &ref_bg_b);
+                    }
+                    ref_bg_ok = 1;
+                    printf("[Pipeline] Bg-norm ref: bg=%.2f scale=%.4f\n",
+                           (double)ref_bg_r.background, (double)ref_bg_r.scale);
+                } else if (ref_bg_r.scale >= 1e-10f) {
+                    /* Non-reference frame: normalize on GPU */
+                    if (config->bg_calibration == DSO_BG_PER_CHANNEL && color) {
+                        /* Per-channel: sync warp, D2H each channel, stats, normalize */
+                        CUDA_CHECK(cudaStreamSynchronize(stream_compute),
+                                   cleanup, "bg frame sync");
+                        /* R channel */
+                        CUDA_CHECK(cudaMemcpy(bg_host_buf,
+                                              ctx_r->d_frames[batch_n], npix_f,
+                                              cudaMemcpyDeviceToHost),
+                                   cleanup, "bg D2H R");
+                        BgStats fs_r;
+                        bg_compute_stats(bg_host_buf, npix, &fs_r);
+                        if (fs_r.scale >= 1e-10f) {
+                            float ratio_r = ref_bg_r.scale / fs_r.scale;
+                            PIPE_CHECK(bg_normalize_gpu(ctx_r->d_frames[batch_n], npix,
+                                                         fs_r.background, ratio_r,
+                                                         ref_bg_r.background, stream_compute),
+                                       cleanup, "bg norm R");
+                        }
+                        /* G channel */
+                        CUDA_CHECK(cudaMemcpy(bg_host_buf,
+                                              ctx_g->d_frames[batch_n], npix_f,
+                                              cudaMemcpyDeviceToHost),
+                                   cleanup, "bg D2H G");
+                        BgStats fs_g;
+                        bg_compute_stats(bg_host_buf, npix, &fs_g);
+                        if (fs_g.scale >= 1e-10f) {
+                            float ratio_g = ref_bg_g.scale / fs_g.scale;
+                            PIPE_CHECK(bg_normalize_gpu(ctx_g->d_frames[batch_n], npix,
+                                                         fs_g.background, ratio_g,
+                                                         ref_bg_g.background, stream_compute),
+                                       cleanup, "bg norm G");
+                        }
+                        /* B channel */
+                        CUDA_CHECK(cudaMemcpy(bg_host_buf,
+                                              ctx_b->d_frames[batch_n], npix_f,
+                                              cudaMemcpyDeviceToHost),
+                                   cleanup, "bg D2H B");
+                        BgStats fs_b;
+                        bg_compute_stats(bg_host_buf, npix, &fs_b);
+                        if (fs_b.scale >= 1e-10f) {
+                            float ratio_b = ref_bg_b.scale / fs_b.scale;
+                            PIPE_CHECK(bg_normalize_gpu(ctx_b->d_frames[batch_n], npix,
+                                                         fs_b.background, ratio_b,
+                                                         ref_bg_b.background, stream_compute),
+                                       cleanup, "bg norm B");
+                        }
+                    } else {
+                        /* RGB mode or mono: use lum_host for stats */
+                        BgStats fs;
+                        bg_compute_stats(lum_host, npix, &fs);
+                        if (fs.scale >= 1e-10f) {
+                            float ratio = ref_bg_r.scale / fs.scale;
+                            PIPE_CHECK(bg_normalize_gpu(ctx_r->d_frames[batch_n], npix,
+                                                         fs.background, ratio,
+                                                         ref_bg_r.background, stream_compute),
+                                       cleanup, "bg norm R");
+                            if (color) {
+                                PIPE_CHECK(bg_normalize_gpu(ctx_g->d_frames[batch_n], npix,
+                                                             fs.background, ratio,
+                                                             ref_bg_r.background, stream_compute),
+                                           cleanup, "bg norm G");
+                                PIPE_CHECK(bg_normalize_gpu(ctx_b->d_frames[batch_n], npix,
+                                                             fs.background, ratio,
+                                                             ref_bg_r.background, stream_compute),
+                                           cleanup, "bg norm B");
+                            }
+                        }
+                    }
+                }
+            }
+
             batch_n++;
             successful_frames++;
         }
@@ -544,6 +662,7 @@ cleanup:
     if (lum_host)  cudaFreeHost(lum_host);
     if (conv_host) cudaFreeHost(conv_host);
     if (mask_host) cudaFreeHost(mask_host);
+    if (bg_host_buf) cudaFreeHost(bg_host_buf);
     if (pinned[0]) cudaFreeHost(pinned[0]);
     if (pinned[1]) cudaFreeHost(pinned[1]);
     cudaFree(d_raw[0]); cudaFree(d_raw[1]);
