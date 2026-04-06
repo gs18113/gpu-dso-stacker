@@ -229,7 +229,7 @@ I/O:
 
 적분:
       --cpu                      모든 파이프라인 단계를 CPU에서 실행 (OpenMP 가속)
-      --integration <method>     mean | kappa-sigma | median (기본값: kappa-sigma)
+      --integration <method>     mean | kappa-sigma | median | auto-adaptive (기본값: kappa-sigma)
       --kappa <float>            시그마 클리핑 임계값 (기본값: 3.0)
       --iterations <int>         픽셀당 최대 클리핑 반복 횟수 (기본값: 3)
       --batch-size <int>         GPU 적분 미니배치 크기 (기본값: 16)

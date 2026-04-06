@@ -166,6 +166,15 @@ static DsoError integrate_batch(
             PIPE_CHECK(integration_gpu_process_batch_median(ctx_b, M, stream),
                        done, "batch integration B");
         }
+    } else if (integration_method == DSO_INTEGRATE_AAWA) {
+        PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_r, M, stream),
+                   done, "batch integration R");
+        if (color) {
+            PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_g, M, stream),
+                       done, "batch integration G");
+            PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_b, M, stream),
+                       done, "batch integration B");
+        }
     } else {
         PIPE_CHECK(integration_gpu_process_batch_mean(ctx_r, M, stream),
                    done, "batch integration R");
@@ -540,7 +549,8 @@ DsoError pipeline_run_cuda(FrameInfo            *frames,
     printf("pipeline: single-pass star-detect + align + %s integration "
            "(%d frames, batch=%d)\n",
            config->integration_method == DSO_INTEGRATE_KAPPA_SIGMA ? "kappa-sigma" :
-           config->integration_method == DSO_INTEGRATE_MEDIAN      ? "median"      : "mean",
+           config->integration_method == DSO_INTEGRATE_MEDIAN      ? "median"      :
+           config->integration_method == DSO_INTEGRATE_AAWA        ? "auto-adaptive" : "mean",
            n_frames, config->batch_size);
 
     PIPE_CHECK(phase_detect_warp_integrate(frames, n_frames, ref_idx, W, H,

@@ -72,6 +72,8 @@ static DsoError flush_batch(
                    cleanup, "batch integration R");
     } else if (integration_method == DSO_INTEGRATE_MEDIAN) {
         PIPE_CHECK(integrate_median(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
+    } else if (integration_method == DSO_INTEGRATE_AAWA) {
+        PIPE_CHECK(integrate_aawa(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
     } else {
         PIPE_CHECK(integrate_mean(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
     }
@@ -86,6 +88,10 @@ static DsoError flush_batch(
             err = integrate_median(ptrs_g, n_batch, &b_out_g);
             if (err == DSO_OK)
                 err = integrate_median(ptrs_b, n_batch, &b_out_b);
+        } else if (integration_method == DSO_INTEGRATE_AAWA) {
+            err = integrate_aawa(ptrs_g, n_batch, &b_out_g);
+            if (err == DSO_OK)
+                err = integrate_aawa(ptrs_b, n_batch, &b_out_b);
         } else {
             err = integrate_mean(ptrs_g, n_batch, &b_out_g);
             if (err == DSO_OK)

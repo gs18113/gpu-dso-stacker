@@ -15,7 +15,7 @@
  *
  * Options (integration):
  *       --cpu                        Run ALL pipeline stages on CPU (default: GPU)
- *       --integration <method>       mean | kappa-sigma (default: kappa-sigma)
+ *       --integration <method>       mean | kappa-sigma | median | auto-adaptive (default: kappa-sigma)
  *       --kappa <float>              Sigma multiplier for clipping (default: 3.0)
  *       --iterations <int>           Max clipping iterations (default: 3)
  *       --batch-size <int>           GPU integration mini-batch size (default: 16)
@@ -125,7 +125,7 @@ static void usage(const char *prog)
         "\n"
         "Integration:\n"
         "      --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)\n"
-        "      --integration <method>     mean | kappa-sigma | median (default: kappa-sigma)\n"
+        "      --integration <method>     mean | kappa-sigma | median | auto-adaptive (default: kappa-sigma)\n"
         "      --kappa <float>            Sigma clipping threshold (default: 3.0)\n"
         "      --iterations <int>         Max clipping passes per pixel (default: 3)\n"
         "      --batch-size <int>         GPU integration mini-batch size (default: 16)\n"
@@ -502,6 +502,8 @@ int main(int argc, char **argv)
         cfg.integration_method = DSO_INTEGRATE_MEAN;
     } else if (strcmp(integ_str, "median") == 0) {
         cfg.integration_method = DSO_INTEGRATE_MEDIAN;
+    } else if (strcmp(integ_str, "auto-adaptive") == 0) {
+        cfg.integration_method = DSO_INTEGRATE_AAWA;
     } else {
         fprintf(stderr, "Error: unknown integration method '%s'\n", integ_str);
         return 1;

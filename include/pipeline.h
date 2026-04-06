@@ -45,7 +45,8 @@ typedef enum {
 typedef enum {
     DSO_INTEGRATE_MEAN        = 0,
     DSO_INTEGRATE_KAPPA_SIGMA = 1,
-    DSO_INTEGRATE_MEDIAN      = 2
+    DSO_INTEGRATE_MEDIAN      = 2,
+    DSO_INTEGRATE_AAWA        = 3
 } IntegrationMethod;
 
 /* -------------------------------------------------------------------------
@@ -70,7 +71,7 @@ typedef struct {
     int          batch_size;      /* frames per GPU mini-batch (16)                  */
     float        kappa;           /* kappa-sigma threshold (3.0)                     */
     int          iterations;      /* sigma-clipping passes per pixel (3)             */
-    IntegrationMethod integration_method; /* mean / kappa-sigma / median             */
+    IntegrationMethod integration_method; /* mean / kappa-sigma / median / aawa     */
 
     /* --- I/O --- */
     const char         *output_file;     /* output FITS path                                */

@@ -164,6 +164,112 @@ __global__ static void kappa_sigma_batch_kernel(
 }
 
 /*
+ * aawa_batch_kernel — Auto Adaptive Weighted Average (Stetson 1989).
+ *
+ * Each thread handles one pixel: loads M values, runs iterative weighted
+ * averaging with Stetson weight w = 1/(1+(|r|/α)²), α=2.0, max 10 iters.
+ * Accumulates result into persistent combined buffers.
+ */
+#define AAWA_GPU_ALPHA    2.0
+#define AAWA_GPU_MAX_ITER 10
+
+__global__ static void aawa_batch_kernel(
+    float * const *d_frame_ptrs,
+    int            M,
+    double        *d_combined_sum,
+    int           *d_combined_count,
+    double        *d_rawsum,
+    int           *d_rawcount,
+    int            npix)
+{
+    int px = blockIdx.x * blockDim.x + threadIdx.x;
+    if (px >= npix) return;
+
+    /* Load M values; skip NaN */
+    float  vals[INTEGRATION_GPU_MAX_BATCH];
+    double raw_total = 0.0;
+    int    n_valid   = 0;
+
+    for (int i = 0; i < M; i++) {
+        float v = d_frame_ptrs[i][px];
+        if (!isnan(v)) {
+            vals[n_valid++] = v;
+            raw_total += (double)v;
+        }
+    }
+
+    d_rawsum[px]   += raw_total;
+    d_rawcount[px] += n_valid;
+
+    if (n_valid == 0) return;
+
+    /* Initial mean */
+    double mu = 0.0;
+    for (int i = 0; i < n_valid; i++) mu += (double)vals[i];
+    mu /= (double)n_valid;
+
+    if (n_valid == 1) {
+        d_combined_sum[px]   += mu;
+        d_combined_count[px] += 1;
+        return;
+    }
+
+    /* Initial Bessel-corrected stddev */
+    double sq = 0.0;
+    for (int i = 0; i < n_valid; i++) {
+        double d = (double)vals[i] - mu;
+        sq += d * d;
+    }
+    double sigma = sqrt(sq / (double)(n_valid - 1));
+
+    if (sigma < 1e-12) {
+        d_combined_sum[px]   += mu * n_valid;
+        d_combined_count[px] += n_valid;
+        return;
+    }
+
+    /* Iterative Stetson weighted average */
+    for (int iter = 0; iter < AAWA_GPU_MAX_ITER; iter++) {
+        double sum_w  = 0.0;
+        double sum_wv = 0.0;
+
+        for (int i = 0; i < n_valid; i++) {
+            double r  = ((double)vals[i] - mu) / sigma;
+            double ra = fabs(r) / AAWA_GPU_ALPHA;
+            double w  = 1.0 / (1.0 + ra * ra);
+            sum_w  += w;
+            sum_wv += w * (double)vals[i];
+        }
+
+        if (sum_w < 1e-12) break;
+
+        double mu_new = sum_wv / sum_w;
+
+        double sum_wsq = 0.0;
+        for (int i = 0; i < n_valid; i++) {
+            double r  = ((double)vals[i] - mu) / sigma;
+            double ra = fabs(r) / AAWA_GPU_ALPHA;
+            double w  = 1.0 / (1.0 + ra * ra);
+            double d  = (double)vals[i] - mu_new;
+            sum_wsq += w * d * d;
+        }
+        double sigma_new = sqrt(sum_wsq / sum_w);
+
+        double denom = fabs(mu) > 1e-10 ? fabs(mu) : 1e-10;
+        if (fabs(mu_new - mu) / denom < 1e-6) {
+            mu = mu_new;
+            break;
+        }
+
+        mu    = mu_new;
+        sigma = (sigma_new > 1e-12) ? sigma_new : 1e-12;
+    }
+
+    d_combined_sum[px]   += mu * n_valid;
+    d_combined_count[px] += n_valid;
+}
+
+/*
  * mean_batch_kernel — accumulate M frames without any sigma clipping.
  *
  * All M values are treated as survivors and added to both combined and raw
@@ -453,7 +559,6 @@ DsoError integration_gpu_process_batch_median(IntegrationGpuCtx *ctx,
 
     int npix = ctx->W * ctx->H;
 
-    /* Update device-side frame pointer array for this batch */
     cudaError_t cerr = cudaMemcpyAsync(
         ctx->d_frame_ptrs,
         ctx->d_frames,
@@ -476,6 +581,42 @@ DsoError integration_gpu_process_batch_median(IntegrationGpuCtx *ctx,
     cerr = cudaGetLastError();
     if (cerr != cudaSuccess) {
         fprintf(stderr, "integration_gpu_process_batch_median kernel: %s\n",
+                cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+    return DSO_OK;
+}
+
+DsoError integration_gpu_process_batch_aawa(IntegrationGpuCtx *ctx,
+                                             int                M,
+                                             cudaStream_t       stream)
+{
+    if (!ctx || M < 1 || M > ctx->batch_size) return DSO_ERR_INVALID_ARG;
+
+    int npix = ctx->W * ctx->H;
+
+    cudaError_t cerr = cudaMemcpyAsync(
+        ctx->d_frame_ptrs,
+        ctx->d_frames,
+        (size_t)M * sizeof(float *),
+        cudaMemcpyHostToDevice, stream);
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "integration_gpu_process_batch_aawa: memcpy ptrs: %s\n",
+                cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+
+    dim3 block(256);
+    dim3 grid((npix + 255) / 256);
+
+    aawa_batch_kernel<<<grid, block, 0, stream>>>(
+        ctx->d_frame_ptrs, M,
+        ctx->d_combined_sum, ctx->d_combined_count,
+        ctx->d_rawsum, ctx->d_rawcount, npix);
+
+    cerr = cudaGetLastError();
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "integration_gpu_process_batch_aawa kernel: %s\n",
                 cudaGetErrorString(cerr));
         return DSO_ERR_CUDA;
     }
