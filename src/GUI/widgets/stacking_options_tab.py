@@ -94,6 +94,7 @@ class StackingOptionsTab(QWidget):
             "wsor_clip":        self._wsor_clip_spin.value(),
             "calib_kappa":      self._calib_kappa_spin.value(),
             "calib_iterations": self._calib_iterations_spin.value(),
+            "bg_calibration":   self._bg_calib_combo.currentText(),
             # Per-tab methods are managed by CalibTab; these keys may also
             # live here for completeness (overridden by CalibTab on run).
             "dark_method":      "kappa-sigma",
@@ -135,6 +136,7 @@ class StackingOptionsTab(QWidget):
         self._wsor_clip_spin.setValue(         opts.get("wsor_clip", 0.1))
         self._calib_kappa_spin.setValue(      opts.get("calib_kappa", 2.5))
         self._calib_iterations_spin.setValue( opts.get("calib_iterations", 5))
+        self._set_combo(self._bg_calib_combo, opts.get("bg_calibration", "none"))
         self._update_visibility()
 
     # ------------------------------------------------------------------ #
@@ -163,6 +165,7 @@ class StackingOptionsTab(QWidget):
         vbox.addWidget(self._build_ransac_group())
         vbox.addWidget(self._build_sensor_group())
         vbox.addWidget(self._build_output_format_group())
+        vbox.addWidget(self._build_background_group())
         vbox.addWidget(self._build_calibration_group())
         vbox.addStretch()
 
@@ -319,6 +322,25 @@ class StackingOptionsTab(QWidget):
         form.addRow(self._stretch_max_lbl, self._stretch_max_edit)
 
         self._bit_depth_combo.currentTextChanged.connect(self._update_visibility)
+        return box
+
+    def _build_background_group(self) -> QGroupBox:
+        box = QGroupBox("Background Normalization")
+        form = QFormLayout(box)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        self._bg_calib_combo = QComboBox()
+        self._bg_calib_combo.addItems(["none", "per-channel", "rgb"])
+        self._bg_calib_combo.setToolTip(
+            "Per-frame background normalization before integration.\n"
+            "  none: disabled (default)\n"
+            "  per-channel: normalize R, G, B independently\n"
+            "  rgb: normalize all channels by luminance stats\n\n"
+            "Useful when sky brightness varies between frames\n"
+            "(clouds, light pollution, moonrise)."
+        )
+        form.addRow("Mode:", self._bg_calib_combo)
         return box
 
     def _build_calibration_group(self) -> QGroupBox:

@@ -23,6 +23,7 @@
 #include "dso_types.h"         /* MoffatParams lives here */
 #include "ransac.h"            /* RansacParams */
 #include "image_io.h"          /* ImageSaveOptions */
+#include "background.h"        /* BgCalibMode */
 
 /* Forward declaration — include calibration.h where the full type is needed */
 typedef struct CalibFrames CalibFrames;
@@ -87,6 +88,9 @@ typedef struct {
 
     /* --- Output format --- */
     ImageSaveOptions save_opts; /* bit depth, compression, stretch; see image_io.h */
+
+    /* --- Background normalization --- */
+    BgCalibMode bg_calibration; /* none | per-channel | rgb (default: none) */
 } PipelineConfig;
 
 /*

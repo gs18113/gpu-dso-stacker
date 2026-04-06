@@ -103,11 +103,14 @@ Replace `metal` with `cpu` in the URL if you don't need Metal acceleration.
 | 3. Triangle Matching Alignment | Triangle/asterism matching + DLT (`--match-device` selects CPU/GPU; default follows stacking device) | Triangle/asterism matching + DLT (CPU by default with `--cpu`) |
 | 4. Debayering (warp) | VNG demosaic → luminance **or R/G/B** | VNG demosaic → luminance **or R/G/B** |
 | 5. Lanczos Warp | nppiRemap + coord-map kernel (CUDA) | 6-tap backward-map warp (OpenMP) |
+| 5b. Background Normalization (optional) | GPU kernel (`--bg-calibration`) | CPU + OpenMP (`--bg-calibration`) |
 | 6. Integration | Mini-batch kappa-sigma / median (CUDA) | Full kappa-sigma / median (OpenMP) |
 
 **Color output**: when a Bayer pattern is active (from `--bayer` or the FITS `BAYERPAT` keyword), stage 4 debayers to separate R, G, B planes; stages 5–6 run once per channel; the output FITS has `NAXIS=3` with planes R=1/G=2/B=3. Star detection (stages 1–2) always uses luminance regardless of color mode.
 
 **Triangle-matching mismatch handling**: if a non-reference frame cannot be aligned (too few stars or triangle-matching mismatch), that frame is skipped and processing continues. At the end, the CLI prints a summary with successful and skipped frame counts.
+
+**Background normalization** (`--bg-calibration`): when enabled, each frame's background level and signal scale are matched to the reference frame after warp and before integration. Uses median and MAD (Median Absolute Deviation) for robust estimation. Two modes: `per-channel` normalizes R/G/B independently (handles coloured light pollution), `rgb` uses luminance-based statistics for all channels (preserves colour ratios). Useful when sky brightness varies across sub-exposures (cloud passages, moonrise, altitude changes).
 
 **Calibration pre-processing** (applied to every raw frame before debayering when `--dark`/`--flat` are provided):
 
@@ -266,6 +269,11 @@ Calibration (applied before debayering; bias and darkflat are mutually exclusive
 Sensor:
       --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg
                                  (default: auto-detect from FITS BAYERPAT keyword)
+
+Background normalization:
+      --bg-calibration <mode>    none | per-channel | rgb (default: none)
+                                 Normalizes each frame's background to match the
+                                 reference before integration.
 
 Output format (format inferred from --output extension):
       --bit-depth <depth>        8 | 16 | f16 | f32  (default: f32)

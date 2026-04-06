@@ -104,6 +104,7 @@ set(LIB_SOURCES
     src/star_detect_cpu.c
     src/ransac.c
     src/calibration.c
+    src/background.c
     src/pipeline_dispatch.c
     src/pipeline_cpu.c
     src/frame_load.c
@@ -121,6 +122,7 @@ if(DSO_ENABLE_CUDA)
         src/integration_gpu.cu
         src/ransac_gpu.cu
         src/calibration_gpu.cu
+        src/background_gpu.cu
         src/pipeline.cu
     )
 else()
@@ -341,3 +343,9 @@ add_executable(test_numerical tests/test_numerical.c)
 target_include_directories(test_numerical PRIVATE tests)
 target_link_libraries(test_numerical PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_numerical COMMAND test_numerical)
+
+# Background normalization tests
+add_executable(test_background tests/test_background.c)
+target_include_directories(test_background PRIVATE tests)
+target_link_libraries(test_background PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_background COMMAND test_background)

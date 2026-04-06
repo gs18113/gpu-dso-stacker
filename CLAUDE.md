@@ -19,6 +19,7 @@ All stages are implemented for both GPU and CPU execution paths. The pipeline ru
 | CCL + CoM | — (CPU always) | `star_detect_cpu.c` |
 | Triangle matching + DLT | `ransac_gpu.cu` (selectable via `--match-device`) | `ransac.c` |
 | Lanczos warp | `lanczos_gpu.cu` | `lanczos_cpu.c` |
+| Bg normalization | `background_gpu.cu` | `background.c` |
 | Integration | `integration_gpu.cu` | `integration.c` |
 | Pipeline orchestrator | `pipeline.cu` | `pipeline_cpu.c` |
 
@@ -71,6 +72,8 @@ gpu-dso-stacker/
 │   ├── calibration_gpu.h        ← CalibGpuCtx, calib_gpu_init/apply_d2d/cleanup
 │   ├── raw_io.h                 ← RAW camera file loading via LibRaw (conditional: DSO_HAS_LIBRAW)
 │   ├── frame_load.h             ← Format-agnostic load dispatch (FITS or RAW by extension)
+│   ├── background.h             ← BgCalibMode, BgStats, bg_compute_stats, bg_normalize_cpu
+│   ├── background_gpu.h         ← bg_normalize_gpu (CUDA kernel)
 │   └── pipeline.h               ← pipeline_run dispatch + pipeline_run_{cpu,cuda,metal} + PipelineConfig
 ├── src/
 │   ├── fits_io.c                ← CFITSIO-based I/O
@@ -89,6 +92,8 @@ gpu-dso-stacker/
 │   ├── integration_gpu.cu       ← Mini-batch kappa-sigma + finalize kernels
 │   ├── calibration.c            ← Master frame generation (winsorized mean / median) + CPU apply
 │   ├── calibration_gpu.cu       ← GPU calibration kernel (dark subtract + flat divide, D2D)
+│   ├── background.c             ← CPU background stats + normalization (stride-16 median/MAD)
+│   ├── background_gpu.cu        ← GPU background normalization kernel
 │   ├── pipeline.cu              ← CUDA orchestrator implementation (`pipeline_run_cuda`)
 │   ├── pipeline_dispatch.c      ← backend dispatch (`pipeline_run`)
 │   ├── pipeline_cpu.c           ← Pure-C CPU orchestrator (no CUDA)
@@ -108,7 +113,8 @@ gpu-dso-stacker/
 │   ├── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
 │   ├── test_color.c             ← 33 tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
 │   ├── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
-│   └── test_raw_io.c           ← 10 tests: frame_is_raw extension detection, frame_load FITS fallback, frame_get_bayer_pattern dispatch, raw_io error handling (conditional on DSO_HAS_LIBRAW)
+│   ├── test_raw_io.c           ← 10 tests: frame_is_raw extension detection, frame_load FITS fallback, frame_get_bayer_pattern dispatch, raw_io error handling (conditional on DSO_HAS_LIBRAW)
+│   └── test_background.c      ← 11 tests: bg_compute_stats (constant/known/NaN/degenerate), bg_normalize_cpu (shift/scale/NaN/degenerate)
 ├── test/
 │   └── star_detect_overlay.cpp  ← Standalone CLI helper that runs CPU/GPU star detection and writes PNG overlays with detected-star circles
 ├── docs/
@@ -246,6 +252,12 @@ Triangle matching (2-column CSV only):
 
 Sensor:
       --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg
+
+Background normalization:
+      --bg-calibration <mode>    none | per-channel | rgb (default: none)
+                                 Normalizes each frame's background level and scale to
+                                 match the reference before integration.  per-channel
+                                 treats R/G/B independently; rgb uses luminance stats.
 
 Calibration (applied before debayering; bias and darkflat are mutually exclusive):
       --dark <path>              Master dark FITS or text list of dark FITS paths
@@ -478,6 +490,35 @@ DsoError integration_gpu_finalize(IntegrationGpuCtx *ctx, int n_frames,
 
 `integration_gpu_process_batch_median`: Mini-batch median approximation. Each pixel sorts its M non-NaN values in registers (insertion sort) and computes the median. The per-batch median is accumulated weighted by n_valid into the persistent buffers. Note: this is an approximation — a true global median requires all N frames simultaneously.
 
+### `background.h`
+
+```c
+typedef enum { DSO_BG_NONE=0, DSO_BG_PER_CHANNEL=1, DSO_BG_RGB=2 } BgCalibMode;
+
+typedef struct {
+    float background;   /* median pixel value */
+    float scale;        /* 1.4826 * MAD (robust σ estimate) */
+} BgStats;
+
+DsoError bg_compute_stats(const float *data, int npix, BgStats *out);
+DsoError bg_normalize_cpu(float *data, int npix,
+                           const BgStats *frame_stats,
+                           const BgStats *ref_stats);
+```
+
+- `bg_compute_stats`: samples every 16th non-NaN pixel, sorts via `qsort`, takes the median, then computes MAD (median of absolute deviations) and multiplies by 1.4826 to get a robust σ estimate. O(npix/16 · log(npix/16)).
+- `bg_normalize_cpu`: applies `pixel = (pixel - frame_bg) * (ref_scale / frame_scale) + ref_bg` in-place. OpenMP-parallelized. Guards: skips if frame or ref scale < 1e-10 (flat frame). NaN pixels left unchanged.
+
+### `background_gpu.h`
+
+```c
+DsoError bg_normalize_gpu(float *d_data, int npix,
+                           float frame_bg, float scale_ratio, float ref_bg,
+                           cudaStream_t stream);
+```
+
+Simple per-pixel CUDA kernel (256 threads/block). Applies the same affine transform as the CPU variant. NaN pixels unchanged.
+
 ### `calibration.h`
 
 ```c
@@ -635,6 +676,7 @@ typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGR
 - **RAW file support via LibRaw**: optional, controlled by `-DDSO_ENABLE_LIBRAW=ON` (default OFF). `raw_io.c` extracts the raw uint16 Bayer mosaic via `libraw_unpack()` — never calls `libraw_dcraw_process()` since the project has its own VNG debayer pipeline. Pixel extraction uses `sizes.width/height` (usable area) with `top_margin/left_margin` offsets, per-channel black subtraction via `cblack[c] + black`, normalization by `color.maximum` to float32 [0, 1]. CFA pattern derived from `idata.filters` (0x94949494→RGGB, 0x16161616→BGGR, 0x61616161→GRBG, 0x49494949→GBRG); non-Bayer sensors (X-Trans, Foveon) return `BAYER_NONE`.
 - **`frame_load` dispatch layer**: all pipeline call sites (`pipeline_cpu.c`, `pipeline.cu`, `main.cpp`, `calibration.c`) use `frame_load`/`frame_get_bayer_pattern`/`frame_get_dimensions` instead of calling `fits_load` directly. The dispatch layer checks file extension via `frame_is_raw()` and routes to `raw_*` or `fits_*`. When `DSO_HAS_LIBRAW=0`, RAW paths return `DSO_ERR_IO` with a diagnostic message.
 - **Calibration RAW support**: `calibration.c` uses `is_image_file()` (checks both FITS and RAW extensions) instead of `is_fits_file()` for the master-vs-framelist decision, and `frame_load()` for loading individual frames.
+- **Background normalization** (`--bg-calibration`): optional per-frame background matching applied after Lanczos warp and before integration. Uses stride-16 subsampling for efficient median/MAD computation (~1M samples for a 16 MP image). The constant 1.4826 converts MAD to σ for Gaussian distributions. Two modes: `per-channel` (R/G/B independently — handles coloured light pollution) and `rgb` (luminance-based stats for all channels — preserves colour ratios). In the GPU path, `rgb` mode uses the existing `lum_host` buffer (no extra D2H); `per-channel` color mode requires a sync + D2H of each warped channel. Default OFF for backward compatibility.
 
 ---
 
@@ -843,5 +885,6 @@ options:
   stretch_min: null     stretch_max: null
   save_master_dir: ./master     wsor_clip: 0.1
   calib_kappa: 2.5     calib_iterations: 5
+  bg_calibration: none
   dark_method: winsorized-mean     ...
 ```

@@ -19,6 +19,7 @@
 
 #include "pipeline.h"
 #include "calibration.h"
+#include "background.h"
 #include "image_io.h"
 #include "fits_io.h"
 #include "frame_load.h"
@@ -196,6 +197,12 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     const Image **ptrs_r   = NULL;
     const Image **ptrs_g   = NULL;
     const Image **ptrs_b   = NULL;
+
+    /* Background normalization reference stats */
+    BgStats ref_bg_r  = {0.0f, 0.0f};
+    BgStats ref_bg_g  = {0.0f, 0.0f};
+    BgStats ref_bg_b  = {0.0f, 0.0f};
+    int     ref_bg_ok = 0;
 
     /* Global accumulators */
     float *global_sum_r   = NULL;
@@ -417,6 +424,39 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                 fprintf(stderr, "pipeline_cpu: lanczos failed for %s\n",
                         frames[i].filepath);
                 free(order); goto cleanup;
+            }
+
+            /* ---- Background normalization ---- */
+            if (config->bg_calibration != DSO_BG_NONE) {
+                if (!ref_bg_ok) {
+                    /* Reference frame (always first): store stats */
+                    bg_compute_stats(xformed_r[slot].data, npix, &ref_bg_r);
+                    if (color && config->bg_calibration == DSO_BG_PER_CHANNEL) {
+                        bg_compute_stats(xformed_g[slot].data, npix, &ref_bg_g);
+                        bg_compute_stats(xformed_b[slot].data, npix, &ref_bg_b);
+                    }
+                    ref_bg_ok = 1;
+                    printf("[Pipeline CPU] Bg-norm ref: bg=%.2f scale=%.4f\n",
+                           (double)ref_bg_r.background, (double)ref_bg_r.scale);
+                } else {
+                    /* Non-reference: normalize to match reference */
+                    BgStats fs;
+                    bg_compute_stats(xformed_r[slot].data, npix, &fs);
+                    bg_normalize_cpu(xformed_r[slot].data, npix, &fs, &ref_bg_r);
+                    if (color) {
+                        if (config->bg_calibration == DSO_BG_PER_CHANNEL) {
+                            BgStats gs, bs;
+                            bg_compute_stats(xformed_g[slot].data, npix, &gs);
+                            bg_compute_stats(xformed_b[slot].data, npix, &bs);
+                            bg_normalize_cpu(xformed_g[slot].data, npix, &gs, &ref_bg_g);
+                            bg_normalize_cpu(xformed_b[slot].data, npix, &bs, &ref_bg_b);
+                        } else {
+                            /* RGB mode: same stats for all channels */
+                            bg_normalize_cpu(xformed_g[slot].data, npix, &fs, &ref_bg_r);
+                            bg_normalize_cpu(xformed_b[slot].data, npix, &fs, &ref_bg_r);
+                        }
+                    }
+                }
             }
 
             batch_n++;
