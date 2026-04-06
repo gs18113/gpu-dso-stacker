@@ -14,6 +14,7 @@ All stages are implemented for both GPU and CPU execution paths. The pipeline ru
 
 | Stage | GPU path | CPU path |
 |---|---|---|
+| White balance (optional) | `white_balance_gpu.cu` | `white_balance.c` |
 | Debayering (VNG) | `debayer_gpu.cu` | `debayer_cpu.c` |
 | Moffat conv + threshold | `star_detect_gpu.cu` | `star_detect_cpu.c` |
 | CCL + CoM | — (CPU always) | `star_detect_cpu.c` |
@@ -71,6 +72,8 @@ gpu-dso-stacker/
 │   ├── integration_gpu.h        ← GPU mini-batch kappa-sigma context + API
 │   ├── calibration.h            ← CalibFrames, CalibMethod, calib_load_or_generate, calib_apply_cpu
 │   ├── calibration_gpu.h        ← CalibGpuCtx, calib_gpu_init/apply_d2d/cleanup
+│   ├── white_balance.h          ← WbMode, WbParams, wb_apply_bayer, wb_auto_compute, bayer_color
+│   ├── white_balance_gpu.h      ← wb_apply_bayer_gpu_d2d (CUDA kernel)
 │   ├── raw_io.h                 ← RAW camera file loading via LibRaw (conditional: DSO_HAS_LIBRAW)
 │   ├── frame_load.h             ← Format-agnostic load dispatch (FITS or RAW by extension)
 │   ├── background.h             ← BgCalibMode, BgStats, bg_compute_stats, bg_normalize_cpu
@@ -94,6 +97,8 @@ gpu-dso-stacker/
 │   ├── integration_gpu.cu       ← Mini-batch kappa-sigma + finalize kernels
 │   ├── calibration.c            ← Master frame generation (winsorized mean / median) + CPU apply
 │   ├── calibration_gpu.cu       ← GPU calibration kernel (dark subtract + flat divide, D2D)
+│   ├── white_balance.c          ← CPU white balance (OpenMP): wb_apply_bayer, wb_auto_compute
+│   ├── white_balance_gpu.cu     ← GPU white balance kernel (per-pixel Bayer-aware multiply)
 │   ├── background.c             ← CPU background stats + normalization (stride-16 median/MAD)
 │   ├── background_gpu.cu        ← GPU background normalization kernel
 │   ├── pipeline.cu              ← CUDA orchestrator implementation (`pipeline_run_cuda`)
@@ -115,6 +120,7 @@ gpu-dso-stacker/
 │   ├── test_calibration.c       ← 29 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, kappa-sigma, bias sub, flat normalization)
 │   ├── test_audit.c             ← 4 tests: integration stability at N=1000, CCL large-frame, Lanczos numerical baseline, RANSAC non-determinism verification
 │   ├── test_color.c             ← 33 tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
+│   ├── test_white_balance.c     ← 16 tests: bayer_color LUT, wb_apply_bayer (all patterns, BAYER_NONE, identity, args), wb_auto_compute (gray-world, uniform, blue-heavy, args)
 │   ├── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
 │   ├── test_raw_io.c           ← 10 tests: frame_is_raw extension detection, frame_load FITS fallback, frame_get_bayer_pattern dispatch, raw_io error handling (conditional on DSO_HAS_LIBRAW)
 │   └── test_background.c      ← 11 tests: bg_compute_stats (constant/known/NaN/degenerate), bg_normalize_cpu (shift/scale/NaN/degenerate)
@@ -256,6 +262,12 @@ Triangle matching (2-column CSV only):
 
 Sensor:
       --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg
+
+White balance (applied to raw Bayer mosaic before debayering):
+      --white-balance <mode>     none | camera | auto | manual (default: none)
+      --wb-red <float>           Red channel multiplier (default: 1.0)
+      --wb-green <float>         Green channel multiplier (default: 1.0)
+      --wb-blue <float>          Blue channel multiplier (default: 1.0)
 
 Background normalization:
       --bg-calibration <mode>    none | per-channel | rgb (default: none)
@@ -601,6 +613,27 @@ DsoError calib_gpu_apply_d2d(float *d_frame, int W, int H,
 
 Single CUDA kernel (256 threads/block): subtract dark, divide by flat, dead-pixel guard (flat < 1e-6 → 0). Upload happens once in `pipeline_run` before Phase 1.
 
+### `white_balance.h`
+
+```c
+typedef enum { WB_NONE=0, WB_CAMERA=1, WB_AUTO=2, WB_MANUAL=3 } WbMode;
+typedef struct { WbMode mode; float r_mul, g_mul, b_mul; } WbParams;
+
+static inline int bayer_color(BayerPattern pat, int x, int y);
+
+DsoError wb_apply_bayer(float *data, int W, int H,
+                        BayerPattern pattern,
+                        float r_mul, float g_mul, float b_mul);
+DsoError wb_auto_compute(const float *data, int W, int H,
+                         BayerPattern pattern,
+                         float *r_mul, float *g_mul, float *b_mul);
+```
+
+- `bayer_color`: LUT-based lookup returning 0=R, 1=G, 2=B for a pixel at (x, y) given a Bayer pattern.
+- `wb_apply_bayer`: in-place per-pixel multiply by the channel multiplier matching its CFA position. `BAYER_NONE` → no-op. OpenMP `collapse(2)` parallelised.
+- `wb_auto_compute`: gray-world assumption. Averages each Bayer channel separately, returns `r_mul = mean_G/mean_R`, `g_mul = 1.0`, `b_mul = mean_G/mean_B`. Returns `DSO_ERR_INVALID_ARG` for `BAYER_NONE`.
+- GPU variant: `wb_apply_bayer_gpu_d2d` in `white_balance_gpu.h` / `white_balance_gpu.cu`. Simple 1D-grid kernel (256 threads/block), no shared memory.
+
 ### `raw_io.h`
 
 ```c
@@ -712,6 +745,11 @@ typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGR
 - **RAW file support via LibRaw**: optional, controlled by `-DDSO_ENABLE_LIBRAW=ON` (default OFF). `raw_io.c` extracts the raw uint16 Bayer mosaic via `libraw_unpack()` — never calls `libraw_dcraw_process()` since the project has its own VNG debayer pipeline. Pixel extraction uses `sizes.width/height` (usable area) with `top_margin/left_margin` offsets, per-channel black subtraction via `cblack[c] + black`, normalization by `color.maximum` to float32 [0, 1]. CFA pattern derived from `idata.filters` (0x94949494→RGGB, 0x16161616→BGGR, 0x61616161→GRBG, 0x49494949→GBRG); non-Bayer sensors (X-Trans, Foveon) return `BAYER_NONE`.
 - **`frame_load` dispatch layer**: all pipeline call sites (`pipeline_cpu.c`, `pipeline.cu`, `main.cpp`, `calibration.c`) use `frame_load`/`frame_get_bayer_pattern`/`frame_get_dimensions` instead of calling `fits_load` directly. The dispatch layer checks file extension via `frame_is_raw()` and routes to `raw_*` or `fits_*`. When `DSO_HAS_LIBRAW=0`, RAW paths return `DSO_ERR_IO` with a diagnostic message.
 - **Calibration RAW support**: `calibration.c` uses `is_image_file()` (checks both FITS and RAW extensions) instead of `is_fits_file()` for the master-vs-framelist decision, and `frame_load()` for loading individual frames.
+- **White balance applied to raw Bayer mosaic**: WB multipliers are applied per-pixel based on the CFA position (via `bayer_color()` LUT) **after calibration, before debayering**. This is the standard astrophotography approach — each mosaic pixel corresponds to exactly one color channel, so multiplying equalises channel response before VNG interpolation mixes them.
+- **WB multiplier consistency**: For `WB_CAMERA` and `WB_AUTO` modes, multipliers are computed once from the **reference frame** and applied to all frames. This ensures color consistency across the stack. Per-frame WB would introduce color shifts between frames due to varying metadata or statistics.
+- **Gray-world auto WB limitation**: The gray-world assumption (`mean R ≈ mean G ≈ mean B`) works well for broadband targets (galaxies, star fields) but poorly for emission nebulae dominated by a single wavelength (e.g., Hα). For narrowband imaging, use `WB_MANUAL` with known filter response ratios.
+- **GPU auto WB**: computed on the host from `pinned[0]` (reference frame in host pinned memory) before the GPU main loop. This avoids a device-to-host transfer of the calibrated frame. The pre-calibration gray-world ratios are a good approximation since calibration is a linear operation that largely preserves channel ratios.
+- **Camera WB from LibRaw**: `raw->color.cam_mul[4]` (R, G, B, G2) normalised so green = 1.0. For FITS files, reads `WB_RMUL`/`WB_GMUL`/`WB_BMUL` keywords; defaults to (1, 1, 1) if absent.
 - **Background normalization** (`--bg-calibration`): optional per-frame background matching applied after Lanczos warp and before integration. Uses stride-16 subsampling for efficient median/MAD computation (~1M samples for a 16 MP image). The constant 1.4826 converts MAD to σ for Gaussian distributions. Two modes: `per-channel` (R/G/B independently — handles coloured light pollution) and `rgb` (luminance-based stats for all channels — preserves colour ratios). In the GPU path, `rgb` mode uses the existing `lum_host` buffer (no extra D2H); `per-channel` color mode requires a sync + D2H of each warped channel. Default OFF for backward compatibility.
 - **Frame quality scoring**: `frame_quality.c` computes per-frame FWHM, roundness, background, and composite score from already-available star detection data (convolution map + StarList). FWHM is measured from the Moffat convolution map (matched-filter response), not the raw image — absolute values include kernel width but relative comparison is more robust. Score normalized to reference frame = 100. `--min-quality <fraction>` auto-rejects frames below the threshold (e.g. 0.5 = reject below 50% of reference quality). Quality scoring runs after CCL+CoM, before RANSAC, in both CPU and GPU pipelines. Pure CPU computation — no CUDA kernel needed.
 
@@ -920,6 +958,7 @@ options:
   triangle_iters: 1000     triangle_thresh: 2.0     match_radius: 30.0     match_device: auto
   bayer: auto     bit_depth: f32     tiff_compression: none
   stretch_min: null     stretch_max: null
+  white_balance: none     wb_red: 1.0     wb_green: 1.0     wb_blue: 1.0
   save_master_dir: ./master     wsor_clip: 0.1
   calib_kappa: 2.5     calib_iterations: 5
   bg_calibration: none

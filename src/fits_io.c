@@ -251,3 +251,45 @@ DsoError fits_get_bayer_pattern(const char *filepath, BayerPattern *pattern_out)
 
     return DSO_OK;
 }
+
+
+DsoError fits_get_wb_multipliers(const char *filepath,
+                                  float *r_mul, float *g_mul, float *b_mul)
+{
+    if (!filepath || !r_mul || !g_mul || !b_mul)
+        return DSO_ERR_INVALID_ARG;
+
+    /* Defaults: unity (no correction) */
+    *r_mul = 1.0f;
+    *g_mul = 1.0f;
+    *b_mul = 1.0f;
+
+    fitsfile *fptr = NULL;
+    int status = 0;
+
+    if (ffopen(&fptr, filepath, READONLY, &status)) {
+        fprintf(stderr, "fits_get_wb_multipliers: cannot open '%s' (status=%d)\n",
+                filepath, status);
+        return DSO_ERR_FITS;
+    }
+
+    /* Read WB_RMUL, WB_GMUL, WB_BMUL keywords.  Missing keywords are normal
+     * (most FITS capture software does not write WB metadata). */
+    float val = 0.0f;
+    int ks = 0;
+
+    ks = 0;
+    ffgkye(fptr, "WB_RMUL", &val, NULL, &ks);
+    if (ks == 0) *r_mul = val;
+
+    ks = 0;
+    ffgkye(fptr, "WB_GMUL", &val, NULL, &ks);
+    if (ks == 0) *g_mul = val;
+
+    ks = 0;
+    ffgkye(fptr, "WB_BMUL", &val, NULL, &ks);
+    if (ks == 0) *b_mul = val;
+
+    ffclos(fptr, &status);
+    return DSO_OK;
+}

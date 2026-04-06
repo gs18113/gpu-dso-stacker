@@ -69,6 +69,20 @@ DsoError raw_get_bayer_pattern(const char *filepath, BayerPattern *pattern_out);
  */
 DsoError raw_get_dimensions(const char *filepath, int *width_out, int *height_out);
 
+/*
+ * raw_get_wb_multipliers — read camera white balance multipliers from a RAW file.
+ *
+ * Extracts cam_mul[4] from LibRaw and normalizes so that *g_mul = 1.0:
+ *   *r_mul = cam_mul[0] / cam_mul[1]
+ *   *g_mul = 1.0
+ *   *b_mul = cam_mul[2] / cam_mul[1]
+ *
+ * Only opens the file header (no unpack).
+ * Returns DSO_OK or DSO_ERR_RAW / DSO_ERR_INVALID_ARG.
+ */
+DsoError raw_get_wb_multipliers(const char *filepath,
+                                 float *r_mul, float *g_mul, float *b_mul);
+
 #ifdef __cplusplus
 }
 #endif

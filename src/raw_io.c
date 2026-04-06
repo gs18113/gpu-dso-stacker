@@ -241,3 +241,43 @@ DsoError raw_get_dimensions(const char *filepath, int *width_out, int *height_ou
     libraw_close(raw);
     return DSO_OK;
 }
+
+
+DsoError raw_get_wb_multipliers(const char *filepath,
+                                 float *r_mul, float *g_mul, float *b_mul)
+{
+    if (!filepath || !r_mul || !g_mul || !b_mul)
+        return DSO_ERR_INVALID_ARG;
+
+    /* Defaults */
+    *r_mul = 1.0f;
+    *g_mul = 1.0f;
+    *b_mul = 1.0f;
+
+    libraw_data_t *raw = libraw_init(LIBRAW_OPTIONS_NONE);
+    if (!raw) return DSO_ERR_RAW;
+
+    int ret = libraw_open_file(raw, filepath);
+    if (ret != LIBRAW_SUCCESS) {
+        fprintf(stderr, "raw_get_wb_multipliers: cannot open '%s': %s\n",
+                filepath, libraw_strerror(ret));
+        libraw_close(raw);
+        return DSO_ERR_RAW;
+    }
+
+    /* cam_mul[4]: R, G, B, G2 — normalize so green (index 1) = 1.0 */
+    float g = raw->color.cam_mul[1];
+    if (g < 1e-10f) {
+        fprintf(stderr, "raw_get_wb_multipliers: green cam_mul is zero "
+                "for '%s', using defaults\n", filepath);
+        libraw_close(raw);
+        return DSO_OK;
+    }
+
+    *r_mul = raw->color.cam_mul[0] / g;
+    *g_mul = 1.0f;
+    *b_mul = raw->color.cam_mul[2] / g;
+
+    libraw_close(raw);
+    return DSO_OK;
+}

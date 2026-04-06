@@ -105,6 +105,7 @@ set(LIB_SOURCES
     src/frame_quality.c
     src/ransac.c
     src/calibration.c
+    src/white_balance.c
     src/background.c
     src/pipeline_dispatch.c
     src/pipeline_cpu.c
@@ -123,6 +124,7 @@ if(DSO_ENABLE_CUDA)
         src/integration_gpu.cu
         src/ransac_gpu.cu
         src/calibration_gpu.cu
+        src/white_balance_gpu.cu
         src/background_gpu.cu
         src/pipeline.cu
     )
@@ -301,6 +303,12 @@ add_executable(test_color tests/test_color.c)
 target_include_directories(test_color PRIVATE tests)
 target_link_libraries(test_color PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_color COMMAND test_color)
+
+# White balance tests: wb_apply_bayer, wb_auto_compute
+add_executable(test_white_balance tests/test_white_balance.c)
+target_include_directories(test_white_balance PRIVATE tests)
+target_link_libraries(test_white_balance PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_white_balance COMMAND test_white_balance)
 
 if(DSO_ENABLE_CUDA)
     # GPU tests for mini-batch kappa-sigma integration

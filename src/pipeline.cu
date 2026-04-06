@@ -34,6 +34,8 @@
 #include "image_io.h"
 #include "fits_io.h"
 #include "frame_load.h"
+#include "white_balance.h"
+#include "white_balance_gpu.h"
 #include "debayer_gpu.h"
 #include "star_detect_gpu.h"
 #include "star_detect_cpu.h"
@@ -248,6 +250,10 @@ static DsoError phase_detect_warp_integrate(
     uint8_t     *mask_host     = NULL;
     StarList     ref_stars      = {NULL, 0};
 
+    /* White balance multipliers (computed once from reference frame) */
+    float        wb_r = 1.0f, wb_g = 1.0f, wb_b = 1.0f;
+    int          wb_active = (config->wb.mode != WB_NONE);
+
     /* Background normalization state */
     BgStats      ref_bg_r  = {0.0f, 0.0f};
     BgStats      ref_bg_g  = {0.0f, 0.0f};
@@ -323,6 +329,39 @@ static DsoError phase_detect_warp_integrate(
                cleanup, frames[order[0]].filepath);
     CUDA_CHECK(cudaEventRecord(e_h2d[0], stream_copy), cleanup, "e_h2d kickstart");
 
+    /* --- White balance: compute multipliers from reference frame --- */
+    if (wb_active) {
+        BayerPattern ref_pat = config->bayer_override;
+        if (ref_pat == BAYER_NONE)
+            frame_get_bayer_pattern(frames[order[0]].filepath, &ref_pat);
+
+        if (ref_pat == BAYER_NONE) {
+            wb_active = 0;  /* monochrome — disable WB */
+        } else if (config->wb.mode == WB_CAMERA) {
+            frame_get_wb_multipliers(frames[order[0]].filepath,
+                                      &wb_r, &wb_g, &wb_b);
+            printf("  WB (camera): R=%.3f G=%.3f B=%.3f\n",
+                   (double)wb_r, (double)wb_g, (double)wb_b);
+        } else if (config->wb.mode == WB_AUTO) {
+            /* Compute gray-world from reference frame host data (pre-calib) */
+            DsoError wb_err = wb_auto_compute(pinned[0], W, H, ref_pat,
+                                               &wb_r, &wb_g, &wb_b);
+            if (wb_err != DSO_OK) {
+                fprintf(stderr, "pipeline: auto WB failed, disabling\n");
+                wb_active = 0;
+            } else {
+                printf("  WB (auto): R=%.3f G=%.3f B=%.3f\n",
+                       (double)wb_r, (double)wb_g, (double)wb_b);
+            }
+        } else { /* WB_MANUAL */
+            wb_r = config->wb.r_mul;
+            wb_g = config->wb.g_mul;
+            wb_b = config->wb.b_mul;
+            printf("  WB (manual): R=%.3f G=%.3f B=%.3f\n",
+                   (double)wb_r, (double)wb_g, (double)wb_b);
+        }
+    }
+
     /* ================================================================
      * Main frame loop
      * ============================================================== */
@@ -343,6 +382,10 @@ static DsoError phase_detect_warp_integrate(
                    cleanup, "stream_wait_e_h2d");
         PIPE_CHECK(calib_gpu_apply_d2d(d_raw[slot], W, H, calib_ctx, stream_compute),
                    cleanup, fi->filepath);
+        if (wb_active && pat != BAYER_NONE)
+            PIPE_CHECK(wb_apply_bayer_gpu_d2d(d_raw[slot], W, H, pat,
+                                               wb_r, wb_g, wb_b, stream_compute),
+                       cleanup, fi->filepath);
         PIPE_CHECK(debayer_gpu_d2d(d_raw[slot], d_lum, W, H, pat, stream_compute),
                    cleanup, fi->filepath);
         PIPE_CHECK(star_detect_gpu_d2d(d_lum, d_conv, d_mask,

@@ -139,3 +139,22 @@ DsoError frame_get_dimensions(const char *filepath, int *width_out, int *height_
     image_free(&tmp);
     return DSO_OK;
 }
+
+
+DsoError frame_get_wb_multipliers(const char *filepath,
+                                   float *r_mul, float *g_mul, float *b_mul)
+{
+    if (!filepath || !r_mul || !g_mul || !b_mul) return DSO_ERR_INVALID_ARG;
+
+    if (frame_is_raw(filepath)) {
+#if DSO_HAS_LIBRAW
+        return raw_get_wb_multipliers(filepath, r_mul, g_mul, b_mul);
+#else
+        fprintf(stderr, "frame_get_wb_multipliers: RAW file '%s' not supported "
+                "(build with -DDSO_ENABLE_LIBRAW=ON)\n", filepath);
+        *r_mul = 1.0f; *g_mul = 1.0f; *b_mul = 1.0f;
+        return DSO_ERR_IO;
+#endif
+    }
+    return fits_get_wb_multipliers(filepath, r_mul, g_mul, b_mul);
+}

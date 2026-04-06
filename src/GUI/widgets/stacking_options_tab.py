@@ -102,6 +102,10 @@ class StackingOptionsTab(QWidget):
             "bias_method":      "kappa-sigma",
             "flat_method":      "kappa-sigma",
             "darkflat_method":  "kappa-sigma",
+            "white_balance":    self._wb_mode_combo.currentText(),
+            "wb_red":           self._wb_red_spin.value(),
+            "wb_green":         self._wb_green_spin.value(),
+            "wb_blue":          self._wb_blue_spin.value(),
         }
         return opts
 
@@ -138,6 +142,10 @@ class StackingOptionsTab(QWidget):
         self._wsor_clip_spin.setValue(         opts.get("wsor_clip", 0.1))
         self._calib_kappa_spin.setValue(      opts.get("calib_kappa", 2.5))
         self._calib_iterations_spin.setValue( opts.get("calib_iterations", 5))
+        self._set_combo(self._wb_mode_combo,   opts.get("white_balance", "none"))
+        self._wb_red_spin.setValue(            opts.get("wb_red", 1.0))
+        self._wb_green_spin.setValue(          opts.get("wb_green", 1.0))
+        self._wb_blue_spin.setValue(           opts.get("wb_blue", 1.0))
         self._set_combo(self._bg_calib_combo, opts.get("bg_calibration", "none"))
         self._update_visibility()
 
@@ -166,6 +174,7 @@ class StackingOptionsTab(QWidget):
         vbox.addWidget(self._build_star_detect_group())
         vbox.addWidget(self._build_ransac_group())
         vbox.addWidget(self._build_sensor_group())
+        vbox.addWidget(self._build_white_balance_group())
         vbox.addWidget(self._build_output_format_group())
         vbox.addWidget(self._build_background_group())
         vbox.addWidget(self._build_calibration_group())
@@ -293,6 +302,48 @@ class StackingOptionsTab(QWidget):
             "rggb/bggr/grbg/gbrg: force a specific Bayer pattern"
         )
         form.addRow("Bayer pattern:", self._bayer_combo)
+        return box
+
+    def _build_white_balance_group(self) -> QGroupBox:
+        box = QGroupBox("White Balance")
+        form = QFormLayout(box)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._wb_mode_combo = QComboBox()
+        self._wb_mode_combo.addItems(["none", "camera", "auto", "manual"])
+        self._wb_mode_combo.setToolTip(
+            "none: no white balance correction\n"
+            "camera: use WB from RAW file metadata\n"
+            "auto: gray-world assumption (equalise channel means)\n"
+            "manual: specify per-channel multipliers below"
+        )
+        self._wb_mode_combo.currentTextChanged.connect(self._update_visibility)
+        form.addRow("Mode:", self._wb_mode_combo)
+
+        self._wb_red_spin = QDoubleSpinBox()
+        self._wb_red_spin.setRange(0.01, 10.0)
+        self._wb_red_spin.setSingleStep(0.1)
+        self._wb_red_spin.setDecimals(3)
+        self._wb_red_spin.setValue(1.0)
+        self._wb_red_lbl = QLabel("Red multiplier:")
+        form.addRow(self._wb_red_lbl, self._wb_red_spin)
+
+        self._wb_green_spin = QDoubleSpinBox()
+        self._wb_green_spin.setRange(0.01, 10.0)
+        self._wb_green_spin.setSingleStep(0.1)
+        self._wb_green_spin.setDecimals(3)
+        self._wb_green_spin.setValue(1.0)
+        self._wb_green_lbl = QLabel("Green multiplier:")
+        form.addRow(self._wb_green_lbl, self._wb_green_spin)
+
+        self._wb_blue_spin = QDoubleSpinBox()
+        self._wb_blue_spin.setRange(0.01, 10.0)
+        self._wb_blue_spin.setSingleStep(0.1)
+        self._wb_blue_spin.setDecimals(3)
+        self._wb_blue_spin.setValue(1.0)
+        self._wb_blue_lbl = QLabel("Blue multiplier:")
+        form.addRow(self._wb_blue_lbl, self._wb_blue_spin)
+
         return box
 
     def _build_output_format_group(self) -> QGroupBox:
@@ -464,6 +515,15 @@ class StackingOptionsTab(QWidget):
         self._calib_kappa_spin.setVisible(cm == "kappa-sigma")
         self._calib_iterations_lbl.setVisible(cm == "kappa-sigma")
         self._calib_iterations_spin.setVisible(cm == "kappa-sigma")
+
+        # White balance manual multipliers: only when mode is "manual"
+        is_manual_wb = (self._wb_mode_combo.currentText() == "manual")
+        self._wb_red_lbl.setVisible(is_manual_wb)
+        self._wb_red_spin.setVisible(is_manual_wb)
+        self._wb_green_lbl.setVisible(is_manual_wb)
+        self._wb_green_spin.setVisible(is_manual_wb)
+        self._wb_blue_lbl.setVisible(is_manual_wb)
+        self._wb_blue_spin.setVisible(is_manual_wb)
 
     def _update_bit_depth_items(self, fmt: str) -> None:
         """Enable/disable bit-depth combo items according to output format.

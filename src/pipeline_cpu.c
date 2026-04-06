@@ -23,6 +23,7 @@
 #include "image_io.h"
 #include "fits_io.h"
 #include "frame_load.h"
+#include "white_balance.h"
 #include "debayer_cpu.h"
 #include "star_detect_cpu.h"
 #include "frame_quality.h"
@@ -190,6 +191,10 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     int       successful_frames = 0;
     int       skipped_frames    = 0;
 
+    /* White balance multipliers (computed once from reference frame) */
+    float     wb_r = 1.0f, wb_g = 1.0f, wb_b = 1.0f;
+    int       wb_active = (config->wb.mode != WB_NONE);
+
     /* Shared scratch (reused per frame) */
     float   *conv_buf    = NULL;
     uint8_t *mask_buf    = NULL;
@@ -319,6 +324,39 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
             frames[i].width   = W;
             frames[i].height  = H;
             frames[i].pattern = (int)pat;
+
+            /* ---- White balance ---- */
+            if (wb_active && pat != BAYER_NONE) {
+                if (pos == 0) {
+                    /* Reference frame: compute/load WB multipliers once */
+                    if (config->wb.mode == WB_CAMERA) {
+                        frame_get_wb_multipliers(frames[i].filepath,
+                                                  &wb_r, &wb_g, &wb_b);
+                        printf("  WB (camera): R=%.3f G=%.3f B=%.3f\n",
+                               (double)wb_r, (double)wb_g, (double)wb_b);
+                    } else if (config->wb.mode == WB_AUTO) {
+                        err = wb_auto_compute(raw.data, W, H, pat,
+                                              &wb_r, &wb_g, &wb_b);
+                        if (err != DSO_OK) {
+                            fprintf(stderr, "pipeline_cpu: auto WB failed, "
+                                    "disabling white balance\n");
+                            wb_active = 0;
+                            err = DSO_OK;
+                        } else {
+                            printf("  WB (auto): R=%.3f G=%.3f B=%.3f\n",
+                                   (double)wb_r, (double)wb_g, (double)wb_b);
+                        }
+                    } else { /* WB_MANUAL */
+                        wb_r = config->wb.r_mul;
+                        wb_g = config->wb.g_mul;
+                        wb_b = config->wb.b_mul;
+                        printf("  WB (manual): R=%.3f G=%.3f B=%.3f\n",
+                               (double)wb_r, (double)wb_g, (double)wb_b);
+                    }
+                }
+                if (wb_active)
+                    wb_apply_bayer(raw.data, W, H, pat, wb_r, wb_g, wb_b);
+            }
 
             /* ---- Debayer → luminance (for star detection) ---- */
             Image lum = {NULL, W, H};
