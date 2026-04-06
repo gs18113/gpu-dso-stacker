@@ -5,6 +5,7 @@
  */
 
 #include "ransac.h"
+#include "transform.h"
 #include "compat.h"
 #include <stdlib.h>
 #include <string.h>
@@ -939,4 +940,143 @@ cleanup:
         }
     }
     return err;
+}
+
+/* =========================================================================
+ * ransac_compute_transform — RANSAC + polynomial refinement.
+ *
+ * Strategy: run the existing RANSAC pipeline (homography-based) for robust
+ * outlier rejection, then re-fit a polynomial transform on the inlier
+ * correspondences.  The homography RANSAC is well-tested and efficient
+ * for outlier rejection; the polynomial fitting only runs once on clean data.
+ * ========================================================================= */
+DsoError ransac_compute_transform(const StarList     *ref_list,
+                                   const StarList     *src_list,
+                                   const RansacParams *params,
+                                   TransformModel      model,
+                                   PolyTransform      *T_out,
+                                   Homography         *H_out,
+                                   int                *n_inliers_out)
+{
+    if (!T_out || !H_out) return DSO_ERR_INVALID_ARG;
+
+    /* Step 1: Run existing RANSAC to get H and inlier count */
+    int h_inliers = 0;
+    DsoError err = ransac_compute_homography(ref_list, src_list, params,
+                                              H_out, &h_inliers);
+    if (err != DSO_OK) return err;
+
+    /* Step 2: Resolve AUTO model */
+    TransformModel selected = model;
+    if (selected == TRANSFORM_AUTO)
+        selected = transform_auto_select(h_inliers);
+
+    /* Step 3: If projective, just wrap H and return */
+    if (selected == TRANSFORM_PROJECTIVE) {
+        transform_from_homography(H_out, T_out);
+        if (n_inliers_out) *n_inliers_out = h_inliers;
+        return DSO_OK;
+    }
+
+    /* Step 4: Collect inlier correspondences using the RANSAC homography */
+    const RansacParams defaults = {1000, 2.0f, 30.0f, 0.99f, 10};
+    const RansacParams *p = params ? params : &defaults;
+    double thresh_sq = (double)p->inlier_thresh * (double)p->inlier_thresh;
+
+    int n_ref = ref_list->n;
+    int n_src = src_list->n;
+    int max_corr = (n_ref < n_src) ? n_ref : n_src;
+
+    StarPos *in_ref = (StarPos *)malloc((size_t)max_corr * sizeof(StarPos));
+    StarPos *in_src = (StarPos *)malloc((size_t)max_corr * sizeof(StarPos));
+    if (!in_ref || !in_src) {
+        free(in_ref); free(in_src);
+        return DSO_ERR_ALLOC;
+    }
+
+    /*
+     * Re-run triangle matching to extract correspondences, then filter
+     * through the RANSAC homography.  We need the actual correspondence
+     * pairs, not just a count.  Unfortunately ransac_compute_homography
+     * doesn't expose them, so we re-derive by projecting all ref stars
+     * through H and matching to the nearest src star within threshold.
+     */
+    int n_inliers = 0;
+    for (int ri = 0; ri < n_ref && n_inliers < max_corr; ri++) {
+        float rx = ref_list->stars[ri].x;
+        float ry = ref_list->stars[ri].y;
+
+        /* Project ref star through homography */
+        const double *h = H_out->h;
+        double qx_h = h[0]*rx + h[1]*ry + h[2];
+        double qy_h = h[3]*rx + h[4]*ry + h[5];
+        double qw   = h[6]*rx + h[7]*ry + h[8];
+        if (fabs(qw) < 1e-12) continue;
+        double px = qx_h / qw;
+        double py = qy_h / qw;
+
+        /* Find nearest source star within threshold */
+        int best_si = -1;
+        double best_d2 = thresh_sq;
+        for (int si = 0; si < n_src; si++) {
+            double dx = px - (double)src_list->stars[si].x;
+            double dy = py - (double)src_list->stars[si].y;
+            double d2 = dx*dx + dy*dy;
+            if (d2 < best_d2) {
+                best_d2 = d2;
+                best_si = si;
+            }
+        }
+        if (best_si >= 0) {
+            in_ref[n_inliers] = ref_list->stars[ri];
+            in_src[n_inliers] = src_list->stars[best_si];
+            n_inliers++;
+        }
+    }
+
+    /* Step 5: Check if we have enough inliers for the selected model */
+    int min_pts = 0;
+    switch (selected) {
+    case TRANSFORM_BILINEAR:  min_pts = TRANSFORM_BILINEAR_MIN_PTS;  break;
+    case TRANSFORM_BISQUARED: min_pts = TRANSFORM_BISQUARED_MIN_PTS; break;
+    case TRANSFORM_BICUBIC:   min_pts = TRANSFORM_BICUBIC_MIN_PTS;   break;
+    default: break;
+    }
+
+    if (n_inliers < min_pts) {
+        /* Fall back to simpler model */
+        TransformModel fallback = transform_auto_select(n_inliers);
+        if (fallback == TRANSFORM_PROJECTIVE || n_inliers < TRANSFORM_BILINEAR_MIN_PTS) {
+            transform_from_homography(H_out, T_out);
+            if (n_inliers_out) *n_inliers_out = h_inliers;
+            free(in_ref); free(in_src);
+            return DSO_OK;
+        }
+        selected = fallback;
+    }
+
+    /* Step 6: Fit the polynomial transform on inlier correspondences */
+    err = transform_fit(in_ref, in_src, n_inliers, selected, T_out);
+    if (err != DSO_OK) {
+        /* Polynomial fit failed — fall back to projective */
+        transform_from_homography(H_out, T_out);
+        if (n_inliers_out) *n_inliers_out = h_inliers;
+        free(in_ref); free(in_src);
+        return DSO_OK;
+    }
+
+    /* Step 7: Re-count inliers using the polynomial transform */
+    int poly_inliers = 0;
+    for (int i = 0; i < n_inliers; i++) {
+        double e2 = transform_reproj_err_sq(T_out,
+                                             in_ref[i].x, in_ref[i].y,
+                                             in_src[i].x, in_src[i].y);
+        if (e2 < thresh_sq) poly_inliers++;
+    }
+
+    if (n_inliers_out) *n_inliers_out = poly_inliers;
+
+    free(in_ref);
+    free(in_src);
+    return DSO_OK;
 }

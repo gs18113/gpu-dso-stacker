@@ -34,6 +34,7 @@ _DEFAULT_OPTIONS: dict = {
     "triangle_thresh": 2.0,
     "match_radius": 30.0,
     "match_device": "auto",
+    "transform": "auto",
     "bayer": "auto",
     "bit_depth": "f32",
     "tiff_compression": "none",

@@ -88,6 +88,24 @@ DsoError lanczos_transform_gpu_d2d(
     const Homography  *H,
     cudaStream_t       stream);
 
+/*
+ * lanczos_transform_gpu_d2d_poly — device-to-device Lanczos-3 warp for
+ * polynomial transforms (bilinear, bisquared, bicubic).
+ *
+ * Same as lanczos_transform_gpu_d2d but evaluates a polynomial coordinate
+ * mapping instead of a homography.  Coefficients are passed as kernel
+ * parameters (20 doubles = 160 bytes).
+ */
+DsoError lanczos_transform_gpu_d2d_poly(
+    const float         *d_src,
+    float               *d_dst,
+    float               *d_xmap,
+    float               *d_ymap,
+    int                  SW, int SH,
+    int                  DW, int DH,
+    const PolyTransform *T,
+    cudaStream_t         stream);
+
 #ifdef __cplusplus
 }
 #endif

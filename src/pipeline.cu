@@ -41,6 +41,7 @@
 #include "star_detect_cpu.h"
 #include "frame_quality.h"
 #include "ransac.h"
+#include "transform.h"
 #include "ransac_gpu.h"
 #include "integration_gpu.h"
 #include "lanczos_gpu.h"
@@ -101,10 +102,17 @@ static void fill_nan_async(float *d_buf, int npix, cudaStream_t stream)
  * d_lum is an in/out scratch buffer (re-used as R in color mode).
  * batch_n is the slot index within ctx_r->d_frames[].
  * ------------------------------------------------------------------------- */
+/* Helper macros for warp dispatch: poly vs homography */
+#define WARP_D2D(src, dst, xm, ym, w, h, hf, pf, s) \
+    ((pf)->model != TRANSFORM_PROJECTIVE \
+        ? lanczos_transform_gpu_d2d_poly((src), (dst), (xm), (ym), (w), (h), (w), (h), (pf), (s)) \
+        : lanczos_transform_gpu_d2d((src), (dst), (xm), (ym), (w), (h), (w), (h), (hf), (s)))
+
 static DsoError phase_warp(
     float *d_raw, float *d_lum, float *d_ch_g, float *d_ch_b,
     int W, int H, int color, BayerPattern pat,
-    const Homography *H_frame, int batch_n,
+    const Homography *H_frame, const PolyTransform *poly_frame,
+    int batch_n,
     IntegrationGpuCtx *ctx_r, IntegrationGpuCtx *ctx_g, IntegrationGpuCtx *ctx_b,
     cudaStream_t stream, const char *label)
 {
@@ -116,31 +124,32 @@ static DsoError phase_warp(
                                         W, H, pat, stream),
                    done, label);
         fill_nan_async(ctx_r->d_frames[batch_n], W * H, stream);
-        PIPE_CHECK(lanczos_transform_gpu_d2d(d_lum, ctx_r->d_frames[batch_n],
-                                              ctx_r->d_xmap, ctx_r->d_ymap,
-                                              W, H, W, H, H_frame, stream),
+        PIPE_CHECK(WARP_D2D(d_lum, ctx_r->d_frames[batch_n],
+                             ctx_r->d_xmap, ctx_r->d_ymap,
+                             W, H, H_frame, poly_frame, stream),
                    done, label);
         fill_nan_async(ctx_g->d_frames[batch_n], W * H, stream);
-        PIPE_CHECK(lanczos_transform_gpu_d2d(d_ch_g, ctx_g->d_frames[batch_n],
-                                              ctx_g->d_xmap, ctx_g->d_ymap,
-                                              W, H, W, H, H_frame, stream),
+        PIPE_CHECK(WARP_D2D(d_ch_g, ctx_g->d_frames[batch_n],
+                             ctx_g->d_xmap, ctx_g->d_ymap,
+                             W, H, H_frame, poly_frame, stream),
                    done, label);
         fill_nan_async(ctx_b->d_frames[batch_n], W * H, stream);
-        PIPE_CHECK(lanczos_transform_gpu_d2d(d_ch_b, ctx_b->d_frames[batch_n],
-                                              ctx_b->d_xmap, ctx_b->d_ymap,
-                                              W, H, W, H, H_frame, stream),
+        PIPE_CHECK(WARP_D2D(d_ch_b, ctx_b->d_frames[batch_n],
+                             ctx_b->d_xmap, ctx_b->d_ymap,
+                             W, H, H_frame, poly_frame, stream),
                    done, label);
     } else {
         /* d_lum already contains the luminance; warp directly */
         fill_nan_async(ctx_r->d_frames[batch_n], W * H, stream);
-        PIPE_CHECK(lanczos_transform_gpu_d2d(d_lum, ctx_r->d_frames[batch_n],
-                                              ctx_r->d_xmap, ctx_r->d_ymap,
-                                              W, H, W, H, H_frame, stream),
+        PIPE_CHECK(WARP_D2D(d_lum, ctx_r->d_frames[batch_n],
+                             ctx_r->d_xmap, ctx_r->d_ymap,
+                             W, H, H_frame, poly_frame, stream),
                    done, label);
     }
 done:
     return err;
 }
+#undef WARP_D2D
 
 /* -------------------------------------------------------------------------
  * integrate_batch — flush the current mini-batch into the accumulators.
@@ -319,6 +328,7 @@ static DsoError phase_detect_warp_integrate(
     /* Set identity homography for the reference frame */
     memset(&frames[ref_idx].H, 0, sizeof(Homography));
     frames[ref_idx].H.h[0] = frames[ref_idx].H.h[4] = frames[ref_idx].H.h[8] = 1.0;
+    transform_from_homography(&frames[ref_idx].H, &frames[ref_idx].poly);
 
     /* --- Kickstart: load frame 0 and begin H2D --- */
     printf("[Pipeline] Loading frame 1/%d: %s\n", n_frames, frames[order[0]].filepath);
@@ -505,9 +515,27 @@ static DsoError phase_detect_warp_integrate(
                                                         &fi->H, &n_inliers, stream_compute);
                     cudaFree(d_ref_stars);
                     cudaFree(d_src_stars);
+                    /* Polynomial refinement on CPU after GPU RANSAC */
+                    if (err == DSO_OK && config->transform_model != TRANSFORM_PROJECTIVE) {
+                        /* Re-derive polynomial from the homography inliers */
+                        err = ransac_compute_transform(&ref_stars, &stars,
+                                                        &config->ransac,
+                                                        config->transform_model,
+                                                        &fi->poly, &fi->H, &n_inliers);
+                    } else if (err == DSO_OK) {
+                        transform_from_homography(&fi->H, &fi->poly);
+                    }
                 } else {
-                    err = ransac_compute_homography(&ref_stars, &stars, &config->ransac,
-                                                    &fi->H, &n_inliers);
+                    if (config->transform_model != TRANSFORM_PROJECTIVE) {
+                        err = ransac_compute_transform(&ref_stars, &stars,
+                                                        &config->ransac,
+                                                        config->transform_model,
+                                                        &fi->poly, &fi->H, &n_inliers);
+                    } else {
+                        err = ransac_compute_homography(&ref_stars, &stars, &config->ransac,
+                                                        &fi->H, &n_inliers);
+                        transform_from_homography(&fi->H, &fi->poly);
+                    }
                 }
                 free(stars.stars);
                 stars.stars = NULL;
@@ -532,7 +560,8 @@ static DsoError phase_detect_warp_integrate(
          * ---------------------------------------------------------- */
         if (!skip_current) {
             PIPE_CHECK(phase_warp(d_raw[slot], d_lum, d_ch_g, d_ch_b,
-                                   W, H, color, pat, &fi->H, batch_n,
+                                   W, H, color, pat, &fi->H, &fi->poly,
+                                   batch_n,
                                    ctx_r, ctx_g, ctx_b, stream_compute, fi->filepath),
                        cleanup, fi->filepath);
 
