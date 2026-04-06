@@ -26,6 +26,7 @@
 #include "white_balance.h"
 #include "debayer_cpu.h"
 #include "star_detect_cpu.h"
+#include "centroid_lm.h"
 #include "frame_quality.h"
 #include "ransac.h"
 #include "transform.h"
@@ -394,6 +395,14 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                 free(order); goto cleanup;
             }
             printf("[Pipeline CPU] Frame %d: %d star(s) detected\n", i, stars.n);
+
+            /* ---- Optional LM centroid refinement ---- */
+            if (config->use_lm_centroid && stars.n > 0) {
+                centroid_lm_refine(&stars, lum.data, W, H,
+                                    config->moffat.alpha * 0.8f,
+                                    config->lm_fit_radius, config->lm_max_iter);
+                printf("[Pipeline CPU] Frame %d: LM centroid refinement applied\n", i);
+            }
 
             /* ---- Frame quality scoring ---- */
             {

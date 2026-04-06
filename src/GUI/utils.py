@@ -176,6 +176,10 @@ def build_command(
     argv += ["--min-stars",     str(opts["min_stars"])]
     if opts.get("min_quality", 0.0) > 0:
         argv += ["--min-quality", str(opts["min_quality"])]
+    if opts.get("lm_centroid", False):
+        argv += ["--lm-centroid"]
+        argv += ["--lm-radius", str(opts.get("lm_radius", 8.0))]
+        argv += ["--lm-iterations", str(opts.get("lm_iterations", 15))]
 
     # --- triangle matching ---
     argv += ["--triangle-iters",  str(opts["triangle_iters"])]

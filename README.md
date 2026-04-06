@@ -100,6 +100,7 @@ Replace `metal` with `cpu` in the URL if you don't need Metal acceleration.
 |---|---|---|
 | 1. Debayering (star detection) | VNG demosaic → luminance (CUDA kernel) | VNG demosaic → luminance (OpenMP) |
 | 2. Star Detection | Moffat PSF conv + threshold (CUDA) | Moffat PSF conv + threshold (OpenMP) |
+| 2b. Centroid Refinement (optional) | LM Gaussian fitting (GPU warp-per-star) | LM Gaussian fitting (OpenMP) |
 | 3. Triangle Matching Alignment | Triangle/asterism matching + DLT (`--match-device` selects CPU/GPU; default follows stacking device). Transform model auto-selected by `--transform`. | Triangle/asterism matching + DLT (CPU by default with `--cpu`). Transform model auto-selected by `--transform`. |
 | 4. Debayering (warp) | VNG demosaic → luminance **or R/G/B** | VNG demosaic → luminance **or R/G/B** |
 | 5. Lanczos Warp | nppiRemap + coord-map kernel (CUDA) | 6-tap backward-map warp (OpenMP) |
@@ -248,6 +249,12 @@ Star detection (2-column CSV only):
       --top-stars <int>          Top-K stars for matching (default: 50)
       --min-stars <int>          Minimum stars for triangle matching (default: 6)
       --min-quality <float>      Min quality as fraction of reference (0=disabled, default: 0)
+
+Centroid refinement:
+      --lm-centroid              Enable Levenberg-Marquardt Gaussian centroid
+                                 fitting (default: off, uses center-of-mass)
+      --lm-radius <float>        LM fitting window radius in pixels (default: 8.0)
+      --lm-iterations <int>      Max LM iterations per star (default: 15)
 
 Triangle matching (2-column CSV only):
       --triangle-iters <int>     Max triangle-matching iterations (default: 1000)

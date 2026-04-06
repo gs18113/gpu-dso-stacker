@@ -111,6 +111,7 @@ set(LIB_SOURCES
     src/pipeline_dispatch.c
     src/pipeline_cpu.c
     src/frame_load.c
+    src/centroid_lm.c
 )
 
 if(DSO_ENABLE_LIBRAW)
@@ -128,6 +129,7 @@ if(DSO_ENABLE_CUDA)
         src/white_balance_gpu.cu
         src/background_gpu.cu
         src/pipeline.cu
+        src/centroid_lm_gpu.cu
     )
 else()
     list(APPEND LIB_SOURCES src/pipeline_cuda_stub.c)
@@ -270,6 +272,11 @@ add_executable(test_star_detect tests/test_star_detect.c)
 target_include_directories(test_star_detect PRIVATE tests)
 target_link_libraries(test_star_detect PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_star_detect COMMAND test_star_detect)
+
+add_executable(test_centroid_lm tests/test_centroid_lm.c)
+target_include_directories(test_centroid_lm PRIVATE tests)
+target_link_libraries(test_centroid_lm PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_centroid_lm COMMAND test_centroid_lm)
 
 add_executable(test_frame_quality tests/test_frame_quality.c)
 target_include_directories(test_frame_quality PRIVATE tests)

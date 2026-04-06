@@ -18,6 +18,7 @@ All stages are implemented for both GPU and CPU execution paths. The pipeline ru
 | Debayering (VNG) | `debayer_gpu.cu` | `debayer_cpu.c` |
 | Moffat conv + threshold | `star_detect_gpu.cu` | `star_detect_cpu.c` |
 | CCL + CoM | — (CPU always) | `star_detect_cpu.c` |
+| LM centroid refine (opt.) | `centroid_lm_gpu.cu` | `centroid_lm.c` |
 | Triangle matching + DLT | `ransac_gpu.cu` (selectable via `--match-device`) | `ransac.c` |
 | Polynomial transform fit | — (CPU always) | `transform.c` |
 | Lanczos warp | `lanczos_gpu.cu` | `lanczos_cpu.c` |
@@ -68,6 +69,8 @@ gpu-dso-stacker/
 │   ├── debayer_gpu.h            ← VNG debayer → luminance or RGB planes (GPU, h2h and d2d)
 │   ├── star_detect_gpu.h        ← Moffat convolution + sigma threshold (GPU, h2h and d2d)
 │   ├── star_detect_cpu.h        ← Moffat conv + threshold + CCL + CoM (CPU)
+│   ├── centroid_lm.h            ← LM 2D Gaussian centroid refinement (CPU)
+│   ├── centroid_lm_gpu.h        ← LM 2D Gaussian centroid refinement (GPU, warp-per-star)
 │   ├── frame_quality.h          ��� Per-frame quality scoring (FWHM, roundness, background)
 │   ├── ransac.h                 ← DLT homography + RANSAC alignment
 │   ├── transform.h              ← Polynomial transform models (bilinear/bisquared/bicubic)
@@ -94,6 +97,8 @@ gpu-dso-stacker/
 │   ├── raw_io.c                 ← LibRaw wrapper: load RAW as float32 Bayer mosaic
 │   ├── frame_load.c             ← Extension-based dispatch to fits_io or raw_io
 │   ├── star_detect_cpu.c        ← Moffat conv + threshold (OpenMP) + CCL + CoM
+│   ├── centroid_lm.c            ← LM Gaussian centroid refinement (CPU, OpenMP)
+│   ├── centroid_lm_gpu.cu       ← LM Gaussian centroid refinement (GPU, warp-per-star)
 │   ├── frame_quality.c          ← Per-frame quality scoring (FWHM, roundness, composite score)
 │   ├── ransac.c                 ← Jacobi eigendecomp DLT + RANSAC loop
 │   ├── transform.c              ← Polynomial transform fitting (Cholesky) + evaluation
@@ -116,6 +121,7 @@ gpu-dso-stacker/
 │   ├── test_cpu.c               ← 42 tests: CSV, FITS, integration (mean, kappa-sigma, median), Lanczos CPU
 │   ├── test_gpu.cu              ← 5 tests: GPU Lanczos (all passing)
 │   ├── test_star_detect.c       ← 21 tests: CCL + CoM + Moffat conv + threshold
+│   ├── test_centroid_lm.c      ← 9 tests: LM Gaussian centroid fitting (CPU)
 │   ├── test_frame_quality.c     ← 9 tests: FWHM, roundness, background, composite scoring
 │   ├── test_ransac.c            ← 13 tests: DLT + RANSAC
 │   ├── test_transform.c         ← 16 tests: polynomial transform eval, fit, auto-select
@@ -254,6 +260,12 @@ Star detection (2-column CSV only):
       --top-stars <int>          Top-K stars for matching (default: 50)
       --min-stars <int>          Minimum detected stars to attempt alignment (default: 20)
       --min-quality <float>      Min quality as fraction of reference (0=disabled, default: 0)
+
+Centroid refinement:
+      --lm-centroid              Enable Levenberg-Marquardt Gaussian centroid
+                                 fitting (default: off, uses center-of-mass)
+      --lm-radius <float>        LM fitting window radius in pixels (default: 8.0)
+      --lm-iterations <int>      Max LM iterations per star (default: 15)
 
 Triangle matching (2-column CSV only):
       --triangle-iters <int>     Max triangle-matching iterations (default: 1000)
@@ -482,6 +494,27 @@ DsoError star_detect_cpu_ccl_com(const uint8_t *mask, const float *original,
 `moffat_convolve`: pre-computed kernel (R = min(⌈3α⌉, 15)), zero-boundary padding, `collapse(2) omp parallel for`.
 `threshold`: double-precision Bessel-corrected σ via `reduction(+:)`, then parallel mask write.
 `ccl_com`: two-pass 8-connectivity union-find; not parallelized (raster scan has data dependencies). After Pass 2, a label re-mapping pass compacts sparse root labels to contiguous `[1, n_unique]`, so `CompStats` is allocated as `calloc(n_unique+1)` (O(n_stars)) rather than `calloc(npix+1)` (O(pixels)).
+
+### `centroid_lm.h`
+
+```c
+DsoError centroid_lm_refine(StarList *stars, const float *image,
+                             int W, int H, float sigma_init,
+                             float fit_radius, int max_iter);
+```
+
+Refines star centroids in-place using Levenberg-Marquardt 2D circular Gaussian fitting. Each star is fitted with the model `f(x,y) = A * exp(-((x-x0)^2 + (y-y0)^2) / (2*sigma^2)) + B` (5 parameters: x0, y0, A, sigma, B). Initial guess from CoM position; background from border median of the fitting window. Uses analytical Jacobian and 5x5 Cholesky decomposition, all in `double` precision. Stars that fail to converge keep their original CoM positions. OpenMP-parallelized over stars with `schedule(dynamic, 4)`.
+
+### `centroid_lm_gpu.h`
+
+```c
+DsoError centroid_lm_refine_gpu(StarList *stars, const float *d_image,
+                                 int W, int H, float sigma_init,
+                                 float fit_radius, int max_iter,
+                                 cudaStream_t stream);
+```
+
+GPU variant using **warp-per-star architecture**: each CUDA warp (32 threads) cooperatively fits one star. Threads stride over pixels for Jacobian/residual computation, then warp-reduce JtJ (15 upper-triangle elements), Jtr (5 elements), and cost via `__shfl_down_sync`. Lane 0 solves the 5x5 Cholesky in registers. All LM math in `double` precision. Launch: `<<<ceil(n_stars/8), 256>>>` (8 warps per block). H2D/D2H only transfers the small star arrays (~1-2 KB for 50 stars); the source image `d_image` is already resident from the star detection stage.
 
 ### `frame_quality.h`
 
@@ -797,6 +830,7 @@ typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGR
 - **Camera WB from LibRaw**: `raw->color.cam_mul[4]` (R, G, B, G2) normalised so green = 1.0. For FITS files, reads `WB_RMUL`/`WB_GMUL`/`WB_BMUL` keywords; defaults to (1, 1, 1) if absent.
 - **Background normalization** (`--bg-calibration`): optional per-frame background matching applied after Lanczos warp and before integration. Uses stride-16 subsampling for efficient median/MAD computation (~1M samples for a 16 MP image). The constant 1.4826 converts MAD to σ for Gaussian distributions. Two modes: `per-channel` (R/G/B independently — handles coloured light pollution) and `rgb` (luminance-based stats for all channels — preserves colour ratios). In the GPU path, `rgb` mode uses the existing `lum_host` buffer (no extra D2H); `per-channel` color mode requires a sync + D2H of each warped channel. Default OFF for backward compatibility.
 - **Frame quality scoring**: `frame_quality.c` computes per-frame FWHM, roundness, background, and composite score from already-available star detection data (convolution map + StarList). FWHM is measured from the Moffat convolution map (matched-filter response), not the raw image — absolute values include kernel width but relative comparison is more robust. Score normalized to reference frame = 100. `--min-quality <fraction>` auto-rejects frames below the threshold (e.g. 0.5 = reject below 50% of reference quality). Quality scoring runs after CCL+CoM, before RANSAC, in both CPU and GPU pipelines. Pure CPU computation — no CUDA kernel needed.
+- **LM Gaussian centroid refinement** (`--lm-centroid`): optional post-CCL refinement that fits a 5-parameter circular 2D Gaussian (`A, x0, y0, sigma, B`) to each detected star using Levenberg-Marquardt optimization. Achieves ~0.01-0.05 pixel centroid accuracy vs ~0.1-0.3 for CoM. Analytical Jacobian (no finite differences), 5x5 Cholesky solver, all in `double` precision. CPU path: `centroid_lm.c`, OpenMP `schedule(dynamic, 4)` over stars. GPU path: `centroid_lm_gpu.cu`, warp-per-star architecture — 32 threads cooperate via `__shfl_down_sync` for JtJ/Jtr reductions, lane 0 solves Cholesky in registers. Stars that fail to converge silently keep their CoM positions. Fitting uses the **original** (non-convolved) luminance image. Initial sigma: `moffat_alpha * 0.8`. Computational cost: ~3ms CPU / ~0.05ms GPU for 50 stars — negligible vs Moffat convolution.
 
 ---
 
