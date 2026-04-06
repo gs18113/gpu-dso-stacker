@@ -24,8 +24,9 @@ DsoError wb_apply_bayer(float *data, int W, int H,
 
     const float mul[3] = { r_mul, g_mul, b_mul };
 
+    int y;
     OMP_PARALLEL_FOR_COLLAPSE2
-    for (int y = 0; y < H; y++) {
+    for (y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             int c = bayer_color(pattern, x, y);
             data[y * W + x] *= mul[c];
@@ -45,22 +46,24 @@ DsoError wb_auto_compute(const float *data, int W, int H,
     if (pattern == BAYER_NONE)
         return DSO_ERR_INVALID_ARG;   /* gray-world needs Bayer data */
 
-    /* Accumulate per-channel sums using double for precision */
+    /* Accumulate per-channel sums using double for precision.
+     * Counts use double (not long) for MSVC OpenMP 2.0 reduction compat. */
     double sum_r = 0.0, sum_g = 0.0, sum_b = 0.0;
-    long   cnt_r = 0,   cnt_g = 0,   cnt_b = 0;
+    double cnt_r = 0.0, cnt_g = 0.0, cnt_b = 0.0;
+    int y;
 
     #pragma omp parallel for schedule(static) reduction(+:sum_r,sum_g,sum_b,cnt_r,cnt_g,cnt_b)
-    for (int y = 0; y < H; y++) {
+    for (y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             int c = bayer_color(pattern, x, y);
             double v = (double)data[y * W + x];
-            if (c == 0)      { sum_r += v; cnt_r++; }
-            else if (c == 1) { sum_g += v; cnt_g++; }
-            else             { sum_b += v; cnt_b++; }
+            if (c == 0)      { sum_r += v; cnt_r += 1.0; }
+            else if (c == 1) { sum_g += v; cnt_g += 1.0; }
+            else             { sum_b += v; cnt_b += 1.0; }
         }
     }
 
-    if (cnt_r == 0 || cnt_g == 0 || cnt_b == 0)
+    if (cnt_r < 1.0 || cnt_g < 1.0 || cnt_b < 1.0)
         return DSO_ERR_STAR_DETECT;   /* degenerate — no pixels for a channel */
 
     double mean_r = sum_r / cnt_r;
