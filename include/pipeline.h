@@ -61,7 +61,7 @@ typedef struct {
     int          batch_size;      /* frames per GPU mini-batch (16)                  */
     float        kappa;           /* kappa-sigma threshold (3.0)                     */
     int          iterations;      /* sigma-clipping passes per pixel (3)             */
-    int          use_kappa_sigma; /* 1 = kappa-sigma, 0 = plain mean                 */
+    int          use_kappa_sigma; /* 0 = mean, 1 = kappa-sigma, 2 = AAWA             */
 
     /* --- I/O --- */
     const char         *output_file;     /* output FITS path                                */

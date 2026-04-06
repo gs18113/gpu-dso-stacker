@@ -822,6 +822,126 @@ static int test_csv_multiple_references(void)
 }
 
 /* =========================================================================
+ * INTEGRATION TESTS — Auto Adaptive Weighted Average (AAWA)
+ * ====================================================================== */
+
+/* Uniform data: all frames identical → output equals the constant. */
+static int test_integrate_aawa_uniform(void)
+{
+    const int N = 6, W = 4, H = 3;
+    Image imgs[6];
+    const Image *ptrs[6];
+    for (int i = 0; i < N; i++) { imgs[i] = make_image_const(W, H, 42.0f); ptrs[i] = &imgs[i]; }
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, N, &out));
+    for (int i = 0; i < W * H; i++) ASSERT_NEAR(out.data[i], 42.0f, 1e-4f);
+
+    for (int i = 0; i < N; i++) image_free(&imgs[i]);
+    image_free(&out);
+    return 0;
+}
+
+/*
+ * Outlier down-weighting: 9 frames at 100.0, 1 frame at 10000.0.
+ * Simple mean = (9*100+10000)/10 = 1090.
+ * AAWA should down-weight the outlier heavily; result should be
+ * much closer to 100 than to 1090.
+ */
+static int test_integrate_aawa_outlier_downweight(void)
+{
+    const int N = 10;
+    Image imgs[10];
+    const Image *ptrs[10];
+    for (int i = 0; i < 9; i++) { imgs[i] = make_image_const(1, 1, 100.0f); ptrs[i] = &imgs[i]; }
+    imgs[9] = make_image_const(1, 1, 10000.0f);
+    ptrs[9] = &imgs[9];
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, N, &out));
+    /* Result should be well below 200 (simple mean = 1090) */
+    ASSERT(out.data[0] < 200.0f);
+    ASSERT(out.data[0] > 90.0f);
+
+    for (int i = 0; i < N; i++) image_free(&imgs[i]);
+    image_free(&out);
+    return 0;
+}
+
+/* NaN frames should be properly skipped. */
+static int test_integrate_aawa_nan_handling(void)
+{
+    const int N = 4;
+    Image imgs[4];
+    const Image *ptrs[4];
+    /* 3 frames at value 5.0, 1 frame all NaN */
+    for (int i = 0; i < 3; i++) { imgs[i] = make_image_const(1, 1, 5.0f); ptrs[i] = &imgs[i]; }
+    imgs[3] = make_image_const(1, 1, NAN);
+    ptrs[3] = &imgs[3];
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, N, &out));
+    ASSERT_NEAR(out.data[0], 5.0f, 1e-4f);
+
+    for (int i = 0; i < N; i++) image_free(&imgs[i]);
+    image_free(&out);
+    return 0;
+}
+
+/* Edge case: n=2 frames should produce a reasonable result (close to mean). */
+static int test_integrate_aawa_two_frames(void)
+{
+    Image a = make_image_const(1, 1, 10.0f);
+    Image b = make_image_const(1, 1, 20.0f);
+    const Image *ptrs[] = { &a, &b };
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, 2, &out));
+    /* With only 2 frames and no extreme outliers, result ≈ mean = 15 */
+    ASSERT_NEAR(out.data[0], 15.0f, 1.0f);
+
+    image_free(&a);
+    image_free(&b);
+    image_free(&out);
+    return 0;
+}
+
+/*
+ * Convergence: verify that the result with 10 max iterations matches what
+ * you'd get if you allowed more. We test by running twice — since the
+ * algorithm has a hardcoded 10-iter cap, both calls are identical and must
+ * produce the same result.
+ */
+static int test_integrate_aawa_convergence(void)
+{
+    const int N = 8;
+    Image imgs[8];
+    const Image *ptrs[8];
+    /* Mix of values with a mild outlier */
+    float values[] = {100, 101, 99, 100, 102, 98, 100, 150};
+    for (int i = 0; i < N; i++) {
+        imgs[i] = make_image_const(1, 1, values[i]);
+        ptrs[i] = &imgs[i];
+    }
+
+    Image out1 = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, N, &out1));
+
+    Image out2 = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, N, &out2));
+
+    /* Both runs must give identical results */
+    ASSERT_NEAR(out1.data[0], out2.data[0], 1e-6f);
+    /* Result should be closer to 100 than to the simple mean (106.25) */
+    ASSERT(out1.data[0] < 105.0f);
+
+    for (int i = 0; i < N; i++) image_free(&imgs[i]);
+    image_free(&out1);
+    image_free(&out2);
+    return 0;
+}
+
+/* =========================================================================
  * main
  * ====================================================================== */
 
@@ -862,6 +982,13 @@ int main(void)
     RUN(test_lanczos_cpu_singular_h);
     RUN(test_lanczos_cpu_null_args);
     RUN(test_lanczos_cpu_subpixel_range);
+
+    SUITE("Integration — AAWA");
+    RUN(test_integrate_aawa_uniform);
+    RUN(test_integrate_aawa_outlier_downweight);
+    RUN(test_integrate_aawa_nan_handling);
+    RUN(test_integrate_aawa_two_frames);
+    RUN(test_integrate_aawa_convergence);
 
     SUITE("Integration — NaN handling");
     RUN(test_integrate_mean_nan_skipped);

@@ -50,6 +50,22 @@ DsoError integrate_mean(const Image **frames, int n, Image *out);
 DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
                                 float kappa, int iterations);
 
+/*
+ * integrate_aawa — Auto Adaptive Weighted Average integration.
+ *
+ * Adapted from Stetson (1989): iteratively down-weights outliers using
+ * Stetson weights w[i] = 1 / (1 + (|r[i]|/alpha)^2) where r[i] is the
+ * normalised residual and alpha = 2.0.  Converges in ≤ 10 iterations.
+ *
+ * Unlike kappa-sigma (which hard-rejects outliers), AAWA preserves partial
+ * signal from mildly deviant pixels, producing smoother results.
+ *
+ * Allocates out->data; caller must free with image_free().
+ *
+ * Returns DSO_OK or DSO_ERR_INVALID_ARG / DSO_ERR_ALLOC.
+ */
+DsoError integrate_aawa(const Image **frames, int n, Image *out);
+
 #ifdef __cplusplus
 }
 #endif

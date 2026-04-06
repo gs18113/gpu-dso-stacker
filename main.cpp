@@ -125,7 +125,11 @@ static void usage(const char *prog)
         "\n"
         "Integration:\n"
         "      --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)\n"
-        "      --integration <method>     mean | kappa-sigma (default: kappa-sigma)\n"
+        "      --integration <method>     mean | kappa-sigma | auto-adaptive\n"
+        "                                 (default: kappa-sigma)\n"
+        "                                 auto-adaptive: Stetson (1989) iterative\n"
+        "                                 weighted average; down-weights outliers\n"
+        "                                 instead of hard-rejecting them\n"
         "      --kappa <float>            Sigma clipping threshold (default: 3.0)\n"
         "      --iterations <int>         Max clipping passes per pixel (default: 3)\n"
         "      --batch-size <int>         GPU integration mini-batch size (default: 16)\n"
@@ -500,6 +504,8 @@ int main(int argc, char **argv)
         cfg.use_kappa_sigma = 1;
     } else if (strcmp(integ_str, "mean") == 0) {
         cfg.use_kappa_sigma = 0;
+    } else if (strcmp(integ_str, "auto-adaptive") == 0) {
+        cfg.use_kappa_sigma = 2;
     } else {
         fprintf(stderr, "Error: unknown integration method '%s'\n", integ_str);
         return 1;

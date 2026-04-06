@@ -67,8 +67,11 @@ static DsoError flush_batch(
 
     for (i = 0; i < n_batch; i++) ptrs_r[i] = &xformed_r[i];
 
-    if (use_kappa_sigma) {
+    if (use_kappa_sigma == 1) {
         PIPE_CHECK(integrate_kappa_sigma(ptrs_r, n_batch, &b_out_r, kappa, iterations),
+                   cleanup, "batch integration R");
+    } else if (use_kappa_sigma == 2) {
+        PIPE_CHECK(integrate_aawa(ptrs_r, n_batch, &b_out_r),
                    cleanup, "batch integration R");
     } else {
         PIPE_CHECK(integrate_mean(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
@@ -76,10 +79,14 @@ static DsoError flush_batch(
 
     if (color) {
         for (i = 0; i < n_batch; i++) { ptrs_g[i] = &xformed_g[i]; ptrs_b[i] = &xformed_b[i]; }
-        if (use_kappa_sigma) {
+        if (use_kappa_sigma == 1) {
             err = integrate_kappa_sigma(ptrs_g, n_batch, &b_out_g, kappa, iterations);
             if (err == DSO_OK)
                 err = integrate_kappa_sigma(ptrs_b, n_batch, &b_out_b, kappa, iterations);
+        } else if (use_kappa_sigma == 2) {
+            err = integrate_aawa(ptrs_g, n_batch, &b_out_g);
+            if (err == DSO_OK)
+                err = integrate_aawa(ptrs_b, n_batch, &b_out_b);
         } else {
             err = integrate_mean(ptrs_g, n_batch, &b_out_g);
             if (err == DSO_OK)

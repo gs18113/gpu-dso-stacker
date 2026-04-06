@@ -400,6 +400,10 @@ cmake --build build --parallel
         <p>FITS (FP32), TIFF (FP32/FP16/INT16/INT8 + none/zip/lzw/rle), PNG (8/16-bit). Format detected from file extension.</p>
       </div>
       <div class="feature-card">
+        <h3>Auto Adaptive Weighted Average</h3>
+        <p>Stetson (1989) iterative weighted mean integration. Down-weights outliers instead of hard-rejecting them, preserving more signal than kappa-sigma clipping. Select via <code>--integration auto-adaptive</code>.</p>
+      </div>
+      <div class="feature-card">
         <h3>CPU &amp; Apple Silicon</h3>
         <p>Full OpenMP-parallelized CPU path via <code>--cpu</code>. Metal backend scaffolded for Apple Silicon. CPU-only builds require no NVIDIA GPU or CUDA runtime.</p>
       </div>
@@ -611,7 +615,7 @@ python src/GUI/main.py</pre>
       <table>
         <thead><tr><th>Suite</th><th>Tests</th><th>Coverage</th></tr></thead>
         <tbody>
-          <tr><td><code>test_cpu</code></td><td>29</td><td>CSV parser, FITS I/O, integration, Lanczos CPU</td></tr>
+          <tr><td><code>test_cpu</code></td><td>34</td><td>CSV parser, FITS I/O, integration (mean/kappa-sigma/AAWA), Lanczos CPU</td></tr>
           <tr><td><code>test_gpu</code></td><td>5</td><td>GPU Lanczos</td></tr>
           <tr><td><code>test_star_detect</code></td><td>21</td><td>CCL + CoM, Moffat conv + threshold</td></tr>
           <tr><td><code>test_ransac</code></td><td>13</td><td>DLT homography, triangle matching, RANSAC</td></tr>

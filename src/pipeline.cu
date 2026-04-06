@@ -148,13 +148,22 @@ static DsoError integrate_batch(
     DsoError err = DSO_OK;
     printf("[Pipeline] Integrating batch of %d frame(s)...\n", M);
 
-    if (use_kappa_sigma) {
+    if (use_kappa_sigma == 1) {
         PIPE_CHECK(integration_gpu_process_batch(ctx_r, M, kappa, iterations, stream),
                    done, "batch integration R");
         if (color) {
             PIPE_CHECK(integration_gpu_process_batch(ctx_g, M, kappa, iterations, stream),
                        done, "batch integration G");
             PIPE_CHECK(integration_gpu_process_batch(ctx_b, M, kappa, iterations, stream),
+                       done, "batch integration B");
+        }
+    } else if (use_kappa_sigma == 2) {
+        PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_r, M, stream),
+                   done, "batch integration R");
+        if (color) {
+            PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_g, M, stream),
+                       done, "batch integration G");
+            PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_b, M, stream),
                        done, "batch integration B");
         }
     } else {

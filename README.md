@@ -229,7 +229,7 @@ I/O:
 
 Integration:
       --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)
-      --integration <method>     mean | kappa-sigma (default: kappa-sigma)
+      --integration <method>     mean | kappa-sigma | auto-adaptive (default: kappa-sigma)
       --kappa <float>            Sigma clipping threshold (default: 3.0)
       --iterations <int>         Max clipping passes per pixel (default: 3)
       --batch-size <int>         GPU integration mini-batch size (default: 16)

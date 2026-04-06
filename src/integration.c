@@ -191,3 +191,138 @@ DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
     free(all_actv);
     return DSO_OK;
 }
+
+/* -------------------------------------------------------------------------
+ * Auto Adaptive Weighted Average (AAWA)
+ *
+ * Stetson (1989) iterative weighted mean.  For each pixel:
+ *   1. Compute initial mean μ and sample stddev σ.
+ *   2. Iterate (max 10):
+ *        r[i] = (v[i] - μ) / σ
+ *        w[i] = 1 / (1 + (|r[i]| / α)²)    α = 2.0
+ *        μ_new = Σ(w·v) / Σ(w)
+ *        σ_new = sqrt(Σ(w·(v - μ_new)²) / Σ(w))
+ *        converge when |μ_new - μ| / max(|μ|, 1e-10) < 1e-6
+ * ------------------------------------------------------------------------- */
+
+#define AAWA_ALPHA      2.0
+#define AAWA_MAX_ITERS  10
+#define AAWA_CONV_TOL   1e-6
+
+DsoError integrate_aawa(const Image **frames, int n, Image *out)
+{
+    if (!frames || n <= 0 || !out) return DSO_ERR_INVALID_ARG;
+
+    int W = frames[0]->width;
+    int H = frames[0]->height;
+
+    for (int i = 1; i < n; i++) {
+        if (frames[i]->width != W || frames[i]->height != H) {
+            fprintf(stderr,
+                    "integrate_aawa: frame %d size mismatch (%dx%d vs %dx%d)\n",
+                    i, frames[i]->width, frames[i]->height, W, H);
+            return DSO_ERR_INVALID_ARG;
+        }
+    }
+
+    out->data = (float *)malloc((size_t)W * H * sizeof(float));
+    if (!out->data) return DSO_ERR_ALLOC;
+    out->width  = W;
+    out->height = H;
+
+    long npix = (long)W * H;
+
+    int max_threads = 1;
+#ifdef _OPENMP
+    max_threads = omp_get_max_threads();
+#endif
+
+    /* Per-thread workspace for pixel values */
+    float  *all_vals = (float  *)malloc((size_t)max_threads * n * sizeof(float));
+    double *all_wgts = (double *)malloc((size_t)max_threads * n * sizeof(double));
+
+    if (!all_vals || !all_wgts) {
+        free(all_vals); free(all_wgts);
+        free(out->data); out->data = NULL;
+        return DSO_ERR_ALLOC;
+    }
+
+    long p;
+#pragma omp parallel for schedule(dynamic, 64)
+    for (p = 0; p < npix; p++) {
+        int tid = 0;
+#ifdef _OPENMP
+        tid = omp_get_thread_num();
+#endif
+        float  *vals = &all_vals[tid * n];
+        double *wgts = &all_wgts[tid * n];
+
+        /* Collect valid (non-NaN) values */
+        int n_valid = 0;
+        for (int i = 0; i < n; i++) {
+            float v = frames[i]->data[p];
+            if (!isnan(v)) vals[n_valid++] = v;
+        }
+
+        if (n_valid == 0) { out->data[p] = NAN; continue; }
+        if (n_valid == 1) { out->data[p] = vals[0]; continue; }
+
+        /* Initial mean and stddev */
+        double mu = 0.0;
+        for (int i = 0; i < n_valid; i++) mu += (double)vals[i];
+        mu /= (double)n_valid;
+
+        double sq = 0.0;
+        for (int i = 0; i < n_valid; i++) {
+            double d = (double)vals[i] - mu;
+            sq += d * d;
+        }
+        double sigma = sqrt(sq / (double)(n_valid - 1));
+
+        /* If σ ≈ 0, all values are identical — output the mean */
+        if (sigma < 1e-12) { out->data[p] = (float)mu; continue; }
+
+        /* Iterative Stetson weighted average */
+        for (int iter = 0; iter < AAWA_MAX_ITERS; iter++) {
+            double sum_w  = 0.0;
+            double sum_wv = 0.0;
+
+            for (int i = 0; i < n_valid; i++) {
+                double r = ((double)vals[i] - mu) / sigma;
+                double ra = fabs(r) / AAWA_ALPHA;
+                double w = 1.0 / (1.0 + ra * ra);
+                wgts[i] = w;
+                sum_w  += w;
+                sum_wv += w * (double)vals[i];
+            }
+
+            if (sum_w < 1e-12) break;  /* fallback: keep current mu */
+
+            double mu_new = sum_wv / sum_w;
+
+            /* Weighted stddev */
+            double sum_wsq = 0.0;
+            for (int i = 0; i < n_valid; i++) {
+                double d = (double)vals[i] - mu_new;
+                sum_wsq += wgts[i] * d * d;
+            }
+            double sigma_new = sqrt(sum_wsq / sum_w);
+
+            /* Convergence check */
+            double denom = fabs(mu) > 1e-10 ? fabs(mu) : 1e-10;
+            if (fabs(mu_new - mu) / denom < AAWA_CONV_TOL) {
+                mu = mu_new;
+                break;
+            }
+
+            mu    = mu_new;
+            sigma = (sigma_new > 1e-12) ? sigma_new : sigma;
+        }
+
+        out->data[p] = (float)mu;
+    }
+
+    free(all_vals);
+    free(all_wgts);
+    return DSO_OK;
+}
