@@ -109,9 +109,10 @@ DsoError bg_normalize_cpu(float *data, int npix,
     float ratio  = ref_stats->scale / frame_stats->scale;
     float frm_bg = frame_stats->background;
     float ref_bg = ref_stats->background;
+    int   i;
 
     #pragma omp parallel for schedule(static)
-    for (int i = 0; i < npix; i++) {
+    for (i = 0; i < npix; i++) {
         float v = data[i];
         if (!isnan(v))
             data[i] = (v - frm_bg) * ratio + ref_bg;
