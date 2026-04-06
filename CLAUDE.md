@@ -20,6 +20,7 @@ All stages are implemented for both GPU and CPU execution paths. The pipeline ru
 | CCL + CoM | — (CPU always) | `star_detect_cpu.c` |
 | LM centroid refine (opt.) | `centroid_lm_gpu.cu` | `centroid_lm.c` |
 | Triangle matching + DLT | `ransac_gpu.cu` (selectable via `--match-device`) | `ransac.c` |
+| Polynomial transform fit | — (CPU always) | `transform.c` |
 | Lanczos warp | `lanczos_gpu.cu` | `lanczos_cpu.c` |
 | Bg normalization | `background_gpu.cu` | `background.c` |
 | Integration | `integration_gpu.cu` | `integration.c` |
@@ -72,6 +73,7 @@ gpu-dso-stacker/
 │   ├── centroid_lm_gpu.h        ← LM 2D Gaussian centroid refinement (GPU, warp-per-star)
 │   ├── frame_quality.h          ��� Per-frame quality scoring (FWHM, roundness, background)
 │   ├── ransac.h                 ← DLT homography + RANSAC alignment
+│   ├── transform.h              ← Polynomial transform models (bilinear/bisquared/bicubic)
 │   ├── integration_gpu.h        ← GPU mini-batch kappa-sigma context + API
 │   ├── calibration.h            ← CalibFrames, CalibMethod, calib_load_or_generate, calib_apply_cpu
 │   ├── calibration_gpu.h        ← CalibGpuCtx, calib_gpu_init/apply_d2d/cleanup
@@ -99,6 +101,7 @@ gpu-dso-stacker/
 │   ├── centroid_lm_gpu.cu       ← LM Gaussian centroid refinement (GPU, warp-per-star)
 │   ├── frame_quality.c          ← Per-frame quality scoring (FWHM, roundness, composite score)
 │   ├── ransac.c                 ← Jacobi eigendecomp DLT + RANSAC loop
+│   ├── transform.c              ← Polynomial transform fitting (Cholesky) + evaluation
 │   ├── integration_gpu.cu       ← Mini-batch kappa-sigma + finalize kernels
 │   ├── calibration.c            ← Master frame generation (winsorized mean / median) + CPU apply
 │   ├── calibration_gpu.cu       ← GPU calibration kernel (dark subtract + flat divide, D2D)
@@ -121,6 +124,7 @@ gpu-dso-stacker/
 │   ├── test_centroid_lm.c      ← 9 tests: LM Gaussian centroid fitting (CPU)
 │   ├── test_frame_quality.c     ← 9 tests: FWHM, roundness, background, composite scoring
 │   ├── test_ransac.c            ← 13 tests: DLT + RANSAC
+│   ├── test_transform.c         ← 16 tests: polynomial transform eval, fit, auto-select
 │   ├── test_debayer_cpu.c       ← 10 tests: VNG debayer CPU (all patterns + edge cases)
 │   ├── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
 │   ├── test_calibration.c       ← 29 tests: calib_apply_cpu (dark/flat/guard/dim), calib_load_or_generate (FITS master, frame-list stacking, winsorized mean, median, kappa-sigma, bias sub, flat normalization)
@@ -271,6 +275,8 @@ Triangle matching (2-column CSV only):
       --match-radius <float>     Star matching search radius px (default: 30.0)
       --min-inliers <int>        Minimum RANSAC inliers for acceptance (default: 10)
       --match-device <device>    auto | cpu | gpu (default: auto = stacking device)
+      --transform <model>        auto | projective | bilinear | bisquared | bicubic
+                                 (default: auto — selects model based on star count)
 
 Sensor:
       --bayer <pattern>          CFA override: none | rggb | bggr | grbg | gbrg
@@ -550,6 +556,39 @@ DsoError ransac_compute_homography(const StarList *ref_list, const StarList *frm
 
 DLT via Jacobi eigendecomposition of A^T·A (9×9); point normalization for numerical stability. `ransac_compute_homography` uses a two-phase approach: (1) triangle voting to extract correspondences, then (2) RANSAC over those correspondences (sample 4, DLT + degenerate check, inlier counting, adaptive iteration termination, final refinement on best inliers). If the primary RANSAC fails, falls back to `fallback_ransac_compute` which uses nearest-neighbour star matching with Lowe ratio test (d1/d2 < 0.8). Produces **backward homography (ref → src)** directly — no inversion needed. Uses `rand_r(&seed)` with per-call seeds derived from `time(NULL) ^ clock() ^ counter++` (static counters) for thread-safe, per-call independent random sequences.
 
+`ransac_compute_transform` wraps `ransac_compute_homography` and adds a polynomial refinement step: after RANSAC produces inlier correspondences via the homography model, the function re-fits a polynomial transform (bilinear/bisquared/bicubic) on all inliers and re-counts inliers using polynomial reprojection error. For `TRANSFORM_AUTO`, the model is selected based on inlier count via `transform_auto_select()`.
+
+### `transform.h`
+
+```c
+typedef enum {
+    TRANSFORM_PROJECTIVE = 0,  /* 3×3 homography, 8 DOF */
+    TRANSFORM_BILINEAR   = 1,  /* affine polynomial, 6 DOF */
+    TRANSFORM_BISQUARED  = 2,  /* quadratic polynomial, 12 DOF */
+    TRANSFORM_BICUBIC    = 3,  /* cubic polynomial, 20 DOF */
+    TRANSFORM_AUTO       = 4   /* auto-select based on inlier count */
+} TransformModel;
+
+typedef struct {
+    TransformModel model;
+    double coeffs[TRANSFORM_MAX_COEFFS]; /* a0..aN, b0..bN packed */
+} PolyTransform;
+
+void     transform_eval(const PolyTransform *T, double dx, double dy,
+                         double *sx, double *sy);
+DsoError transform_fit(const StarPos *ref_pts, const StarPos *src_pts,
+                        int n, TransformModel model, PolyTransform *out);
+void     transform_from_homography(const Homography *H, PolyTransform *out);
+void     transform_identity(TransformModel model, PolyTransform *out);
+TransformModel transform_auto_select(int n_inliers);
+double   transform_reproj_err_sq(const PolyTransform *T,
+                                  float rx, float ry, float sx, float sy);
+```
+
+`TransformModel` and `PolyTransform` are defined in `dso_types.h` (not `transform.h`) so all translation units can reference them without pulling in transform function declarations. `transform.h` provides the function API and constants (`TRANSFORM_BILINEAR_NCOEFFS`, `TRANSFORM_BILINEAR_MIN_PTS`, `TRANSFORM_AUTO_BICUBIC_THRESH`, etc.).
+
+`transform_fit` uses least-squares via normal equations (A^T A x = A^T b) with Cholesky decomposition of the K×K Gram matrix (K = 3, 6, or 10). Coordinates are normalized (centroid + scale = √2/avg_dist) before fitting, matching the DLT normalization in `ransac.c`. Coefficients are de-normalized via re-fitting on a grid of sample points evaluated through the normalized polynomial.
+
 ### `integration_gpu.h`
 
 ```c
@@ -727,6 +766,12 @@ typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGR
 ## Key Implementation Notes
 
 - **Homography convention**: H is the *backward* map (ref → src). Transform functions use it directly for pixel sampling — **do not invert**. The `invert_homography` helpers remain in the source but are dead code.
+- **Polynomial transform models**: `PolyTransform` (bilinear/bisquared/bicubic) provides 2D polynomial coordinate mappings as alternatives to the projective homography. Unlike the projective model (which has a w denominator), polynomial models cannot represent perspective foreshortening, but they can model field curvature, barrel/pincushion distortion, and other nonlinear optical aberrations. For typical astronomical FOV (< 5°), perspective effects are negligible.
+- **Polynomial fitting strategy**: RANSAC still uses 4-point DLT homography sampling for outlier rejection. After RANSAC identifies clean inlier correspondences, `ransac_compute_transform()` re-fits a polynomial on all inliers. This preserves the proven outlier rejection while enabling higher-order fitting.
+- **Transform auto-selection thresholds**: `TRANSFORM_AUTO` selects based on inlier count: ≥20 → bicubic (20 DOF), ≥12 → bisquared (12 DOF), ≥6 → bilinear (6 DOF), <6 → projective (8 DOF via DLT). Thresholds are practical minimums for robust fitting (2× the parameter count).
+- **Cholesky solver for polynomial fitting**: Normal equations `A^T A x = A^T b` solved via Cholesky decomposition (max 10×10 for bicubic). Returns `DSO_ERR_INVALID_ARG` if the Gram matrix is not positive definite (collinear points).
+- **GPU polynomial warp**: `build_coord_maps_poly` kernel evaluates polynomial transforms per pixel. 20 double coefficients (160 bytes) passed as kernel parameters, well within CUDA's 4KB limit. Same `nppiRemap_32f_C1R_Ctx` with Lanczos-3 interpolation as the homography path.
+- **`PolyTransform` and `TransformModel` live in `dso_types.h`**: Moved there (not `transform.h`) so all translation units can reference them without pulling in transform function declarations — same pattern as `MoffatParams`.
 - **GPU Lanczos strategy**: `nppiWarpPerspective` only supports NN/LINEAR/CUBIC. We instead pre-compute backward-homography coordinate maps (H used directly, no inversion) in a CUDA kernel, then feed them to `nppiRemap_32f_C1R_Ctx` with `NPPI_INTER_LANCZOS` (= 16).
 - **Backend dispatch is centralized**: `pipeline_run()` now lives in `pipeline_dispatch.c` and dispatches via `PipelineConfig.backend` (`AUTO/CPU/CUDA/METAL`). AUTO preserves legacy behavior: `use_gpu_lanczos==0` forces CPU; otherwise it prefers compiled GPU backend(s).
 - **`MoffatParams` lives in `dso_types.h`**: moved from `star_detect_gpu.h` (which includes `cuda_runtime.h`) so that `pipeline_cpu.c` and `star_detect_cpu.c` can use it without any CUDA dependency.
@@ -990,6 +1035,7 @@ options:
   star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
   top_stars: 50     min_stars: 20    min_quality: 0.0    min_inliers: 10
   triangle_iters: 1000     triangle_thresh: 2.0     match_radius: 30.0     match_device: auto
+  transform: auto   # auto | projective | bilinear | bisquared | bicubic
   bayer: auto     bit_depth: f32     tiff_compression: none
   stretch_min: null     stretch_max: null
   white_balance: none     wb_red: 1.0     wb_green: 1.0     wb_blue: 1.0

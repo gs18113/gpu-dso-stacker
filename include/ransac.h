@@ -67,6 +67,28 @@ DsoError ransac_compute_homography(const StarList     *ref_list,
                                     Homography         *H_out,
                                     int                *n_inliers_out);
 
+/* -------------------------------------------------------------------------
+ * ransac_compute_transform — triangle matching + RANSAC + polynomial fit.
+ *
+ * Runs the existing RANSAC pipeline to obtain inlier correspondences,
+ * then fits a polynomial transform of the requested model on all inliers.
+ *
+ * For TRANSFORM_AUTO, selects the best model based on inlier count:
+ *   ≥ 20 → BICUBIC,  ≥ 12 → BISQUARED,  ≥ 6 → BILINEAR,  else → PROJECTIVE
+ *
+ * T_out        : polynomial transform (backward map: ref → src)
+ * H_out        : backward homography (always populated for compatibility)
+ * n_inliers_out: final inlier count (may differ from homography-based count
+ *                when polynomial model captures distortion better)
+ * ------------------------------------------------------------------------- */
+DsoError ransac_compute_transform(const StarList     *ref_list,
+                                   const StarList     *src_list,
+                                   const RansacParams *params,
+                                   TransformModel      model,
+                                   PolyTransform      *T_out,
+                                   Homography         *H_out,
+                                   int                *n_inliers_out);
+
 #ifdef __cplusplus
 }
 #endif

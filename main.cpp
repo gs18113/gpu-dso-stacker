@@ -122,6 +122,8 @@ enum {
     OPT_LM_CENTROID,
     OPT_LM_RADIUS,
     OPT_LM_ITERATIONS,
+    /* Transform model */
+    OPT_TRANSFORM,
     /* Query */
     OPT_LIST_BACKENDS,
 };
@@ -166,6 +168,8 @@ static void usage(const char *prog)
         "      --match-radius <float>     Star matching radius px (default: 30.0)\n"
         "      --min-inliers <int>        Minimum RANSAC inliers for acceptance (default: 10)\n"
         "      --match-device <device>    auto | cpu | gpu (default: auto = stacking device)\n"
+        "      --transform <model>        auto | projective | bilinear | bisquared | bicubic\n"
+        "                                 (default: auto — selects model based on star count)\n"
         "      --backend <backend>        auto | cpu"
 #if defined(DSO_HAS_CUDA) && DSO_HAS_CUDA
         " | cuda"
@@ -290,6 +294,7 @@ int main(int argc, char **argv)
     cfg.wb.r_mul  = 1.0f;
     cfg.wb.g_mul  = 1.0f;
     cfg.wb.b_mul  = 1.0f;
+    cfg.transform_model = TRANSFORM_AUTO;
     cfg.use_gpu_lanczos = 1;
     cfg.use_gpu_ransac  = -1; /* auto: follow stacking device */
     cfg.calib           = nullptr;
@@ -337,6 +342,7 @@ int main(int argc, char **argv)
         {"match-radius",      required_argument, nullptr, OPT_MATCH_RADIUS},
         {"min-inliers",       required_argument, nullptr, OPT_MIN_INLIERS},
         {"match-device",      required_argument, nullptr, OPT_MATCH_DEVICE},
+        {"transform",         required_argument, nullptr, OPT_TRANSFORM},
         {"backend",           required_argument, nullptr, OPT_BACKEND},
         {"batch-size",        required_argument, nullptr, OPT_BATCH_SIZE},
         {"bayer",             required_argument, nullptr, OPT_BAYER},
@@ -404,6 +410,23 @@ int main(int argc, char **argv)
                 cfg.use_gpu_ransac = 1;
             } else {
                 fprintf(stderr, "Error: unknown --match-device '%s'; use auto, cpu, or gpu\n",
+                        optarg);
+                return 1;
+            }
+            break;
+        case OPT_TRANSFORM:
+            if (strcmp(optarg, "auto") == 0) {
+                cfg.transform_model = TRANSFORM_AUTO;
+            } else if (strcmp(optarg, "projective") == 0) {
+                cfg.transform_model = TRANSFORM_PROJECTIVE;
+            } else if (strcmp(optarg, "bilinear") == 0) {
+                cfg.transform_model = TRANSFORM_BILINEAR;
+            } else if (strcmp(optarg, "bisquared") == 0) {
+                cfg.transform_model = TRANSFORM_BISQUARED;
+            } else if (strcmp(optarg, "bicubic") == 0) {
+                cfg.transform_model = TRANSFORM_BICUBIC;
+            } else {
+                fprintf(stderr, "Error: unknown --transform '%s'; use auto, projective, bilinear, bisquared, or bicubic\n",
                         optarg);
                 return 1;
             }

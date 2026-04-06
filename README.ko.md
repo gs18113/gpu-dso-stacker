@@ -101,7 +101,7 @@ Metal 가속이 필요 없으면 URL에서 `metal`을 `cpu`로 변경하세요.
 | 1. 디베이어링 (별 검출) | VNG 디모자이크 → 휘도 (CUDA 커널) | VNG 디모자이크 → 휘도 (OpenMP) |
 | 2. 별 검출 | Moffat PSF 컨볼루션 + 임계값 (CUDA) | Moffat PSF 컨볼루션 + 임계값 (OpenMP) |
 | 2b. 중심점 정밀화 (선택) | LM 가우시안 피팅 (GPU 워프-별 단위) | LM 가우시안 피팅 (OpenMP) |
-| 3. 삼각형 매칭 정렬 | 삼각형/별자리 매칭 + DLT (`--match-device`로 CPU/GPU 선택; 기본값은 스태킹 장치를 따름) | 삼각형/별자리 매칭 + DLT (`--cpu` 사용 시 기본 CPU) |
+| 3. 삼각형 매칭 정렬 | 삼각형/별자리 매칭 + DLT (`--match-device`로 CPU/GPU 선택; `--transform auto`로 변환 모델 자동 선택) | 삼각형/별자리 매칭 + DLT (`--cpu` 사용 시 기본 CPU; `--transform auto`로 변환 모델 자동 선택) |
 | 4. 디베이어링 (워프) | VNG 디모자이크 → 휘도 **또는 R/G/B** | VNG 디모자이크 → 휘도 **또는 R/G/B** |
 | 5. Lanczos 워프 | nppiRemap + 좌표맵 커널 (CUDA) | 6-탭 역방향 매핑 워프 (OpenMP) |
 | 5b. 배경 정규화 (선택) | GPU 커널 (`--bg-calibration`) | CPU + OpenMP (`--bg-calibration`) |
@@ -110,6 +110,8 @@ Metal 가속이 필요 없으면 URL에서 `metal`을 `cpu`로 변경하세요.
 **컬러 출력**: 베이어 패턴이 활성화되면 (`--bayer` 또는 FITS `BAYERPAT` 키워드) 4단계에서 별도의 R, G, B 평면으로 디베이어링합니다. 5~6단계는 채널별로 한 번씩 실행되며 출력 FITS는 `NAXIS=3` (R=1/G=2/B=3)입니다. 별 검출(1~2단계)은 컬러 모드와 관계없이 항상 휘도를 사용합니다.
 
 **화이트 밸런스** (`--white-balance`): 보정 후, 디베이어링 전에 원시 베이어 모자이크에 적용되는 선택적 채널별 곱셈기 보정입니다. 세 가지 모드: `camera` (RAW 파일 메타데이터 사용), `auto` (그레이 월드: R/G/B 채널 평균 균등화), `manual` (`--wb-red/green/blue`로 사용자 지정 곱셈기). 곱셈기는 기준 프레임에서 한 번 계산되어 모든 프레임에 일관되게 적용됩니다.
+
+**변환 모델** (`--transform`): 고차 변환 모델(이차, 삼차 다항식)은 단일 사영 호모그래피가 모델링할 수 없는 시야 왜곡과 광학 수차를 보정합니다. auto 모드는 매칭된 별의 수에 따라 최적 모델을 자동 선택합니다: ≥20 → 삼차 다항식, ≥12 → 이차 다항식, ≥6 → 이중선형, 그 외 → 사영 변환.
 
 **삼각형 매칭 실패 처리**: 비기준 프레임의 정렬이 실패하면(별이 너무 적거나 삼각형 매칭 불일치) 해당 프레임을 건너뛰고 처리를 계속합니다. 완료 시 CLI에서 성공 및 건너뛴 프레임 수를 요약 출력합니다.
 
@@ -261,6 +263,8 @@ I/O:
       --ransac-thresh <float>    --triangle-thresh의 구 별칭
       --match-radius <float>     별 매칭 검색 반경 px (기본값: 30.0)
       --match-device <device>    auto | cpu | gpu (기본값: auto = 스태킹 장치)
+      --transform <model>        auto | projective | bilinear | bisquared | bicubic
+                                 (기본값: auto — 별 수에 따라 모델 자동 선택)
       --backend <backend>        auto | cpu | cuda | metal (기본값: auto)
 
 보정 (디베이어링 전 적용; bias와 darkflat은 상호 배타적):

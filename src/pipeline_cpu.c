@@ -29,6 +29,7 @@
 #include "centroid_lm.h"
 #include "frame_quality.h"
 #include "ransac.h"
+#include "transform.h"
 #include "lanczos_cpu.h"
 #include "integration.h"
 
@@ -278,6 +279,8 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
         double id[9] = {1,0,0, 0,1,0, 0,0,1};
         memcpy(frames[ref_idx].H.h, id, sizeof(id));
     }
+    /* Identity polynomial transform for the reference frame */
+    transform_from_homography(&frames[ref_idx].H, &frames[ref_idx].poly);
 
     /* ---- Build visit order: reference frame first, then non-reference ---- */
     {
@@ -456,9 +459,18 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                     continue;
                 }
                 int n_inliers = 0;
-                err = ransac_compute_homography(&ref_stars, &stars,
-                                                 &config->ransac,
-                                                 &frames[i].H, &n_inliers);
+                if (config->transform_model != TRANSFORM_PROJECTIVE) {
+                    err = ransac_compute_transform(&ref_stars, &stars,
+                                                    &config->ransac,
+                                                    config->transform_model,
+                                                    &frames[i].poly,
+                                                    &frames[i].H, &n_inliers);
+                } else {
+                    err = ransac_compute_homography(&ref_stars, &stars,
+                                                     &config->ransac,
+                                                     &frames[i].H, &n_inliers);
+                    transform_from_homography(&frames[i].H, &frames[i].poly);
+                }
                 free(stars.stars);
                 if (err != DSO_OK) {
                     fprintf(stderr,
@@ -508,11 +520,19 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                     image_free(&ch_r); image_free(&ch_g); image_free(&ch_b);
                     err = DSO_ERR_ALLOC; free(order); goto cleanup;
                 }
-                err = lanczos_transform_cpu(&ch_r, &xformed_r[slot], &frames[i].H);
-                if (err == DSO_OK)
-                    err = lanczos_transform_cpu(&ch_g, &xformed_g[slot], &frames[i].H);
-                if (err == DSO_OK)
-                    err = lanczos_transform_cpu(&ch_b, &xformed_b[slot], &frames[i].H);
+                if (frames[i].poly.model != TRANSFORM_PROJECTIVE) {
+                    err = lanczos_transform_cpu_poly(&ch_r, &xformed_r[slot], &frames[i].poly);
+                    if (err == DSO_OK)
+                        err = lanczos_transform_cpu_poly(&ch_g, &xformed_g[slot], &frames[i].poly);
+                    if (err == DSO_OK)
+                        err = lanczos_transform_cpu_poly(&ch_b, &xformed_b[slot], &frames[i].poly);
+                } else {
+                    err = lanczos_transform_cpu(&ch_r, &xformed_r[slot], &frames[i].H);
+                    if (err == DSO_OK)
+                        err = lanczos_transform_cpu(&ch_g, &xformed_g[slot], &frames[i].H);
+                    if (err == DSO_OK)
+                        err = lanczos_transform_cpu(&ch_b, &xformed_b[slot], &frames[i].H);
+                }
                 image_free(&ch_r); image_free(&ch_g); image_free(&ch_b);
             } else {
                 xformed_r[slot].data   = (float *)calloc((size_t)npix, sizeof(float));
@@ -522,7 +542,11 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                     image_free(&lum); err = DSO_ERR_ALLOC;
                     free(order); goto cleanup;
                 }
-                err = lanczos_transform_cpu(&lum, &xformed_r[slot], &frames[i].H);
+                if (frames[i].poly.model != TRANSFORM_PROJECTIVE) {
+                    err = lanczos_transform_cpu_poly(&lum, &xformed_r[slot], &frames[i].poly);
+                } else {
+                    err = lanczos_transform_cpu(&lum, &xformed_r[slot], &frames[i].H);
+                }
                 image_free(&lum);
             }
             if (err != DSO_OK) {

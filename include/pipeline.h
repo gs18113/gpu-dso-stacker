@@ -71,8 +71,10 @@ typedef struct {
     float        lm_fit_radius;  /* fitting window half-size in pixels (default: 8.0)  */
     int          lm_max_iter;    /* max LM iterations per star (default: 15)           */
 
-    /* --- RANSAC --- */
-    RansacParams ransac;          /* {max_iters=1000, inlier_thresh=2.0,
+    /* --- RANSAC / alignment --- */
+    RansacParams ransac;
+    TransformModel transform_model; /* auto | projective | bilinear | bisquared | bicubic
+                                        (default: TRANSFORM_AUTO) */          /* {max_iters=1000, inlier_thresh=2.0,
                                       match_radius=30.0, confidence=0.99,
                                       min_inliers=10}                                */
 

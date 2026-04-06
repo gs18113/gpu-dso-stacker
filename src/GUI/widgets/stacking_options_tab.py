@@ -89,6 +89,7 @@ class StackingOptionsTab(QWidget):
             "triangle_thresh":  self._triangle_thresh_spin.value(),
             "match_radius":     self._match_radius_spin.value(),
             "match_device":     self._match_device_combo.currentText(),
+            "transform":        self._transform_combo.currentText(),
             "bayer":            self._bayer_combo.currentText(),
             "bit_depth":        self._bit_depth_combo.currentText(),
             "tiff_compression": self._tiff_compress_combo.currentText(),
@@ -137,6 +138,7 @@ class StackingOptionsTab(QWidget):
         self._triangle_thresh_spin.setValue(   opts.get("triangle_thresh", opts.get("ransac_thresh", 2.0)))
         self._match_radius_spin.setValue(      opts.get("match_radius", 30.0))
         self._set_combo(self._match_device_combo, opts.get("match_device", "auto"))
+        self._set_combo(self._transform_combo,  opts.get("transform", "auto"))
         self._set_combo(self._bayer_combo,     opts.get("bayer", "auto"))
         self._set_combo(self._bit_depth_combo, opts.get("bit_depth", "f32"))
         self._set_combo(self._tiff_compress_combo, opts.get("tiff_compression", "none"))
@@ -306,11 +308,22 @@ class StackingOptionsTab(QWidget):
         self._match_device_combo.addItems(["auto", "cpu", "gpu"])
         self._match_device_lbl = QLabel("Match device:")
 
+        self._transform_combo = QComboBox()
+        self._transform_combo.addItems(["auto", "projective", "bilinear", "bisquared", "bicubic"])
+        self._transform_combo.setToolTip(
+            "auto: select model based on matched star count\n"
+            "  ≥20 stars → bicubic, ≥12 → bisquared, ≥6 → bilinear, else projective\n"
+            "projective: 3×3 homography (8 DOF)\n"
+            "bilinear: affine polynomial (6 DOF)\n"
+            "bisquared: quadratic polynomial (12 DOF) — corrects field curvature\n"
+            "bicubic: cubic polynomial (20 DOF) — corrects complex distortion")
+
         form.addRow("Max iterations:",       self._triangle_iters_spin)
         form.addRow("Inlier threshold (px):", self._triangle_thresh_spin)
         form.addRow("Match radius (px):",     self._match_radius_spin)
         form.addRow("Min inliers (RANSAC):",  self._min_inliers_spin)
         form.addRow(self._match_device_lbl,   self._match_device_combo)
+        form.addRow("Transform model:",       self._transform_combo)
         return box
 
     def _build_sensor_group(self) -> QGroupBox:

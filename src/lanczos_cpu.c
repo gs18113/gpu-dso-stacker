@@ -18,6 +18,7 @@
  */
 
 #include "lanczos_cpu.h"
+#include "transform.h"
 #include <stdlib.h>
 #include <math.h>
 #include <float.h>
@@ -134,6 +135,68 @@ DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H
             double weight_sum = 0.0;
 
             /* Pre-calculate 6 weights for x and 6 for y */
+            float wx_arr[6], wy_arr[6];
+            for (int k = 0; k < 6; k++) {
+                wx_arr[k] = lanczos_weight(sx - (float)(ix - 2 + k));
+                wy_arr[k] = lanczos_weight(sy - (float)(iy - 2 + k));
+            }
+
+            for (int j = 0; j < 6; j++) {
+                int row = iy - 2 + j;
+                if (row < 0 || row >= SH) continue;
+                float wy = wy_arr[j];
+
+                for (int i = 0; i < 6; i++) {
+                    int col = ix - 2 + i;
+                    if (col < 0 || col >= SW) continue;
+
+                    float wx = wx_arr[i];
+                    float w  = wx * wy;
+                    accum      += w * src->data[row * SW + col];
+                    weight_sum += w;
+                }
+            }
+
+            dst->data[dy * DW + dx] = (fabs(weight_sum) < 1e-6) ? NAN : (float)(accum / weight_sum);
+        }
+    }
+
+    return DSO_OK;
+}
+
+/* -------------------------------------------------------------------------
+ * lanczos_transform_cpu_poly — Lanczos-3 warp using polynomial transform.
+ *
+ * Same algorithm as lanczos_transform_cpu but uses transform_eval() for
+ * coordinate mapping instead of homography matrix-vector multiply.
+ * The Lanczos-3 interpolation kernel is unchanged.
+ * ------------------------------------------------------------------------- */
+DsoError lanczos_transform_cpu_poly(const Image *src, Image *dst,
+                                     const PolyTransform *T)
+{
+    if (!src || !dst || !T || !src->data || !dst->data) return DSO_ERR_INVALID_ARG;
+
+    int SW = src->width,  SH = src->height;
+    int DW = dst->width,  DH = dst->height;
+
+    int dy;
+#pragma omp parallel for schedule(static)
+    for (dy = 0; dy < DH; dy++) {
+        for (int dx = 0; dx < DW; dx++) {
+
+            /* Map destination pixel to source via polynomial transform */
+            double sx_d, sy_d;
+            transform_eval(T, (double)dx, (double)dy, &sx_d, &sy_d);
+
+            float sx = (float)sx_d;
+            float sy = (float)sy_d;
+
+            int ix = (int)floorf(sx);
+            int iy = (int)floorf(sy);
+
+            double accum      = 0.0;
+            double weight_sum = 0.0;
+
             float wx_arr[6], wy_arr[6];
             for (int k = 0; k < 6; k++) {
                 wx_arr[k] = lanczos_weight(sx - (float)(ix - 2 + k));

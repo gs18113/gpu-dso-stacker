@@ -381,7 +381,7 @@ cmake --build build --parallel
       </div>
       <div class="feature-card">
         <h3>Automatic Star Alignment</h3>
-        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Optional Levenberg-Marquardt Gaussian centroid fitting refines positions to ~0.01-0.05 pixel accuracy. Triangle-matching + DLT computes a full homography &mdash; no manual reference or pre-computed transforms required. Per-frame quality scoring (FWHM, roundness, star count) with optional automatic rejection of poor sub-frames.</p>
+        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Optional Levenberg-Marquardt Gaussian centroid fitting refines positions to ~0.01-0.05 pixel accuracy. Triangle-matching + RANSAC computes alignment transforms &mdash; auto-selecting from projective, bilinear, bisquared, or bicubic models based on star density for optimal field-curvature correction. Per-frame quality scoring (FWHM, roundness, star count) with optional automatic rejection of poor sub-frames.</p>
       </div>
       <div class="feature-card">
         <h3>RAW Camera File Support</h3>

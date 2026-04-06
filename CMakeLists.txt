@@ -104,6 +104,7 @@ set(LIB_SOURCES
     src/star_detect_cpu.c
     src/frame_quality.c
     src/ransac.c
+    src/transform.c
     src/calibration.c
     src/white_balance.c
     src/background.c
@@ -286,6 +287,12 @@ add_executable(test_ransac tests/test_ransac.c test/star_coords_generator.c)
 target_include_directories(test_ransac PRIVATE tests test)
 target_link_libraries(test_ransac PRIVATE dso_stacker_lib ${MATH_LIB})
 add_test(NAME test_ransac COMMAND test_ransac)
+
+# Polynomial transform tests
+add_executable(test_transform tests/test_transform.c)
+target_include_directories(test_transform PRIVATE tests)
+target_link_libraries(test_transform PRIVATE dso_stacker_lib ${MATH_LIB})
+add_test(NAME test_transform COMMAND test_transform)
 
 # CPU debayer tests
 add_executable(test_debayer_cpu tests/test_debayer_cpu.c)

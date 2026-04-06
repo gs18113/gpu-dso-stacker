@@ -18,6 +18,7 @@
  */
 
 #include "lanczos_gpu.h"
+#include "transform.h"
 #include <nppi_geometry_transforms.h>
 #include <stdio.h>
 #include <string.h>
@@ -327,4 +328,127 @@ DsoError lanczos_transform_gpu_d2d(
     return DSO_OK;
 
 #undef CHECK_CUDA_D2D
+}
+
+/* -------------------------------------------------------------------------- */
+/* Polynomial coordinate mapping kernel                                        */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * build_coord_maps_poly — polynomial backward-map per pixel.
+ *
+ * Evaluates the polynomial transform at each destination pixel (dx, dy)
+ * and writes xmap/ymap.  Coefficients are passed as kernel parameters
+ * (20 doubles = 160 bytes, well within CUDA's 4KB parameter limit).
+ *
+ * model: 1=BILINEAR (3 coeffs/axis), 2=BISQUARED (6), 3=BICUBIC (10).
+ * c[0..9] = sx coeffs (a0..a9),  c[10..19] = sy coeffs (b0..b9).
+ */
+__global__ static void build_coord_maps_poly(
+    float *xmap, float *ymap, int W, int H,
+    int model,
+    double c0,  double c1,  double c2,  double c3,  double c4,
+    double c5,  double c6,  double c7,  double c8,  double c9,
+    double c10, double c11, double c12, double c13, double c14,
+    double c15, double c16, double c17, double c18, double c19)
+{
+    int dx = blockIdx.x * blockDim.x + threadIdx.x;
+    int dy = blockIdx.y * blockDim.y + threadIdx.y;
+    if (dx >= W || dy >= H) return;
+
+    double x = (double)dx;
+    double y = (double)dy;
+    double sx, sy;
+
+    if (model == 1) {
+        /* BILINEAR */
+        sx = c0 + c1*x + c2*y;
+        sy = c3 + c4*x + c5*y;
+    } else if (model == 2) {
+        /* BISQUARED */
+        double x2 = x*x, xy = x*y, y2 = y*y;
+        sx = c0 + c1*x + c2*y + c3*x2 + c4*xy + c5*y2;
+        sy = c6 + c7*x + c8*y + c9*x2 + c10*xy + c11*y2;
+    } else {
+        /* BICUBIC */
+        double x2 = x*x, y2 = y*y, xy = x*y;
+        double x3 = x2*x, y3 = y2*y;
+        sx = c0  + c1*x  + c2*y  + c3*x2  + c4*xy  + c5*y2
+           + c6*x3 + c7*x2*y + c8*x*y2 + c9*y3;
+        sy = c10 + c11*x + c12*y + c13*x2 + c14*xy + c15*y2
+           + c16*x3 + c17*x2*y + c18*x*y2 + c19*y3;
+    }
+
+    int idx = dy * W + dx;
+    xmap[idx] = (float)sx;
+    ymap[idx] = (float)sy;
+}
+
+/* -------------------------------------------------------------------------- */
+/* D2D polynomial warp                                                         */
+/* -------------------------------------------------------------------------- */
+
+DsoError lanczos_transform_gpu_d2d_poly(
+    const float       *d_src,
+    float             *d_dst,
+    float             *d_xmap,
+    float             *d_ymap,
+    int                SW, int SH,
+    int                DW, int DH,
+    const PolyTransform *T,
+    cudaStream_t       stream)
+{
+    if (!d_src || !d_dst || !d_xmap || !d_ymap || !T) return DSO_ERR_INVALID_ARG;
+    if (SW <= 0 || SH <= 0 || DW <= 0 || DH <= 0)     return DSO_ERR_INVALID_ARG;
+
+    NppStreamContext ctx = g_nppCtx;
+    ctx.hStream = stream;
+    if (stream != 0) cudaStreamGetFlags(stream, &ctx.nStreamFlags);
+
+    const double *c = T->coeffs;
+    int model = (int)T->model;
+
+    cudaError_t cerr;
+    dim3 block(16, 16);
+    dim3 grid((DW + 15) / 16, (DH + 15) / 16);
+
+#define CHECK_CUDA_POLY(call) \
+    do { cerr = (call); if (cerr != cudaSuccess) { \
+        fprintf(stderr, "CUDA error (poly) %s:%d: %s\n", __FILE__, __LINE__, \
+                cudaGetErrorString(cerr)); \
+        return DSO_ERR_CUDA; } } while(0)
+
+    build_coord_maps_poly<<<grid, block, 0, stream>>>(
+        d_xmap, d_ymap, DW, DH, model,
+        c[0],  c[1],  c[2],  c[3],  c[4],
+        c[5],  c[6],  c[7],  c[8],  c[9],
+        c[10], c[11], c[12], c[13], c[14],
+        c[15], c[16], c[17], c[18], c[19]);
+    CHECK_CUDA_POLY(cudaGetLastError());
+
+    {
+        NppiSize oSrcSize = { SW, SH };
+        NppiRect oSrcROI  = { 0, 0, SW, SH };
+        NppiSize oDstSize = { DW, DH };
+        int src_step = SW * (int)sizeof(float);
+        int map_step = DW * (int)sizeof(float);
+        int dst_step = DW * (int)sizeof(float);
+
+        NppStatus npp_err = nppiRemap_32f_C1R_Ctx(
+            d_src,  oSrcSize, src_step, oSrcROI,
+            d_xmap, map_step,
+            d_ymap, map_step,
+            d_dst,  dst_step, oDstSize,
+            NPPI_INTER_LANCZOS,
+            ctx);
+
+        if (npp_err != NPP_SUCCESS) {
+            fprintf(stderr, "nppiRemap_32f_C1R_Ctx (poly) failed: %d\n", (int)npp_err);
+            return DSO_ERR_NPP;
+        }
+    }
+
+    return DSO_OK;
+
+#undef CHECK_CUDA_POLY
 }
