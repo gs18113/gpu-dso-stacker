@@ -318,8 +318,9 @@ DsoError centroid_lm_refine(StarList *stars, const float *image,
     if (R < 3)  R = 3;
     if (R > 15) R = 15;
 
+    int s;
     #pragma omp parallel for schedule(dynamic, 4)
-    for (int s = 0; s < stars->n; s++) {
+    for (s = 0; s < stars->n; s++) {
         float out_x = stars->stars[s].x;
         float out_y = stars->stars[s].y;
 
