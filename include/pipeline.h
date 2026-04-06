@@ -24,6 +24,7 @@
 #include "ransac.h"            /* RansacParams */
 #include "image_io.h"          /* ImageSaveOptions */
 #include "white_balance.h"     /* WbParams, WbMode */
+#include "background.h"        /* BgCalibMode */
 
 /* Forward declaration — include calibration.h where the full type is needed */
 typedef struct CalibFrames CalibFrames;
@@ -62,6 +63,8 @@ typedef struct {
     MoffatParams moffat;          /* Moffat kernel shape {alpha=2.5, beta=2.0}       */
     int          top_stars;       /* top-K stars to use for matching (50)            */
     int          min_stars;       /* minimum detected stars to attempt alignment (20)*/
+    float        min_quality;     /* auto-reject below this fraction of ref quality;
+                                      0 = disabled (default). E.g. 0.5 = reject < 50% */
 
     /* --- RANSAC --- */
     RansacParams ransac;          /* {max_iters=1000, inlier_thresh=2.0,
@@ -92,6 +95,9 @@ typedef struct {
 
     /* --- Output format --- */
     ImageSaveOptions save_opts; /* bit depth, compression, stretch; see image_io.h */
+
+    /* --- Background normalization --- */
+    BgCalibMode bg_calibration; /* none | per-channel | rgb (default: none) */
 } PipelineConfig;
 
 /*

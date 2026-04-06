@@ -20,6 +20,7 @@ All stages are implemented for both GPU and CPU execution paths. The pipeline ru
 | CCL + CoM | — (CPU always) | `star_detect_cpu.c` |
 | Triangle matching + DLT | `ransac_gpu.cu` (selectable via `--match-device`) | `ransac.c` |
 | Lanczos warp | `lanczos_gpu.cu` | `lanczos_cpu.c` |
+| Bg normalization | `background_gpu.cu` | `background.c` |
 | Integration | `integration_gpu.cu` | `integration.c` |
 | Pipeline orchestrator | `pipeline.cu` | `pipeline_cpu.c` |
 
@@ -66,6 +67,7 @@ gpu-dso-stacker/
 │   ├── debayer_gpu.h            ← VNG debayer → luminance or RGB planes (GPU, h2h and d2d)
 │   ├── star_detect_gpu.h        ← Moffat convolution + sigma threshold (GPU, h2h and d2d)
 │   ├── star_detect_cpu.h        ← Moffat conv + threshold + CCL + CoM (CPU)
+│   ├── frame_quality.h          ��� Per-frame quality scoring (FWHM, roundness, background)
 │   ├── ransac.h                 ← DLT homography + RANSAC alignment
 │   ├── integration_gpu.h        ← GPU mini-batch kappa-sigma context + API
 │   ├── calibration.h            ← CalibFrames, CalibMethod, calib_load_or_generate, calib_apply_cpu
@@ -74,6 +76,8 @@ gpu-dso-stacker/
 │   ├── white_balance_gpu.h      ← wb_apply_bayer_gpu_d2d (CUDA kernel)
 │   ├── raw_io.h                 ← RAW camera file loading via LibRaw (conditional: DSO_HAS_LIBRAW)
 │   ├── frame_load.h             ← Format-agnostic load dispatch (FITS or RAW by extension)
+│   ├── background.h             ← BgCalibMode, BgStats, bg_compute_stats, bg_normalize_cpu
+│   ├── background_gpu.h         ← bg_normalize_gpu (CUDA kernel)
 │   └── pipeline.h               ← pipeline_run dispatch + pipeline_run_{cpu,cuda,metal} + PipelineConfig
 ├── src/
 │   ├── fits_io.c                ← CFITSIO-based I/O
@@ -88,12 +92,15 @@ gpu-dso-stacker/
 │   ├── raw_io.c                 ← LibRaw wrapper: load RAW as float32 Bayer mosaic
 │   ├── frame_load.c             ← Extension-based dispatch to fits_io or raw_io
 │   ├── star_detect_cpu.c        ← Moffat conv + threshold (OpenMP) + CCL + CoM
+│   ├── frame_quality.c          ← Per-frame quality scoring (FWHM, roundness, composite score)
 │   ├── ransac.c                 ← Jacobi eigendecomp DLT + RANSAC loop
 │   ├── integration_gpu.cu       ← Mini-batch kappa-sigma + finalize kernels
 │   ├── calibration.c            ← Master frame generation (winsorized mean / median) + CPU apply
 │   ├── calibration_gpu.cu       ← GPU calibration kernel (dark subtract + flat divide, D2D)
 │   ├── white_balance.c          ← CPU white balance (OpenMP): wb_apply_bayer, wb_auto_compute
 │   ├── white_balance_gpu.cu     ← GPU white balance kernel (per-pixel Bayer-aware multiply)
+│   ├── background.c             ← CPU background stats + normalization (stride-16 median/MAD)
+│   ├── background_gpu.cu        ← GPU background normalization kernel
 │   ├── pipeline.cu              ← CUDA orchestrator implementation (`pipeline_run_cuda`)
 │   ├── pipeline_dispatch.c      ← backend dispatch (`pipeline_run`)
 │   ├── pipeline_cpu.c           ← Pure-C CPU orchestrator (no CUDA)
@@ -106,6 +113,7 @@ gpu-dso-stacker/
 │   ├── test_cpu.c               ← 42 tests: CSV, FITS, integration (mean, kappa-sigma, median), Lanczos CPU
 │   ├── test_gpu.cu              ← 5 tests: GPU Lanczos (all passing)
 │   ├── test_star_detect.c       ← 21 tests: CCL + CoM + Moffat conv + threshold
+│   ├── test_frame_quality.c     ← 9 tests: FWHM, roundness, background, composite scoring
 │   ├── test_ransac.c            ← 13 tests: DLT + RANSAC
 │   ├── test_debayer_cpu.c       ← 10 tests: VNG debayer CPU (all patterns + edge cases)
 │   ├── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
@@ -114,7 +122,8 @@ gpu-dso-stacker/
 │   ├── test_color.c             ← 33 tests: debayer_cpu_rgb (arg validation, BAYER_NONE passthrough, channel separation), fits_save_rgb (NAXIS=3, round-trip), color auto-detection
 │   ├── test_white_balance.c     ← 16 tests: bayer_color LUT, wb_apply_bayer (all patterns, BAYER_NONE, identity, args), wb_auto_compute (gray-world, uniform, blue-heavy, args)
 │   ├── test_image_io.c          ← 21 tests: format detection, FITS passthrough, TIFF (FP32/FP16/INT16/INT8, all compressions, mono+RGB), PNG (8/16-bit mono+RGB), error cases, auto stretch
-│   └── test_raw_io.c           ← 10 tests: frame_is_raw extension detection, frame_load FITS fallback, frame_get_bayer_pattern dispatch, raw_io error handling (conditional on DSO_HAS_LIBRAW)
+│   ├── test_raw_io.c           ← 10 tests: frame_is_raw extension detection, frame_load FITS fallback, frame_get_bayer_pattern dispatch, raw_io error handling (conditional on DSO_HAS_LIBRAW)
+│   └── test_background.c      ← 11 tests: bg_compute_stats (constant/known/NaN/degenerate), bg_normalize_cpu (shift/scale/NaN/degenerate)
 ├── test/
 │   └── star_detect_overlay.cpp  ← Standalone CLI helper that runs CPU/GPU star detection and writes PNG overlays with detected-star circles
 ├── docs/
@@ -240,6 +249,7 @@ Star detection (2-column CSV only):
       --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
       --top-stars <int>          Top-K stars for matching (default: 50)
       --min-stars <int>          Minimum detected stars to attempt alignment (default: 20)
+      --min-quality <float>      Min quality as fraction of reference (0=disabled, default: 0)
 
 Triangle matching (2-column CSV only):
       --triangle-iters <int>     Max triangle-matching iterations (default: 1000)
@@ -258,6 +268,12 @@ White balance (applied to raw Bayer mosaic before debayering):
       --wb-red <float>           Red channel multiplier (default: 1.0)
       --wb-green <float>         Green channel multiplier (default: 1.0)
       --wb-blue <float>          Blue channel multiplier (default: 1.0)
+
+Background normalization:
+      --bg-calibration <mode>    none | per-channel | rgb (default: none)
+                                 Normalizes each frame's background level and scale to
+                                 match the reference before integration.  per-channel
+                                 treats R/G/B independently; rgb uses luminance stats.
 
 Calibration (applied before debayering; bias and darkflat are mutually exclusive):
       --dark <path>              Master dark FITS or text list of dark FITS paths
@@ -299,7 +315,9 @@ filepath, is_reference
 ```c
 typedef struct { double h[9]; }  Homography;   // row-major 3x3, backward map (ref → src)
 typedef struct { float *data; int width; int height; } Image;  // row-major float32
-typedef struct { char filepath[4096]; int is_reference; Homography H; } FrameInfo;
+typedef struct { char filepath[4096]; int is_reference; Homography H;
+                 int width; int height; int pattern;
+                 float quality_score; } FrameInfo;
 typedef struct { float x, y, flux; } StarPos;  // sub-pixel CoM position + integrated flux
 typedef struct { StarPos *stars; int n; } StarList;  // heap-alloc'd, caller must free()
 typedef struct { float alpha; float beta; } MoffatParams;  // Moffat PSF params (default: 2.5, 2.0)
@@ -459,6 +477,32 @@ DsoError star_detect_cpu_ccl_com(const uint8_t *mask, const float *original,
 `threshold`: double-precision Bessel-corrected σ via `reduction(+:)`, then parallel mask write.
 `ccl_com`: two-pass 8-connectivity union-find; not parallelized (raster scan has data dependencies). After Pass 2, a label re-mapping pass compacts sparse root labels to contiguous `[1, n_unique]`, so `CompStats` is allocated as `calloc(n_unique+1)` (O(n_stars)) rather than `calloc(npix+1)` (O(pixels)).
 
+### `frame_quality.h`
+
+```c
+typedef struct {
+    float fwhm;        /* median FWHM across detected stars (pixels) */
+    float roundness;   /* median min(fwhm_x,fwhm_y)/max(fwhm_x,fwhm_y), 1.0=circular */
+    float background;  /* sigma-clipped mean of luminance image */
+    int   star_count;  /* number of detected stars */
+    float composite;   /* raw composite score (before normalization) */
+    float normalized;  /* score normalized so reference = 100.0 */
+} FrameQuality;
+
+DsoError frame_quality_compute(const float *conv_data, const float *lum_data,
+                               const StarList *stars, int W, int H,
+                               FrameQuality *quality_out);
+void frame_quality_normalize(FrameQuality *q, float ref_composite);
+void frame_quality_print_table(const FrameQuality *qualities,
+                               const int *frame_indices, const int *rejected, int n);
+```
+
+- `frame_quality_compute`: FWHM estimated from the Moffat convolution map via 4-direction radial profile per star (walk outward until half-max crossing, linear interpolation). Roundness = min(FWHM_x, FWHM_y) / max(FWHM_x, FWHM_y) per star. Both metrics are median across all detected stars. Background via 3-iteration 3σ-clipped mean of the luminance image.
+- Composite score: `roundness * log2(1 + star_count) / (fwhm * (1 + 0.001 * background))`. Rewards more stars, rounder stars, tighter FWHM, lower background.
+- `frame_quality_normalize`: scales composite so reference frame = 100.0.
+- `frame_quality_print_table`: prints a summary table with FWHM, roundness, star count, and normalized score for each frame, with `[SKIPPED]` tag for quality-rejected frames.
+- Pure C, no CUDA dependency. Called after CCL+CoM and before RANSAC in both pipelines.
+
 ### `ransac.h`
 
 ```c
@@ -491,6 +535,35 @@ DsoError integration_gpu_finalize(IntegrationGpuCtx *ctx, int n_frames,
 `IntegrationGpuCtx` is now a **public** struct (in the header) exposing `d_frames[]`, `d_xmap`, `d_ymap` so `pipeline.cu` can fill frames without extra indirection. Mini-batch approximation: per-batch kappa-sigma / AAWA combined with survivor-count-weighted mean across batches. All-clipped fallback uses raw (unclipped) per-pixel sum. `integration_gpu_process_batch_aawa` runs the Stetson (1989) iterative weighted average per pixel (max 10 iterations, α=2.0) entirely in registers, using `double` accumulations.
 
 `integration_gpu_process_batch_median`: Mini-batch median approximation. Each pixel sorts its M non-NaN values in registers (insertion sort) and computes the median. The per-batch median is accumulated weighted by n_valid into the persistent buffers. Note: this is an approximation — a true global median requires all N frames simultaneously.
+
+### `background.h`
+
+```c
+typedef enum { DSO_BG_NONE=0, DSO_BG_PER_CHANNEL=1, DSO_BG_RGB=2 } BgCalibMode;
+
+typedef struct {
+    float background;   /* median pixel value */
+    float scale;        /* 1.4826 * MAD (robust σ estimate) */
+} BgStats;
+
+DsoError bg_compute_stats(const float *data, int npix, BgStats *out);
+DsoError bg_normalize_cpu(float *data, int npix,
+                           const BgStats *frame_stats,
+                           const BgStats *ref_stats);
+```
+
+- `bg_compute_stats`: samples every 16th non-NaN pixel, sorts via `qsort`, takes the median, then computes MAD (median of absolute deviations) and multiplies by 1.4826 to get a robust σ estimate. O(npix/16 · log(npix/16)).
+- `bg_normalize_cpu`: applies `pixel = (pixel - frame_bg) * (ref_scale / frame_scale) + ref_bg` in-place. OpenMP-parallelized. Guards: skips if frame or ref scale < 1e-10 (flat frame). NaN pixels left unchanged.
+
+### `background_gpu.h`
+
+```c
+DsoError bg_normalize_gpu(float *d_data, int npix,
+                           float frame_bg, float scale_ratio, float ref_bg,
+                           cudaStream_t stream);
+```
+
+Simple per-pixel CUDA kernel (256 threads/block). Applies the same affine transform as the CPU variant. NaN pixels unchanged.
 
 ### `calibration.h`
 
@@ -677,6 +750,8 @@ typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGR
 - **Gray-world auto WB limitation**: The gray-world assumption (`mean R ≈ mean G ≈ mean B`) works well for broadband targets (galaxies, star fields) but poorly for emission nebulae dominated by a single wavelength (e.g., Hα). For narrowband imaging, use `WB_MANUAL` with known filter response ratios.
 - **GPU auto WB**: computed on the host from `pinned[0]` (reference frame in host pinned memory) before the GPU main loop. This avoids a device-to-host transfer of the calibrated frame. The pre-calibration gray-world ratios are a good approximation since calibration is a linear operation that largely preserves channel ratios.
 - **Camera WB from LibRaw**: `raw->color.cam_mul[4]` (R, G, B, G2) normalised so green = 1.0. For FITS files, reads `WB_RMUL`/`WB_GMUL`/`WB_BMUL` keywords; defaults to (1, 1, 1) if absent.
+- **Background normalization** (`--bg-calibration`): optional per-frame background matching applied after Lanczos warp and before integration. Uses stride-16 subsampling for efficient median/MAD computation (~1M samples for a 16 MP image). The constant 1.4826 converts MAD to σ for Gaussian distributions. Two modes: `per-channel` (R/G/B independently — handles coloured light pollution) and `rgb` (luminance-based stats for all channels — preserves colour ratios). In the GPU path, `rgb` mode uses the existing `lum_host` buffer (no extra D2H); `per-channel` color mode requires a sync + D2H of each warped channel. Default OFF for backward compatibility.
+- **Frame quality scoring**: `frame_quality.c` computes per-frame FWHM, roundness, background, and composite score from already-available star detection data (convolution map + StarList). FWHM is measured from the Moffat convolution map (matched-filter response), not the raw image — absolute values include kernel width but relative comparison is more robust. Score normalized to reference frame = 100. `--min-quality <fraction>` auto-rejects frames below the threshold (e.g. 0.5 = reject below 50% of reference quality). Quality scoring runs after CCL+CoM, before RANSAC, in both CPU and GPU pipelines. Pure CPU computation — no CUDA kernel needed.
 
 ---
 
@@ -879,12 +954,13 @@ options:
   integration: kappa-sigma     # or mean, median, auto-adaptive
   kappa: 3.0     iterations: 3     batch_size: 16
   star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
-  top_stars: 50     min_stars: 20    min_inliers: 10
+  top_stars: 50     min_stars: 20    min_quality: 0.0    min_inliers: 10
   triangle_iters: 1000     triangle_thresh: 2.0     match_radius: 30.0     match_device: auto
   bayer: auto     bit_depth: f32     tiff_compression: none
   stretch_min: null     stretch_max: null
   white_balance: none     wb_red: 1.0     wb_green: 1.0     wb_blue: 1.0
   save_master_dir: ./master     wsor_clip: 0.1
   calib_kappa: 2.5     calib_iterations: 5
+  bg_calibration: none
   dark_method: winsorized-mean     ...
 ```

@@ -84,6 +84,7 @@ enum {
     OPT_MOFFAT_BETA,
     OPT_TOP_STARS,
     OPT_MIN_STARS,
+    OPT_MIN_QUALITY,
     OPT_RANSAC_ITERS,
     OPT_RANSAC_THRESH,
     OPT_MATCH_RADIUS,
@@ -115,6 +116,8 @@ enum {
     OPT_WB_RED,
     OPT_WB_GREEN,
     OPT_WB_BLUE,
+    /* Background normalization */
+    OPT_BG_CALIBRATION,
     /* Query */
     OPT_LIST_BACKENDS,
 };
@@ -141,6 +144,9 @@ static void usage(const char *prog)
         "      --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)\n"
         "      --top-stars <int>          Top-K stars for matching (default: 50)\n"
         "      --min-stars <int>          Minimum detected stars to attempt alignment (default: 20)\n"
+        "      --min-quality <float>      Auto-reject frames below this fraction of reference\n"
+        "                                 quality (0=disabled, default: 0). E.g. 0.5 rejects\n"
+        "                                 frames scoring below 50%% of reference frame\n"
         "\n"
         "Triangle matching alignment (used only for 2-column CSV input):\n"
         "      --triangle-iters <int>     Max triangle-matching iterations (default: 1000)\n"
@@ -204,6 +210,12 @@ static void usage(const char *prog)
         "      --stretch-min <float>      Lower bound for integer scaling (default: auto)\n"
         "      --stretch-max <float>      Upper bound for integer scaling (default: auto)\n"
         "                                 stretch-min/max are ignored for f16/f32 output\n"
+        "\n"
+        "Background normalization:\n"
+        "      --bg-calibration <mode>    none | per-channel | rgb (default: none)\n"
+        "                                 Normalizes each frame's background to match the\n"
+        "                                 reference before integration.  per-channel treats\n"
+        "                                 R/G/B independently; rgb uses luminance stats.\n"
         "\n",
         prog);
 }
@@ -303,6 +315,7 @@ int main(int argc, char **argv)
         {"moffat-beta",       required_argument, nullptr, OPT_MOFFAT_BETA},
         {"top-stars",         required_argument, nullptr, OPT_TOP_STARS},
         {"min-stars",         required_argument, nullptr, OPT_MIN_STARS},
+        {"min-quality",       required_argument, nullptr, OPT_MIN_QUALITY},
         {"triangle-iters",    required_argument, nullptr, OPT_RANSAC_ITERS},
         {"triangle-thresh",   required_argument, nullptr, OPT_RANSAC_THRESH},
         {"ransac-iters",      required_argument, nullptr, OPT_RANSAC_ITERS},  /* deprecated alias */
@@ -336,6 +349,8 @@ int main(int argc, char **argv)
         {"tiff-compression",  required_argument, nullptr, OPT_TIFF_COMPRESSION},
         {"stretch-min",       required_argument, nullptr, OPT_STRETCH_MIN},
         {"stretch-max",       required_argument, nullptr, OPT_STRETCH_MAX},
+        /* Background normalization */
+        {"bg-calibration",    required_argument, nullptr, OPT_BG_CALIBRATION},
         {"list-backends",     no_argument,       nullptr, OPT_LIST_BACKENDS},
         {nullptr, 0, nullptr, 0}
     };
@@ -356,6 +371,7 @@ int main(int argc, char **argv)
         case OPT_MOFFAT_BETA:  cfg.moffat.beta       = strtof(optarg, nullptr); break;
         case OPT_TOP_STARS:    cfg.top_stars         = atoi(optarg);            break;
         case OPT_MIN_STARS:    cfg.min_stars         = atoi(optarg);            break;
+        case OPT_MIN_QUALITY:  cfg.min_quality       = strtof(optarg, nullptr); break;
 
         case OPT_RANSAC_ITERS:  cfg.ransac.max_iters     = atoi(optarg);             break;
         case OPT_RANSAC_THRESH: cfg.ransac.inlier_thresh  = strtof(optarg, nullptr); break;
@@ -509,6 +525,18 @@ int main(int argc, char **argv)
 
         case OPT_STRETCH_MIN: cfg.save_opts.stretch_min = strtof(optarg, nullptr); break;
         case OPT_STRETCH_MAX: cfg.save_opts.stretch_max = strtof(optarg, nullptr); break;
+
+        case OPT_BG_CALIBRATION:
+            if      (strcmp(optarg, "none")        == 0) cfg.bg_calibration = DSO_BG_NONE;
+            else if (strcmp(optarg, "per-channel") == 0) cfg.bg_calibration = DSO_BG_PER_CHANNEL;
+            else if (strcmp(optarg, "rgb")         == 0) cfg.bg_calibration = DSO_BG_RGB;
+            else {
+                fprintf(stderr,
+                        "Error: unknown --bg-calibration '%s'; "
+                        "use none, per-channel, or rgb\n", optarg);
+                return 1;
+            }
+            break;
 
         case OPT_LIST_BACKENDS: list_backends = true; break;
 

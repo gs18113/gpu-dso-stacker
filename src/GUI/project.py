@@ -28,6 +28,7 @@ _DEFAULT_OPTIONS: dict = {
     "moffat_beta": 2.0,
     "top_stars": 50,
     "min_stars": 20,
+    "min_quality": 0.0,
     "min_inliers": 10,
     "triangle_iters": 1000,
     "triangle_thresh": 2.0,
@@ -51,6 +52,7 @@ _DEFAULT_OPTIONS: dict = {
     "wb_red": 1.0,
     "wb_green": 1.0,
     "wb_blue": 1.0,
+    "bg_calibration": "none",
 }
 
 

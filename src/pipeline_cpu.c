@@ -19,12 +19,14 @@
 
 #include "pipeline.h"
 #include "calibration.h"
+#include "background.h"
 #include "image_io.h"
 #include "fits_io.h"
 #include "frame_load.h"
 #include "white_balance.h"
 #include "debayer_cpu.h"
 #include "star_detect_cpu.h"
+#include "frame_quality.h"
 #include "ransac.h"
 #include "lanczos_cpu.h"
 #include "integration.h"
@@ -200,6 +202,13 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     /* Reference star list kept until all frames are processed */
     StarList  ref_stars  = {NULL, 0};
 
+    /* Frame quality scoring */
+    FrameQuality *frame_qualities  = NULL;
+    int          *quality_indices  = NULL;
+    int          *quality_rejected = NULL;
+    int           quality_count    = 0;
+    FrameQuality  ref_quality;
+
     /* Batch buffers */
     Image       *xformed_r = NULL;
     Image       *xformed_g = NULL;
@@ -207,6 +216,12 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     const Image **ptrs_r   = NULL;
     const Image **ptrs_g   = NULL;
     const Image **ptrs_b   = NULL;
+
+    /* Background normalization reference stats */
+    BgStats ref_bg_r  = {0.0f, 0.0f};
+    BgStats ref_bg_g  = {0.0f, 0.0f};
+    BgStats ref_bg_b  = {0.0f, 0.0f};
+    int     ref_bg_ok = 0;
 
     /* Global accumulators */
     float *global_sum_r   = NULL;
@@ -220,6 +235,14 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     conv_buf = (float   *)malloc((size_t)npix * sizeof(float));
     mask_buf = (uint8_t *)malloc((size_t)npix);
     if (!conv_buf || !mask_buf) { err = DSO_ERR_ALLOC; goto cleanup; }
+
+    frame_qualities  = (FrameQuality *)calloc((size_t)n_frames, sizeof(FrameQuality));
+    quality_indices  = (int *)calloc((size_t)n_frames, sizeof(int));
+    quality_rejected = (int *)calloc((size_t)n_frames, sizeof(int));
+    if (!frame_qualities || !quality_indices || !quality_rejected) {
+        err = DSO_ERR_ALLOC; goto cleanup;
+    }
+    memset(&ref_quality, 0, sizeof(ref_quality));
 
     xformed_r = (Image *)calloc((size_t)batch_size, sizeof(Image));
     ptrs_r    = (const Image **)malloc((size_t)batch_size * sizeof(Image *));
@@ -369,9 +392,45 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
             }
             printf("[Pipeline CPU] Frame %d: %d star(s) detected\n", i, stars.n);
 
+            /* ---- Frame quality scoring ---- */
+            {
+                FrameQuality fq;
+                frame_quality_compute(conv_buf, lum.data, &stars, W, H, &fq);
+                if (i == ref_idx) {
+                    ref_quality = fq;
+                    fq.normalized = 100.0f;
+                } else {
+                    frame_quality_normalize(&fq, ref_quality.composite);
+                }
+                frames[i].quality_score = fq.normalized;
+                frame_qualities[quality_count] = fq;
+                quality_indices[quality_count] = i;
+                quality_rejected[quality_count] = 0;
+                quality_count++;
+                printf("[Pipeline CPU] Frame %d: quality=%.1f "
+                       "(FWHM=%.2f round=%.3f bg=%.1f stars=%d)\n",
+                       i, fq.normalized, fq.fwhm, fq.roundness,
+                       fq.background, fq.star_count);
+            }
+
             if (i == ref_idx) {
                 ref_stars = stars;
             } else {
+                /* ---- Quality-based rejection ---- */
+                if (config->min_quality > 0.0f &&
+                    frames[i].quality_score < config->min_quality * 100.0f) {
+                    fprintf(stderr,
+                            "pipeline_cpu: skipping frame %d/%d "
+                            "(csv index=%d, path=%s): quality %.1f below threshold %.1f\n",
+                            pos + 1, n_frames, i + 1, frames[i].filepath,
+                            frames[i].quality_score, config->min_quality * 100.0f);
+                    quality_rejected[quality_count - 1] = 1;
+                    free(stars.stars); image_free(&lum);
+                    if (color) image_free(&raw);
+                    skipped_frames++;
+                    err = DSO_OK;
+                    continue;
+                }
                 /* ---- Triangle matching against reference ---- */
                 if (stars.n < config->min_stars ||
                     ref_stars.n < config->min_stars) {
@@ -463,6 +522,39 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                 free(order); goto cleanup;
             }
 
+            /* ---- Background normalization ---- */
+            if (config->bg_calibration != DSO_BG_NONE) {
+                if (!ref_bg_ok) {
+                    /* Reference frame (always first): store stats */
+                    bg_compute_stats(xformed_r[slot].data, npix, &ref_bg_r);
+                    if (color && config->bg_calibration == DSO_BG_PER_CHANNEL) {
+                        bg_compute_stats(xformed_g[slot].data, npix, &ref_bg_g);
+                        bg_compute_stats(xformed_b[slot].data, npix, &ref_bg_b);
+                    }
+                    ref_bg_ok = 1;
+                    printf("[Pipeline CPU] Bg-norm ref: bg=%.2f scale=%.4f\n",
+                           (double)ref_bg_r.background, (double)ref_bg_r.scale);
+                } else {
+                    /* Non-reference: normalize to match reference */
+                    BgStats fs;
+                    bg_compute_stats(xformed_r[slot].data, npix, &fs);
+                    bg_normalize_cpu(xformed_r[slot].data, npix, &fs, &ref_bg_r);
+                    if (color) {
+                        if (config->bg_calibration == DSO_BG_PER_CHANNEL) {
+                            BgStats gs, bs;
+                            bg_compute_stats(xformed_g[slot].data, npix, &gs);
+                            bg_compute_stats(xformed_b[slot].data, npix, &bs);
+                            bg_normalize_cpu(xformed_g[slot].data, npix, &gs, &ref_bg_g);
+                            bg_normalize_cpu(xformed_b[slot].data, npix, &bs, &ref_bg_b);
+                        } else {
+                            /* RGB mode: same stats for all channels */
+                            bg_normalize_cpu(xformed_g[slot].data, npix, &fs, &ref_bg_r);
+                            bg_normalize_cpu(xformed_b[slot].data, npix, &fs, &ref_bg_r);
+                        }
+                    }
+                }
+            }
+
             batch_n++;
             successful_frames++;
 
@@ -548,11 +640,18 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
         }
     }
 
-    if (err == DSO_OK)
+    if (err == DSO_OK) {
+        if (quality_count > 0)
+            frame_quality_print_table(frame_qualities, quality_indices,
+                                      quality_rejected, quality_count);
         printf("pipeline_cpu: done. successful frames: %d/%d (skipped: %d)\n",
                successful_frames, n_frames, skipped_frames);
+    }
 
 cleanup:
+    free(frame_qualities);
+    free(quality_indices);
+    free(quality_rejected);
     free(ref_stars.stars);
     free(conv_buf);
     free(mask_buf);

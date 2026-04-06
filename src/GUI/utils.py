@@ -174,6 +174,8 @@ def build_command(
     argv += ["--moffat-beta",   str(opts["moffat_beta"])]
     argv += ["--top-stars",     str(opts["top_stars"])]
     argv += ["--min-stars",     str(opts["min_stars"])]
+    if opts.get("min_quality", 0.0) > 0:
+        argv += ["--min-quality", str(opts["min_quality"])]
 
     # --- triangle matching ---
     argv += ["--triangle-iters",  str(opts["triangle_iters"])]
@@ -209,6 +211,11 @@ def build_command(
     if "kappa-sigma" in calib_methods:
         argv += ["--calib-kappa", str(opts.get("calib_kappa", 2.5))]
         argv += ["--calib-iterations", str(opts.get("calib_iterations", 5))]
+
+    # --- background normalization ---
+    bg = opts.get("bg_calibration", "none")
+    if bg != "none":
+        argv += ["--bg-calibration", bg]
 
     # --- sensor ---
     if opts.get("bayer", "auto") != "auto":
