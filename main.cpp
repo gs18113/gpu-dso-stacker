@@ -118,6 +118,10 @@ enum {
     OPT_WB_BLUE,
     /* Background normalization */
     OPT_BG_CALIBRATION,
+    /* LM centroid refinement */
+    OPT_LM_CENTROID,
+    OPT_LM_RADIUS,
+    OPT_LM_ITERATIONS,
     /* Query */
     OPT_LIST_BACKENDS,
 };
@@ -147,6 +151,12 @@ static void usage(const char *prog)
         "      --min-quality <float>      Auto-reject frames below this fraction of reference\n"
         "                                 quality (0=disabled, default: 0). E.g. 0.5 rejects\n"
         "                                 frames scoring below 50%% of reference frame\n"
+        "\n"
+        "Centroid refinement:\n"
+        "      --lm-centroid              Enable Levenberg-Marquardt Gaussian centroid\n"
+        "                                 fitting (default: off, uses center-of-mass)\n"
+        "      --lm-radius <float>        LM fitting window radius in pixels (default: 8.0)\n"
+        "      --lm-iterations <int>      Max LM iterations per star (default: 15)\n"
         "\n"
         "Triangle matching alignment (used only for 2-column CSV input):\n"
         "      --triangle-iters <int>     Max triangle-matching iterations (default: 1000)\n"
@@ -288,6 +298,10 @@ int main(int argc, char **argv)
     cfg.save_opts.bit_depth     = OUT_BITS_FP32;
     cfg.save_opts.stretch_min   = (float)NAN;
     cfg.save_opts.stretch_max   = (float)NAN;
+    /* LM centroid defaults */
+    cfg.use_lm_centroid = 0;
+    cfg.lm_fit_radius   = 8.0f;
+    cfg.lm_max_iter     = 15;
 
     /* Calibration defaults */
     const char *dark_path        = nullptr;
@@ -351,6 +365,10 @@ int main(int argc, char **argv)
         {"stretch-max",       required_argument, nullptr, OPT_STRETCH_MAX},
         /* Background normalization */
         {"bg-calibration",    required_argument, nullptr, OPT_BG_CALIBRATION},
+        /* LM centroid refinement */
+        {"lm-centroid",       no_argument,       nullptr, OPT_LM_CENTROID},
+        {"lm-radius",         required_argument, nullptr, OPT_LM_RADIUS},
+        {"lm-iterations",     required_argument, nullptr, OPT_LM_ITERATIONS},
         {"list-backends",     no_argument,       nullptr, OPT_LIST_BACKENDS},
         {nullptr, 0, nullptr, 0}
     };
@@ -537,6 +555,10 @@ int main(int argc, char **argv)
                 return 1;
             }
             break;
+
+        case OPT_LM_CENTROID:    cfg.use_lm_centroid = 1;                   break;
+        case OPT_LM_RADIUS:      cfg.lm_fit_radius = strtof(optarg, nullptr); break;
+        case OPT_LM_ITERATIONS:  cfg.lm_max_iter = atoi(optarg);              break;
 
         case OPT_LIST_BACKENDS: list_backends = true; break;
 

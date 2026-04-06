@@ -100,6 +100,7 @@ Metal 가속이 필요 없으면 URL에서 `metal`을 `cpu`로 변경하세요.
 |---|---|---|
 | 1. 디베이어링 (별 검출) | VNG 디모자이크 → 휘도 (CUDA 커널) | VNG 디모자이크 → 휘도 (OpenMP) |
 | 2. 별 검출 | Moffat PSF 컨볼루션 + 임계값 (CUDA) | Moffat PSF 컨볼루션 + 임계값 (OpenMP) |
+| 2b. 중심점 정밀화 (선택) | LM 가우시안 피팅 (GPU 워프-별 단위) | LM 가우시안 피팅 (OpenMP) |
 | 3. 삼각형 매칭 정렬 | 삼각형/별자리 매칭 + DLT (`--match-device`로 CPU/GPU 선택; 기본값은 스태킹 장치를 따름) | 삼각형/별자리 매칭 + DLT (`--cpu` 사용 시 기본 CPU) |
 | 4. 디베이어링 (워프) | VNG 디모자이크 → 휘도 **또는 R/G/B** | VNG 디모자이크 → 휘도 **또는 R/G/B** |
 | 5. Lanczos 워프 | nppiRemap + 좌표맵 커널 (CUDA) | 6-탭 역방향 매핑 워프 (OpenMP) |
@@ -246,6 +247,12 @@ I/O:
       --top-stars <int>          매칭용 Top-K 별 (기본값: 50)
       --min-stars <int>          삼각형 매칭을 위한 최소 별 수 (기본값: 6)
       --min-quality <float>      기준 프레임 대비 최소 품질 비율 (0=비활성, 기본값: 0)
+
+중심점 정밀화:
+      --lm-centroid              Levenberg-Marquardt 가우시안 중심점 피팅 활성화
+                                 (기본값: 비활성, 무게중심 사용)
+      --lm-radius <float>        LM 피팅 윈도우 반경 (픽셀, 기본값: 8.0)
+      --lm-iterations <int>      별당 최대 LM 반복 횟수 (기본값: 15)
 
 삼각형 매칭 (2열 CSV 전용):
       --triangle-iters <int>     최대 삼각형 매칭 반복 횟수 (기본값: 1000)

@@ -381,7 +381,7 @@ cmake --build build --parallel
       </div>
       <div class="feature-card">
         <h3>Automatic Star Alignment</h3>
-        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Triangle-matching + DLT computes a full homography &mdash; no manual reference or pre-computed transforms required. Per-frame quality scoring (FWHM, roundness, star count) with optional automatic rejection of poor sub-frames.</p>
+        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Optional Levenberg-Marquardt Gaussian centroid fitting refines positions to ~0.01-0.05 pixel accuracy. Triangle-matching + DLT computes a full homography &mdash; no manual reference or pre-computed transforms required. Per-frame quality scoring (FWHM, roundness, star count) with optional automatic rejection of poor sub-frames.</p>
       </div>
       <div class="feature-card">
         <h3>RAW Camera File Support</h3>
@@ -574,6 +574,11 @@ python src/GUI/main.py</pre>
             <td>2</td><td><strong>Star Detection</strong></td>
             <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-cuda">CUDA</span></td>
             <td>Moffat PSF conv + &sigma; threshold <span class="pipe-tag tag-omp">OpenMP</span></td>
+          </tr>
+          <tr>
+            <td>2b</td><td><strong>Centroid Refinement</strong> (optional)</td>
+            <td>LM Gaussian fitting <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>LM Gaussian fitting <span class="pipe-tag tag-omp">OpenMP</span></td>
           </tr>
           <tr>
             <td>3</td><td><strong>Alignment</strong></td>

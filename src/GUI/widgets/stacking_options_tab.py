@@ -25,6 +25,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -80,6 +81,9 @@ class StackingOptionsTab(QWidget):
             "top_stars":        self._top_stars_spin.value(),
             "min_stars":        self._min_stars_spin.value(),
             "min_quality":      self._min_quality_spin.value(),
+            "lm_centroid":      self._lm_centroid_check.isChecked(),
+            "lm_radius":        self._lm_radius_spin.value(),
+            "lm_iterations":    self._lm_iterations_spin.value(),
             "min_inliers":      self._min_inliers_spin.value(),
             "triangle_iters":   self._triangle_iters_spin.value(),
             "triangle_thresh":  self._triangle_thresh_spin.value(),
@@ -125,6 +129,9 @@ class StackingOptionsTab(QWidget):
         self._top_stars_spin.setValue(         opts.get("top_stars", 50))
         self._min_stars_spin.setValue(         opts.get("min_stars", 20))
         self._min_quality_spin.setValue(      opts.get("min_quality", 0.0))
+        self._lm_centroid_check.setChecked(  opts.get("lm_centroid", False))
+        self._lm_radius_spin.setValue(       opts.get("lm_radius", 8.0))
+        self._lm_iterations_spin.setValue(   opts.get("lm_iterations", 15))
         self._min_inliers_spin.setValue(      opts.get("min_inliers", 10))
         self._triangle_iters_spin.setValue(    opts.get("triangle_iters", opts.get("ransac_iters", 1000)))
         self._triangle_thresh_spin.setValue(   opts.get("triangle_thresh", opts.get("ransac_thresh", 2.0)))
@@ -267,6 +274,23 @@ class StackingOptionsTab(QWidget):
         form.addRow("Top-K stars:",       self._top_stars_spin)
         form.addRow("Min stars (detection gate):", self._min_stars_spin)
         form.addRow("Min quality (0=off):", self._min_quality_spin)
+
+        self._lm_centroid_check = QCheckBox("LM Gaussian centroid fitting")
+        self._lm_centroid_check.setToolTip(
+            "Refine star centroids with Levenberg-Marquardt Gaussian fitting.\n"
+            "Achieves ~5x better precision than center-of-mass (default: off)."
+        )
+        self._lm_centroid_check.stateChanged.connect(self._update_visibility)
+        form.addRow("", self._lm_centroid_check)
+
+        self._lm_radius_lbl = QLabel("LM radius (px):")
+        self._lm_radius_spin = _dbl_spin(2.0, 20.0, 8.0, 1, 1.0)
+        form.addRow(self._lm_radius_lbl, self._lm_radius_spin)
+
+        self._lm_iterations_lbl = QLabel("LM iterations:")
+        self._lm_iterations_spin = _int_spin(1, 50, 15)
+        form.addRow(self._lm_iterations_lbl, self._lm_iterations_spin)
+
         return box
 
     def _build_ransac_group(self) -> QGroupBox:
@@ -524,6 +548,13 @@ class StackingOptionsTab(QWidget):
         self._wb_green_spin.setVisible(is_manual_wb)
         self._wb_blue_lbl.setVisible(is_manual_wb)
         self._wb_blue_spin.setVisible(is_manual_wb)
+
+        # LM centroid params: only when checkbox is checked
+        is_lm = self._lm_centroid_check.isChecked()
+        self._lm_radius_lbl.setVisible(is_lm)
+        self._lm_radius_spin.setVisible(is_lm)
+        self._lm_iterations_lbl.setVisible(is_lm)
+        self._lm_iterations_spin.setVisible(is_lm)
 
     def _update_bit_depth_items(self, fmt: str) -> None:
         """Enable/disable bit-depth combo items according to output format.

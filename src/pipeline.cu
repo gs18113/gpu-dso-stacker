@@ -39,6 +39,7 @@
 #include "debayer_gpu.h"
 #include "star_detect_gpu.h"
 #include "star_detect_cpu.h"
+#include "centroid_lm_gpu.h"
 #include "frame_quality.h"
 #include "ransac.h"
 #include "ransac_gpu.h"
@@ -421,6 +422,16 @@ static DsoError phase_detect_warp_integrate(
                    cleanup, fi->filepath);
         printf("[Pipeline] Frame %d/%d: %d star(s) — %s\n",
                pos + 1, n_frames, stars.n, fi->filepath);
+
+        /* ---- Optional LM centroid refinement ---- */
+        if (config->use_lm_centroid && stars.n > 0) {
+            centroid_lm_refine_gpu(&stars, d_lum, W, H,
+                                    config->moffat.alpha * 0.8f,
+                                    config->lm_fit_radius, config->lm_max_iter,
+                                    stream_compute);
+            printf("[Pipeline] Frame %d/%d: LM centroid refinement applied\n",
+                   pos + 1, n_frames);
+        }
 
         /* ---- Frame quality scoring ---- */
         {

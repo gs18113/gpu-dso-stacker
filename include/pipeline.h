@@ -66,6 +66,11 @@ typedef struct {
     float        min_quality;     /* auto-reject below this fraction of ref quality;
                                       0 = disabled (default). E.g. 0.5 = reject < 50% */
 
+    /* --- LM centroid refinement --- */
+    int          use_lm_centroid; /* 0 = CoM only (default), 1 = LM Gaussian refine   */
+    float        lm_fit_radius;  /* fitting window half-size in pixels (default: 8.0)  */
+    int          lm_max_iter;    /* max LM iterations per star (default: 15)           */
+
     /* --- RANSAC --- */
     RansacParams ransac;          /* {max_iters=1000, inlier_thresh=2.0,
                                       match_radius=30.0, confidence=0.99,
