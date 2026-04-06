@@ -232,7 +232,7 @@ I/O:
 
 적분:
       --cpu                      모든 파이프라인 단계를 CPU에서 실행 (OpenMP 가속)
-      --integration <method>     mean | kappa-sigma | median (기본값: kappa-sigma)
+      --integration <method>     mean | kappa-sigma | median | auto-adaptive (기본값: kappa-sigma)
       --kappa <float>            시그마 클리핑 임계값 (기본값: 3.0)
       --iterations <int>         픽셀당 최대 클리핑 반복 횟수 (기본값: 3)
       --batch-size <int>         GPU 적분 미니배치 크기 (기본값: 16)
@@ -243,6 +243,7 @@ I/O:
       --moffat-beta <float>      Moffat PSF beta / 날개 기울기 (기본값: 2.0)
       --top-stars <int>          매칭용 Top-K 별 (기본값: 50)
       --min-stars <int>          삼각형 매칭을 위한 최소 별 수 (기본값: 6)
+      --min-quality <float>      기준 프레임 대비 최소 품질 비율 (0=비활성, 기본값: 0)
 
 삼각형 매칭 (2열 CSV 전용):
       --triangle-iters <int>     최대 삼각형 매칭 반복 횟수 (기본값: 1000)

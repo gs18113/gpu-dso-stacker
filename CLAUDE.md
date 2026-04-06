@@ -66,6 +66,7 @@ gpu-dso-stacker/
 │   ├── debayer_gpu.h            ← VNG debayer → luminance or RGB planes (GPU, h2h and d2d)
 │   ├── star_detect_gpu.h        ← Moffat convolution + sigma threshold (GPU, h2h and d2d)
 │   ├── star_detect_cpu.h        ← Moffat conv + threshold + CCL + CoM (CPU)
+│   ├── frame_quality.h          ��� Per-frame quality scoring (FWHM, roundness, background)
 │   ├── ransac.h                 ← DLT homography + RANSAC alignment
 │   ├── integration_gpu.h        ← GPU mini-batch kappa-sigma context + API
 │   ├── calibration.h            ← CalibFrames, CalibMethod, calib_load_or_generate, calib_apply_cpu
@@ -88,6 +89,7 @@ gpu-dso-stacker/
 │   ├── raw_io.c                 ← LibRaw wrapper: load RAW as float32 Bayer mosaic
 │   ├── frame_load.c             ← Extension-based dispatch to fits_io or raw_io
 │   ├── star_detect_cpu.c        ← Moffat conv + threshold (OpenMP) + CCL + CoM
+│   ├── frame_quality.c          ← Per-frame quality scoring (FWHM, roundness, composite score)
 │   ├── ransac.c                 ← Jacobi eigendecomp DLT + RANSAC loop
 │   ├── integration_gpu.cu       ← Mini-batch kappa-sigma + finalize kernels
 │   ├── calibration.c            ← Master frame generation (winsorized mean / median) + CPU apply
@@ -106,6 +108,7 @@ gpu-dso-stacker/
 │   ├── test_cpu.c               ← 42 tests: CSV, FITS, integration (mean, kappa-sigma, median), Lanczos CPU
 │   ├── test_gpu.cu              ← 5 tests: GPU Lanczos (all passing)
 │   ├── test_star_detect.c       ← 21 tests: CCL + CoM + Moffat conv + threshold
+│   ├── test_frame_quality.c     ← 9 tests: FWHM, roundness, background, composite scoring
 │   ├── test_ransac.c            ← 13 tests: DLT + RANSAC
 │   ├── test_debayer_cpu.c       ← 10 tests: VNG debayer CPU (all patterns + edge cases)
 │   ├── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
@@ -229,7 +232,7 @@ I/O:
 Integration:
       --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)
       --backend <backend>        auto | cpu | cuda | metal (default: auto)
-      --integration <method>     mean | kappa-sigma | median (default: kappa-sigma)
+      --integration <method>     mean | kappa-sigma | median | auto-adaptive (default: kappa-sigma)
       --kappa <float>            Sigma clipping threshold (default: 3.0)
       --iterations <int>         Max clipping passes per pixel (default: 3)
       --batch-size <int>         GPU integration mini-batch size (default: 16)
@@ -240,6 +243,7 @@ Star detection (2-column CSV only):
       --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
       --top-stars <int>          Top-K stars for matching (default: 50)
       --min-stars <int>          Minimum detected stars to attempt alignment (default: 20)
+      --min-quality <float>      Min quality as fraction of reference (0=disabled, default: 0)
 
 Triangle matching (2-column CSV only):
       --triangle-iters <int>     Max triangle-matching iterations (default: 1000)
@@ -299,7 +303,9 @@ filepath, is_reference
 ```c
 typedef struct { double h[9]; }  Homography;   // row-major 3x3, backward map (ref → src)
 typedef struct { float *data; int width; int height; } Image;  // row-major float32
-typedef struct { char filepath[4096]; int is_reference; Homography H; } FrameInfo;
+typedef struct { char filepath[4096]; int is_reference; Homography H;
+                 int width; int height; int pattern;
+                 float quality_score; } FrameInfo;
 typedef struct { float x, y, flux; } StarPos;  // sub-pixel CoM position + integrated flux
 typedef struct { StarPos *stars; int n; } StarList;  // heap-alloc'd, caller must free()
 typedef struct { float alpha; float beta; } MoffatParams;  // Moffat PSF params (default: 2.5, 2.0)
@@ -391,10 +397,11 @@ Per-frame device allocations (d_src, d_dst, d_xmap, d_ymap) are freed inside the
 DsoError integrate_mean(const Image **frames, int n, Image *out);
 DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
                                 float kappa, int iterations);
+DsoError integrate_aawa(const Image **frames, int n, Image *out);
 ```
 
 All frames must be the same size. `out->data` is heap-allocated; free with `image_free()`.
-Kappa-sigma uses two-pass Bessel-corrected stddev per iteration; degenerate pixels (all clipped) fall back to unclipped mean. Both `integrate_mean` and `integrate_kappa_sigma` skip NaN-valued pixels (OOB sentinel from Lanczos warp) and output NAN when all frames are NaN at a pixel.
+Kappa-sigma uses two-pass Bessel-corrected stddev per iteration; degenerate pixels (all clipped) fall back to unclipped mean. All three methods skip NaN-valued pixels (OOB sentinel from Lanczos warp) and output NAN when all frames are NaN at a pixel. `integrate_aawa` uses Stetson (1989) Auto Adaptive Weighted Average: iteratively computes weighted mean with `w[i] = 1/(1+(|r|/α)²)` (α=2.0), converging when |Δμ|/|μ| < 1e-6 or after 10 iterations. All accumulations use `double` precision.
 
 `integrate_median`: Per-pixel median over all frames. Collects all non-NaN values, sorts them (insertion sort), and returns the middle value (or average of the two middle values for even counts). Naturally resistant to outliers without any tuning parameters.
 
@@ -458,6 +465,32 @@ DsoError star_detect_cpu_ccl_com(const uint8_t *mask, const float *original,
 `threshold`: double-precision Bessel-corrected σ via `reduction(+:)`, then parallel mask write.
 `ccl_com`: two-pass 8-connectivity union-find; not parallelized (raster scan has data dependencies). After Pass 2, a label re-mapping pass compacts sparse root labels to contiguous `[1, n_unique]`, so `CompStats` is allocated as `calloc(n_unique+1)` (O(n_stars)) rather than `calloc(npix+1)` (O(pixels)).
 
+### `frame_quality.h`
+
+```c
+typedef struct {
+    float fwhm;        /* median FWHM across detected stars (pixels) */
+    float roundness;   /* median min(fwhm_x,fwhm_y)/max(fwhm_x,fwhm_y), 1.0=circular */
+    float background;  /* sigma-clipped mean of luminance image */
+    int   star_count;  /* number of detected stars */
+    float composite;   /* raw composite score (before normalization) */
+    float normalized;  /* score normalized so reference = 100.0 */
+} FrameQuality;
+
+DsoError frame_quality_compute(const float *conv_data, const float *lum_data,
+                               const StarList *stars, int W, int H,
+                               FrameQuality *quality_out);
+void frame_quality_normalize(FrameQuality *q, float ref_composite);
+void frame_quality_print_table(const FrameQuality *qualities,
+                               const int *frame_indices, const int *rejected, int n);
+```
+
+- `frame_quality_compute`: FWHM estimated from the Moffat convolution map via 4-direction radial profile per star (walk outward until half-max crossing, linear interpolation). Roundness = min(FWHM_x, FWHM_y) / max(FWHM_x, FWHM_y) per star. Both metrics are median across all detected stars. Background via 3-iteration 3σ-clipped mean of the luminance image.
+- Composite score: `roundness * log2(1 + star_count) / (fwhm * (1 + 0.001 * background))`. Rewards more stars, rounder stars, tighter FWHM, lower background.
+- `frame_quality_normalize`: scales composite so reference frame = 100.0.
+- `frame_quality_print_table`: prints a summary table with FWHM, roundness, star count, and normalized score for each frame, with `[SKIPPED]` tag for quality-rejected frames.
+- Pure C, no CUDA dependency. Called after CCL+CoM and before RANSAC in both pipelines.
+
 ### `ransac.h`
 
 ```c
@@ -482,11 +515,12 @@ DsoError integration_gpu_process_batch(IntegrationGpuCtx *ctx, int M,
                                         float kappa, int iterations, cudaStream_t stream);
 DsoError integration_gpu_process_batch_mean(IntegrationGpuCtx *ctx, int M, cudaStream_t stream);
 DsoError integration_gpu_process_batch_median(IntegrationGpuCtx *ctx, int M, cudaStream_t stream);
+DsoError integration_gpu_process_batch_aawa(IntegrationGpuCtx *ctx, int M, cudaStream_t stream);
 DsoError integration_gpu_finalize(IntegrationGpuCtx *ctx, int n_frames,
                                    Image *out, cudaStream_t stream);
 ```
 
-`IntegrationGpuCtx` is now a **public** struct (in the header) exposing `d_frames[]`, `d_xmap`, `d_ymap` so `pipeline.cu` can fill frames without extra indirection. Mini-batch approximation: per-batch kappa-sigma combined with survivor-count-weighted mean across batches. All-clipped fallback uses raw (unclipped) per-pixel sum.
+`IntegrationGpuCtx` is now a **public** struct (in the header) exposing `d_frames[]`, `d_xmap`, `d_ymap` so `pipeline.cu` can fill frames without extra indirection. Mini-batch approximation: per-batch kappa-sigma / AAWA combined with survivor-count-weighted mean across batches. All-clipped fallback uses raw (unclipped) per-pixel sum. `integration_gpu_process_batch_aawa` runs the Stetson (1989) iterative weighted average per pixel (max 10 iterations, α=2.0) entirely in registers, using `double` accumulations.
 
 `integration_gpu_process_batch_median`: Mini-batch median approximation. Each pixel sorts its M non-NaN values in registers (insertion sort) and computes the median. The per-batch median is accumulated weighted by n_valid into the persistent buffers. Note: this is an approximation — a true global median requires all N frames simultaneously.
 
@@ -637,6 +671,7 @@ typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGR
   - `lanczos_cpu`: `schedule(static)` on outer `dy` row loop.
   - `integrate_mean`: pixel-outer loop (restructured from frame-outer) — `schedule(static)`.
   - `integrate_kappa_sigma`: `schedule(dynamic, 64)` — per-thread heap slabs `all_vals` / `all_actv` (size `max_threads × n`, allocated once before the parallel region, indexed by `omp_get_thread_num() * n`). No VLAs.
+  - `integrate_aawa`: `schedule(dynamic, 64)` — per-thread heap slabs `all_vals` (float) / `all_wts` (double) (size `max_threads × n`). Same workspace pattern as kappa-sigma.
   - `star_detect_cpu_ccl_com` (CCL pass): **not parallelized** — union-find raster scan has cross-pixel data dependencies.
 - **C goto rule (C11 and C++17)**: variables that appear between a `goto` source and its label must be declared before the first `goto`. In `pipeline_cpu.c`, all variables are declared at the top of each function; error paths use explicit `image_free()` before `goto cleanup` rather than a PIPE_CHECK macro, to avoid jumping over initializers.
 - **Row steps for NPP**: all row steps are `width * sizeof(float)` (row-major float32).
@@ -655,6 +690,7 @@ typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGR
 - **`lanczos_transform_gpu` singular-H guard**: checks `det(H) < 1e-12` before any CUDA allocation and returns `DSO_ERR_INVALID_ARG`.
 - **GPU kappa-sigma variance uses `double`**: `kappa_sigma_batch_kernel` accumulates squared deviations into `double sq` (not `float`). For pixel values up to 65535 and batch size 64, max sq ≈ 2.75×10¹¹ exceeds float precision; using double matches the CPU `integrate_kappa_sigma` implementation.
 - **Mini-batch median approximation**: `integration_gpu_process_batch_median` computes a per-batch median and accumulates it weighted by valid-frame count. The finalize kernel produces a weighted average of per-batch medians. This is an approximation of the true global median (which would require all N frames in memory simultaneously). For typical astronomical data with batch sizes of 16-32, the approximation is good. The same architectural limitation applies to kappa-sigma.
+- **AAWA (Auto Adaptive Weighted Average)**: Adapted from Stetson (1989). Uses Stetson weight function `w[i] = 1/(1+(|r[i]|/α)²)` with α=2.0. Converges when `|Δμ|/max(|μ|,1e-10) < 1e-6` or after 10 iterations. Values 2σ from the mean get weight ≈0.2 (vs. hard rejection in kappa-sigma). All accumulations use `double`. GPU mini-batch approximation: per-batch AAWA result weighted by valid frame count, combined across batches in `finalize_kernel`. Integration method is selected via `IntegrationMethod` enum in `PipelineConfig` (`DSO_INTEGRATE_MEAN`, `DSO_INTEGRATE_KAPPA_SIGMA`, `DSO_INTEGRATE_MEDIAN`, `DSO_INTEGRATE_AAWA`).
 - **Synthetic RANSAC stress tests**: `test/star_coords_generator.{h,c}` generates deterministic synthetic star lists (shared inlier transform + independent outliers); `tests/test_ransac.c` uses it for seed sweeps and high-outlier scenarios, and `test_ransac` target links the generator directly in `CMakeLists.txt`.
 - **Calibration formula**: `light_cal = (light - dark_master) / flat_master`. Applied before debayering. With bias: `dark_master = stack(dark_raw - bias)`, `flat_master = stack(normalize(flat_raw - bias))`. With darkflat: `dark_master = stack(dark_raw)`, `flat_master = stack(normalize(flat_raw - darkflat))`. Bias and darkflat are mutually exclusive.
 - **Winsorized mean (γ=0.1)**: Sort N pixel values per pixel; replace bottom `g = floor(0.1·N)` values with `vals[g]` and top g with `vals[N-1-g]`; compute mean using `double` accumulator to prevent overflow for N·(65535)² accumulations. Insertion sort used for per-pixel sort (N typically < 100).
@@ -677,6 +713,7 @@ typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGR
 - **`frame_load` dispatch layer**: all pipeline call sites (`pipeline_cpu.c`, `pipeline.cu`, `main.cpp`, `calibration.c`) use `frame_load`/`frame_get_bayer_pattern`/`frame_get_dimensions` instead of calling `fits_load` directly. The dispatch layer checks file extension via `frame_is_raw()` and routes to `raw_*` or `fits_*`. When `DSO_HAS_LIBRAW=0`, RAW paths return `DSO_ERR_IO` with a diagnostic message.
 - **Calibration RAW support**: `calibration.c` uses `is_image_file()` (checks both FITS and RAW extensions) instead of `is_fits_file()` for the master-vs-framelist decision, and `frame_load()` for loading individual frames.
 - **Background normalization** (`--bg-calibration`): optional per-frame background matching applied after Lanczos warp and before integration. Uses stride-16 subsampling for efficient median/MAD computation (~1M samples for a 16 MP image). The constant 1.4826 converts MAD to σ for Gaussian distributions. Two modes: `per-channel` (R/G/B independently — handles coloured light pollution) and `rgb` (luminance-based stats for all channels — preserves colour ratios). In the GPU path, `rgb` mode uses the existing `lum_host` buffer (no extra D2H); `per-channel` color mode requires a sync + D2H of each warped channel. Default OFF for backward compatibility.
+- **Frame quality scoring**: `frame_quality.c` computes per-frame FWHM, roundness, background, and composite score from already-available star detection data (convolution map + StarList). FWHM is measured from the Moffat convolution map (matched-filter response), not the raw image — absolute values include kernel width but relative comparison is more robust. Score normalized to reference frame = 100. `--min-quality <fraction>` auto-rejects frames below the threshold (e.g. 0.5 = reject below 50% of reference quality). Quality scoring runs after CCL+CoM, before RANSAC, in both CPU and GPU pipelines. Pure CPU computation — no CUDA kernel needed.
 
 ---
 
@@ -876,10 +913,10 @@ bias_frames:    { method: winsorized-mean, files: [] }
 darkflat_frames: { method: winsorized-mean, files: [] }
 options:
   output_path: output.fits     use_cpu: false
-  integration: kappa-sigma   # or mean, median
+  integration: kappa-sigma     # or mean, median, auto-adaptive
   kappa: 3.0     iterations: 3     batch_size: 16
   star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
-  top_stars: 50     min_stars: 20    min_inliers: 10
+  top_stars: 50     min_stars: 20    min_quality: 0.0    min_inliers: 10
   triangle_iters: 1000     triangle_thresh: 2.0     match_radius: 30.0     match_device: auto
   bayer: auto     bit_depth: f32     tiff_compression: none
   stretch_min: null     stretch_max: null

@@ -79,6 +79,7 @@ class StackingOptionsTab(QWidget):
             "moffat_beta":      self._moffat_beta_spin.value(),
             "top_stars":        self._top_stars_spin.value(),
             "min_stars":        self._min_stars_spin.value(),
+            "min_quality":      self._min_quality_spin.value(),
             "min_inliers":      self._min_inliers_spin.value(),
             "triangle_iters":   self._triangle_iters_spin.value(),
             "triangle_thresh":  self._triangle_thresh_spin.value(),
@@ -119,6 +120,7 @@ class StackingOptionsTab(QWidget):
         self._moffat_beta_spin.setValue(       opts.get("moffat_beta", 2.0))
         self._top_stars_spin.setValue(         opts.get("top_stars", 50))
         self._min_stars_spin.setValue(         opts.get("min_stars", 20))
+        self._min_quality_spin.setValue(      opts.get("min_quality", 0.0))
         self._min_inliers_spin.setValue(      opts.get("min_inliers", 10))
         self._triangle_iters_spin.setValue(    opts.get("triangle_iters", opts.get("ransac_iters", 1000)))
         self._triangle_thresh_spin.setValue(   opts.get("triangle_thresh", opts.get("ransac_thresh", 2.0)))
@@ -221,7 +223,7 @@ class StackingOptionsTab(QWidget):
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self._integration_combo = QComboBox()
-        self._integration_combo.addItems(["kappa-sigma", "mean", "median"])
+        self._integration_combo.addItems(["kappa-sigma", "mean", "median", "auto-adaptive"])
         form.addRow("Method:", self._integration_combo)
 
         self._kappa_spin     = _dbl_spin(0.1, 20.0, 3.0, 1, 0.1)
@@ -244,12 +246,18 @@ class StackingOptionsTab(QWidget):
         self._moffat_beta_spin   = _dbl_spin(0.1, 10.0, 2.0, 1, 0.1)
         self._top_stars_spin     = _int_spin(3, 500, 50)
         self._min_stars_spin     = _int_spin(3, 100, 20)
+        self._min_quality_spin   = _dbl_spin(0.0, 1.0, 0.0, 2, 0.05)
+        self._min_quality_spin.setToolTip(
+            "Auto-reject frames scoring below this fraction of reference quality.\n"
+            "0 = disabled (default). 0.5 = reject frames below 50% of ref quality."
+        )
 
         form.addRow("Star sigma (σ):",   self._star_sigma_spin)
         form.addRow("Moffat alpha:",      self._moffat_alpha_spin)
         form.addRow("Moffat beta:",       self._moffat_beta_spin)
         form.addRow("Top-K stars:",       self._top_stars_spin)
         form.addRow("Min stars (detection gate):", self._min_stars_spin)
+        form.addRow("Min quality (0=off):", self._min_quality_spin)
         return box
 
     def _build_ransac_group(self) -> QGroupBox:

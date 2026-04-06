@@ -15,7 +15,7 @@
  *
  * Options (integration):
  *       --cpu                        Run ALL pipeline stages on CPU (default: GPU)
- *       --integration <method>       mean | kappa-sigma (default: kappa-sigma)
+ *       --integration <method>       mean | kappa-sigma | median | auto-adaptive (default: kappa-sigma)
  *       --kappa <float>              Sigma multiplier for clipping (default: 3.0)
  *       --iterations <int>           Max clipping iterations (default: 3)
  *       --batch-size <int>           GPU integration mini-batch size (default: 16)
@@ -84,6 +84,7 @@ enum {
     OPT_MOFFAT_BETA,
     OPT_TOP_STARS,
     OPT_MIN_STARS,
+    OPT_MIN_QUALITY,
     OPT_RANSAC_ITERS,
     OPT_RANSAC_THRESH,
     OPT_MATCH_RADIUS,
@@ -127,7 +128,7 @@ static void usage(const char *prog)
         "\n"
         "Integration:\n"
         "      --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)\n"
-        "      --integration <method>     mean | kappa-sigma | median (default: kappa-sigma)\n"
+        "      --integration <method>     mean | kappa-sigma | median | auto-adaptive (default: kappa-sigma)\n"
         "      --kappa <float>            Sigma clipping threshold (default: 3.0)\n"
         "      --iterations <int>         Max clipping passes per pixel (default: 3)\n"
         "      --batch-size <int>         GPU integration mini-batch size (default: 16)\n"
@@ -138,6 +139,9 @@ static void usage(const char *prog)
         "      --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)\n"
         "      --top-stars <int>          Top-K stars for matching (default: 50)\n"
         "      --min-stars <int>          Minimum detected stars to attempt alignment (default: 20)\n"
+        "      --min-quality <float>      Auto-reject frames below this fraction of reference\n"
+        "                                 quality (0=disabled, default: 0). E.g. 0.5 rejects\n"
+        "                                 frames scoring below 50%% of reference frame\n"
         "\n"
         "Triangle matching alignment (used only for 2-column CSV input):\n"
         "      --triangle-iters <int>     Max triangle-matching iterations (default: 1000)\n"
@@ -293,6 +297,7 @@ int main(int argc, char **argv)
         {"moffat-beta",       required_argument, nullptr, OPT_MOFFAT_BETA},
         {"top-stars",         required_argument, nullptr, OPT_TOP_STARS},
         {"min-stars",         required_argument, nullptr, OPT_MIN_STARS},
+        {"min-quality",       required_argument, nullptr, OPT_MIN_QUALITY},
         {"triangle-iters",    required_argument, nullptr, OPT_RANSAC_ITERS},
         {"triangle-thresh",   required_argument, nullptr, OPT_RANSAC_THRESH},
         {"ransac-iters",      required_argument, nullptr, OPT_RANSAC_ITERS},  /* deprecated alias */
@@ -343,6 +348,7 @@ int main(int argc, char **argv)
         case OPT_MOFFAT_BETA:  cfg.moffat.beta       = strtof(optarg, nullptr); break;
         case OPT_TOP_STARS:    cfg.top_stars         = atoi(optarg);            break;
         case OPT_MIN_STARS:    cfg.min_stars         = atoi(optarg);            break;
+        case OPT_MIN_QUALITY:  cfg.min_quality       = strtof(optarg, nullptr); break;
 
         case OPT_RANSAC_ITERS:  cfg.ransac.max_iters     = atoi(optarg);             break;
         case OPT_RANSAC_THRESH: cfg.ransac.inlier_thresh  = strtof(optarg, nullptr); break;
@@ -524,6 +530,8 @@ int main(int argc, char **argv)
         cfg.integration_method = DSO_INTEGRATE_MEAN;
     } else if (strcmp(integ_str, "median") == 0) {
         cfg.integration_method = DSO_INTEGRATE_MEDIAN;
+    } else if (strcmp(integ_str, "auto-adaptive") == 0) {
+        cfg.integration_method = DSO_INTEGRATE_AAWA;
     } else {
         fprintf(stderr, "Error: unknown integration method '%s'\n", integ_str);
         return 1;

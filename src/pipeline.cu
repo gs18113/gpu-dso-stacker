@@ -37,6 +37,7 @@
 #include "debayer_gpu.h"
 #include "star_detect_gpu.h"
 #include "star_detect_cpu.h"
+#include "frame_quality.h"
 #include "ransac.h"
 #include "ransac_gpu.h"
 #include "integration_gpu.h"
@@ -168,6 +169,15 @@ static DsoError integrate_batch(
             PIPE_CHECK(integration_gpu_process_batch_median(ctx_b, M, stream),
                        done, "batch integration B");
         }
+    } else if (integration_method == DSO_INTEGRATE_AAWA) {
+        PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_r, M, stream),
+                   done, "batch integration R");
+        if (color) {
+            PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_g, M, stream),
+                       done, "batch integration G");
+            PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_b, M, stream),
+                       done, "batch integration B");
+        }
     } else {
         PIPE_CHECK(integration_gpu_process_batch_mean(ctx_r, M, stream),
                    done, "batch integration R");
@@ -245,6 +255,14 @@ static DsoError phase_detect_warp_integrate(
     int          ref_bg_ok = 0;
     float       *bg_host_buf  = NULL;
 
+    /* Frame quality scoring */
+    FrameQuality *frame_qualities  = NULL;
+    int          *quality_indices  = NULL;
+    int          *quality_rejected = NULL;
+    int           quality_count    = 0;
+    FrameQuality  ref_quality;
+    memset(&ref_quality, 0, sizeof(ref_quality));
+
     /* --- Streams and events --- */
     CUDA_CHECK(cudaStreamCreate(&stream_copy),    cleanup, "stream_copy");
     CUDA_CHECK(cudaStreamCreate(&stream_compute), cleanup, "stream_compute");
@@ -272,6 +290,14 @@ static DsoError phase_detect_warp_integrate(
     /* --- Background normalization host buffer (per-channel color D2H) --- */
     if (config->bg_calibration == DSO_BG_PER_CHANNEL && color) {
         CUDA_CHECK(cudaMallocHost(&bg_host_buf, npix_f), cleanup, "bg_host_buf pinned");
+    }
+
+    /* --- Frame quality arrays --- */
+    frame_qualities  = (FrameQuality *)calloc((size_t)n_frames, sizeof(FrameQuality));
+    quality_indices  = (int *)calloc((size_t)n_frames, sizeof(int));
+    quality_rejected = (int *)calloc((size_t)n_frames, sizeof(int));
+    if (!frame_qualities || !quality_indices || !quality_rejected) {
+        err = DSO_ERR_ALLOC; goto cleanup;
     }
 
     /* --- Processing order: reference frame first --- */
@@ -353,6 +379,27 @@ static DsoError phase_detect_warp_integrate(
         printf("[Pipeline] Frame %d/%d: %d star(s) — %s\n",
                pos + 1, n_frames, stars.n, fi->filepath);
 
+        /* ---- Frame quality scoring ---- */
+        {
+            FrameQuality fq;
+            frame_quality_compute(conv_host, lum_host, &stars, W, H, &fq);
+            if (fi_idx == ref_idx) {
+                ref_quality = fq;
+                fq.normalized = 100.0f;
+            } else {
+                frame_quality_normalize(&fq, ref_quality.composite);
+            }
+            frames[fi_idx].quality_score = fq.normalized;
+            frame_qualities[quality_count] = fq;
+            quality_indices[quality_count] = fi_idx;
+            quality_rejected[quality_count] = 0;
+            quality_count++;
+            printf("[Pipeline] Frame %d/%d: quality=%.1f "
+                   "(FWHM=%.2f round=%.3f bg=%.1f stars=%d)\n",
+                   pos + 1, n_frames, fq.normalized, fq.fwhm,
+                   fq.roundness, fq.background, fq.star_count);
+        }
+
         if (fi_idx == ref_idx) {
             if (stars.n < config->min_stars) {
                 fprintf(stderr,
@@ -363,7 +410,21 @@ static DsoError phase_detect_warp_integrate(
             }
             ref_stars = stars;  /* take ownership */
         } else {
-            if (stars.n < config->min_stars) {
+            /* ---- Quality-based rejection ---- */
+            if (config->min_quality > 0.0f &&
+                frames[fi_idx].quality_score < config->min_quality * 100.0f) {
+                fprintf(stderr,
+                        "pipeline: skipping frame %d/%d "
+                        "(csv index=%d, path=%s): quality %.1f below threshold %.1f\n",
+                        pos + 1, n_frames, fi_idx + 1, fi->filepath,
+                        frames[fi_idx].quality_score, config->min_quality * 100.0f);
+                quality_rejected[quality_count - 1] = 1;
+                free(stars.stars);
+                stars.stars = NULL;
+                skipped_frames++;
+                skip_current = 1;
+            }
+            if (!skip_current && stars.n < config->min_stars) {
                 fprintf(stderr,
                         "pipeline: skipping frame %d/%d "
                         "(csv index=%d, path=%s): insufficient stars for triangle matching "
@@ -585,9 +646,17 @@ static DsoError phase_detect_warp_integrate(
         CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup, "final int sync");
     }
 
+    /* --- Quality summary table --- */
+    if (quality_count > 0)
+        frame_quality_print_table(frame_qualities, quality_indices,
+                                  quality_rejected, quality_count);
+
 cleanup:
     *successful_frames_out = successful_frames;
     *skipped_frames_out = skipped_frames;
+    free(frame_qualities);
+    free(quality_indices);
+    free(quality_rejected);
     free(order);
     free(ref_stars.stars);
     if (lum_host)  cudaFreeHost(lum_host);
@@ -659,7 +728,8 @@ DsoError pipeline_run_cuda(FrameInfo            *frames,
     printf("pipeline: single-pass star-detect + align + %s integration "
            "(%d frames, batch=%d)\n",
            config->integration_method == DSO_INTEGRATE_KAPPA_SIGMA ? "kappa-sigma" :
-           config->integration_method == DSO_INTEGRATE_MEDIAN      ? "median"      : "mean",
+           config->integration_method == DSO_INTEGRATE_MEDIAN      ? "median"      :
+           config->integration_method == DSO_INTEGRATE_AAWA        ? "auto-adaptive" : "mean",
            n_frames, config->batch_size);
 
     PIPE_CHECK(phase_detect_warp_integrate(frames, n_frames, ref_idx, W, H,

@@ -377,11 +377,11 @@ cmake --build build --parallel
     <div class="features-grid">
       <div class="feature-card">
         <h3>GPU-Accelerated Pipeline</h3>
-        <p>Every compute-heavy stage runs on CUDA &mdash; VNG debayer, Moffat convolution, Lanczos warp, and kappa-sigma / median integration use double-buffered stream overlap for maximum GPU utilization.</p>
+        <p>Every compute-heavy stage runs on CUDA &mdash; VNG debayer, Moffat convolution, Lanczos warp, and kappa-sigma / median / AAWA integration use double-buffered stream overlap for maximum GPU utilization.</p>
       </div>
       <div class="feature-card">
         <h3>Automatic Star Alignment</h3>
-        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Triangle-matching + DLT computes a full homography &mdash; no manual reference or pre-computed transforms required.</p>
+        <p>Moffat PSF convolution with adaptive sigma threshold detects stars per frame. Triangle-matching + DLT computes a full homography &mdash; no manual reference or pre-computed transforms required. Per-frame quality scoring (FWHM, roundness, star count) with optional automatic rejection of poor sub-frames.</p>
       </div>
       <div class="feature-card">
         <h3>RAW Camera File Support</h3>

@@ -25,6 +25,7 @@
 #include "frame_load.h"
 #include "debayer_cpu.h"
 #include "star_detect_cpu.h"
+#include "frame_quality.h"
 #include "ransac.h"
 #include "lanczos_cpu.h"
 #include "integration.h"
@@ -73,6 +74,8 @@ static DsoError flush_batch(
                    cleanup, "batch integration R");
     } else if (integration_method == DSO_INTEGRATE_MEDIAN) {
         PIPE_CHECK(integrate_median(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
+    } else if (integration_method == DSO_INTEGRATE_AAWA) {
+        PIPE_CHECK(integrate_aawa(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
     } else {
         PIPE_CHECK(integrate_mean(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
     }
@@ -87,6 +90,10 @@ static DsoError flush_batch(
             err = integrate_median(ptrs_g, n_batch, &b_out_g);
             if (err == DSO_OK)
                 err = integrate_median(ptrs_b, n_batch, &b_out_b);
+        } else if (integration_method == DSO_INTEGRATE_AAWA) {
+            err = integrate_aawa(ptrs_g, n_batch, &b_out_g);
+            if (err == DSO_OK)
+                err = integrate_aawa(ptrs_b, n_batch, &b_out_b);
         } else {
             err = integrate_mean(ptrs_g, n_batch, &b_out_g);
             if (err == DSO_OK)
@@ -190,6 +197,13 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     /* Reference star list kept until all frames are processed */
     StarList  ref_stars  = {NULL, 0};
 
+    /* Frame quality scoring */
+    FrameQuality *frame_qualities  = NULL;
+    int          *quality_indices  = NULL;
+    int          *quality_rejected = NULL;
+    int           quality_count    = 0;
+    FrameQuality  ref_quality;
+
     /* Batch buffers */
     Image       *xformed_r = NULL;
     Image       *xformed_g = NULL;
@@ -216,6 +230,14 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
     conv_buf = (float   *)malloc((size_t)npix * sizeof(float));
     mask_buf = (uint8_t *)malloc((size_t)npix);
     if (!conv_buf || !mask_buf) { err = DSO_ERR_ALLOC; goto cleanup; }
+
+    frame_qualities  = (FrameQuality *)calloc((size_t)n_frames, sizeof(FrameQuality));
+    quality_indices  = (int *)calloc((size_t)n_frames, sizeof(int));
+    quality_rejected = (int *)calloc((size_t)n_frames, sizeof(int));
+    if (!frame_qualities || !quality_indices || !quality_rejected) {
+        err = DSO_ERR_ALLOC; goto cleanup;
+    }
+    memset(&ref_quality, 0, sizeof(ref_quality));
 
     xformed_r = (Image *)calloc((size_t)batch_size, sizeof(Image));
     ptrs_r    = (const Image **)malloc((size_t)batch_size * sizeof(Image *));
@@ -332,9 +354,45 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
             }
             printf("[Pipeline CPU] Frame %d: %d star(s) detected\n", i, stars.n);
 
+            /* ---- Frame quality scoring ---- */
+            {
+                FrameQuality fq;
+                frame_quality_compute(conv_buf, lum.data, &stars, W, H, &fq);
+                if (i == ref_idx) {
+                    ref_quality = fq;
+                    fq.normalized = 100.0f;
+                } else {
+                    frame_quality_normalize(&fq, ref_quality.composite);
+                }
+                frames[i].quality_score = fq.normalized;
+                frame_qualities[quality_count] = fq;
+                quality_indices[quality_count] = i;
+                quality_rejected[quality_count] = 0;
+                quality_count++;
+                printf("[Pipeline CPU] Frame %d: quality=%.1f "
+                       "(FWHM=%.2f round=%.3f bg=%.1f stars=%d)\n",
+                       i, fq.normalized, fq.fwhm, fq.roundness,
+                       fq.background, fq.star_count);
+            }
+
             if (i == ref_idx) {
                 ref_stars = stars;
             } else {
+                /* ---- Quality-based rejection ---- */
+                if (config->min_quality > 0.0f &&
+                    frames[i].quality_score < config->min_quality * 100.0f) {
+                    fprintf(stderr,
+                            "pipeline_cpu: skipping frame %d/%d "
+                            "(csv index=%d, path=%s): quality %.1f below threshold %.1f\n",
+                            pos + 1, n_frames, i + 1, frames[i].filepath,
+                            frames[i].quality_score, config->min_quality * 100.0f);
+                    quality_rejected[quality_count - 1] = 1;
+                    free(stars.stars); image_free(&lum);
+                    if (color) image_free(&raw);
+                    skipped_frames++;
+                    err = DSO_OK;
+                    continue;
+                }
                 /* ---- Triangle matching against reference ---- */
                 if (stars.n < config->min_stars ||
                     ref_stars.n < config->min_stars) {
@@ -544,11 +602,18 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
         }
     }
 
-    if (err == DSO_OK)
+    if (err == DSO_OK) {
+        if (quality_count > 0)
+            frame_quality_print_table(frame_qualities, quality_indices,
+                                      quality_rejected, quality_count);
         printf("pipeline_cpu: done. successful frames: %d/%d (skipped: %d)\n",
                successful_frames, n_frames, skipped_frames);
+    }
 
 cleanup:
+    free(frame_qualities);
+    free(quality_indices);
+    free(quality_rejected);
     free(ref_stars.stars);
     free(conv_buf);
     free(mask_buf);

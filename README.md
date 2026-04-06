@@ -232,7 +232,7 @@ I/O:
 
 Integration:
       --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)
-      --integration <method>     mean | kappa-sigma | median (default: kappa-sigma)
+      --integration <method>     mean | kappa-sigma | median | auto-adaptive (default: kappa-sigma)
       --kappa <float>            Sigma clipping threshold (default: 3.0)
       --iterations <int>         Max clipping passes per pixel (default: 3)
       --batch-size <int>         GPU integration mini-batch size (default: 16)
@@ -243,6 +243,7 @@ Star detection (2-column CSV only):
       --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
       --top-stars <int>          Top-K stars for matching (default: 50)
       --min-stars <int>          Minimum stars for triangle matching (default: 6)
+      --min-quality <float>      Min quality as fraction of reference (0=disabled, default: 0)
 
 Triangle matching (2-column CSV only):
       --triangle-iters <int>     Max triangle-matching iterations (default: 1000)
