@@ -40,6 +40,15 @@ typedef enum {
 } DsoBackend;
 
 /* -------------------------------------------------------------------------
+ * IntegrationMethod — stacking combination strategy.
+ * ------------------------------------------------------------------------- */
+typedef enum {
+    DSO_INTEGRATE_MEAN        = 0,
+    DSO_INTEGRATE_KAPPA_SIGMA = 1,
+    DSO_INTEGRATE_MEDIAN      = 2
+} IntegrationMethod;
+
+/* -------------------------------------------------------------------------
  * PipelineConfig — complete configuration for one pipeline run.
  * ------------------------------------------------------------------------- */
 typedef struct {
@@ -61,7 +70,7 @@ typedef struct {
     int          batch_size;      /* frames per GPU mini-batch (16)                  */
     float        kappa;           /* kappa-sigma threshold (3.0)                     */
     int          iterations;      /* sigma-clipping passes per pixel (3)             */
-    int          use_kappa_sigma; /* 1 = kappa-sigma, 0 = plain mean                 */
+    IntegrationMethod integration_method; /* mean / kappa-sigma / median             */
 
     /* --- I/O --- */
     const char         *output_file;     /* output FITS path                                */
