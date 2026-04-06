@@ -39,6 +39,12 @@ typedef enum {
     DSO_BACKEND_METAL = 3
 } DsoBackend;
 
+typedef enum {
+    DSO_INTEGRATE_MEAN        = 0,
+    DSO_INTEGRATE_KAPPA_SIGMA = 1,
+    DSO_INTEGRATE_AAWA        = 2
+} IntegrationMethod;
+
 /* -------------------------------------------------------------------------
  * PipelineConfig — complete configuration for one pipeline run.
  * ------------------------------------------------------------------------- */
@@ -61,7 +67,7 @@ typedef struct {
     int          batch_size;      /* frames per GPU mini-batch (16)                  */
     float        kappa;           /* kappa-sigma threshold (3.0)                     */
     int          iterations;      /* sigma-clipping passes per pixel (3)             */
-    int          use_kappa_sigma; /* 1 = kappa-sigma, 0 = plain mean                 */
+    IntegrationMethod integration_method; /* mean, kappa-sigma, or aawa           */
 
     /* --- I/O --- */
     const char         *output_file;     /* output FITS path                                */

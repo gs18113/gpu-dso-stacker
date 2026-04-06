@@ -52,7 +52,7 @@
 static DsoError flush_batch(
     Image        *xformed_r, Image *xformed_g, Image *xformed_b,
     int           n_batch, int color, int W, int H, long npix,
-    float kappa, int iterations, int use_kappa_sigma,
+    float kappa, int iterations, IntegrationMethod method,
     const Image **ptrs_r, const Image **ptrs_g, const Image **ptrs_b,
     float *global_sum_r, float *global_sum_g, float *global_sum_b,
     int   *global_count_r, int   *global_count_g, int   *global_count_b)
@@ -67,23 +67,37 @@ static DsoError flush_batch(
 
     for (i = 0; i < n_batch; i++) ptrs_r[i] = &xformed_r[i];
 
-    if (use_kappa_sigma) {
+    switch (method) {
+    case DSO_INTEGRATE_KAPPA_SIGMA:
         PIPE_CHECK(integrate_kappa_sigma(ptrs_r, n_batch, &b_out_r, kappa, iterations),
                    cleanup, "batch integration R");
-    } else {
+        break;
+    case DSO_INTEGRATE_AAWA:
+        PIPE_CHECK(integrate_aawa(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
+        break;
+    default: /* DSO_INTEGRATE_MEAN */
         PIPE_CHECK(integrate_mean(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
+        break;
     }
 
     if (color) {
         for (i = 0; i < n_batch; i++) { ptrs_g[i] = &xformed_g[i]; ptrs_b[i] = &xformed_b[i]; }
-        if (use_kappa_sigma) {
+        switch (method) {
+        case DSO_INTEGRATE_KAPPA_SIGMA:
             err = integrate_kappa_sigma(ptrs_g, n_batch, &b_out_g, kappa, iterations);
             if (err == DSO_OK)
                 err = integrate_kappa_sigma(ptrs_b, n_batch, &b_out_b, kappa, iterations);
-        } else {
+            break;
+        case DSO_INTEGRATE_AAWA:
+            err = integrate_aawa(ptrs_g, n_batch, &b_out_g);
+            if (err == DSO_OK)
+                err = integrate_aawa(ptrs_b, n_batch, &b_out_b);
+            break;
+        default:
             err = integrate_mean(ptrs_g, n_batch, &b_out_g);
             if (err == DSO_OK)
                 err = integrate_mean(ptrs_b, n_batch, &b_out_b);
+            break;
         }
         if (err != DSO_OK) { image_free(&b_out_r); goto cleanup; }
     }
@@ -422,7 +436,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
                 err = flush_batch(xformed_r, xformed_g, xformed_b,
                                   batch_size, color, W, H, npix,
                                   config->kappa, config->iterations,
-                                  config->use_kappa_sigma,
+                                  config->integration_method,
                                   ptrs_r, ptrs_g, ptrs_b,
                                   global_sum_r, global_sum_g, global_sum_b,
                                   global_count_r, global_count_g, global_count_b);
@@ -445,7 +459,7 @@ DsoError pipeline_run_cpu(FrameInfo            *frames,
         err = flush_batch(xformed_r, xformed_g, xformed_b,
                           batch_n, color, W, H, npix,
                           config->kappa, config->iterations,
-                          config->use_kappa_sigma,
+                          config->integration_method,
                           ptrs_r, ptrs_g, ptrs_b,
                           global_sum_r, global_sum_g, global_sum_b,
                           global_count_r, global_count_g, global_count_b);

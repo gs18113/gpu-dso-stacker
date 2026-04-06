@@ -130,7 +130,7 @@ static PipelineConfig default_config(const char *output_path)
     cfg.batch_size       = 16;
     cfg.kappa            = 3.0f;
     cfg.iterations       = 3;
-    cfg.use_kappa_sigma  = 1;
+    cfg.integration_method = DSO_INTEGRATE_KAPPA_SIGMA;
     cfg.bayer_override   = BAYER_NONE;
     cfg.color_output     = 0;
     cfg.save_opts.stretch_min = NAN;
@@ -369,7 +369,7 @@ static int test_pipeline_cpu_mean_integration(void)
     ASSERT_OK(csv_parse(csv, &frames, &n));
 
     PipelineConfig cfg = default_config(out);
-    cfg.use_kappa_sigma = 0; /* mean integration */
+    cfg.integration_method = DSO_INTEGRATE_MEAN; /* mean integration */
     ASSERT_OK(pipeline_run_cpu(frames, n, 0, &cfg));
 
     Image result = {NULL, 0, 0};
@@ -403,7 +403,7 @@ static int test_pipeline_cpu_kappa_sigma_integration(void)
     ASSERT_OK(csv_parse(csv, &frames, &n));
 
     PipelineConfig cfg = default_config(out);
-    cfg.use_kappa_sigma = 1;
+    cfg.integration_method = DSO_INTEGRATE_KAPPA_SIGMA;
     cfg.kappa = 2.0f;
     ASSERT_OK(pipeline_run_cpu(frames, n, 0, &cfg));
 

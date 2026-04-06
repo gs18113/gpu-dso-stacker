@@ -15,7 +15,7 @@
  *
  * Options (integration):
  *       --cpu                        Run ALL pipeline stages on CPU (default: GPU)
- *       --integration <method>       mean | kappa-sigma (default: kappa-sigma)
+ *       --integration <method>       mean | kappa-sigma | auto-adaptive (default: kappa-sigma)
  *       --kappa <float>              Sigma multiplier for clipping (default: 3.0)
  *       --iterations <int>           Max clipping iterations (default: 3)
  *       --batch-size <int>           GPU integration mini-batch size (default: 16)
@@ -125,7 +125,7 @@ static void usage(const char *prog)
         "\n"
         "Integration:\n"
         "      --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)\n"
-        "      --integration <method>     mean | kappa-sigma (default: kappa-sigma)\n"
+        "      --integration <method>     mean | kappa-sigma | auto-adaptive (default: kappa-sigma)\n"
         "      --kappa <float>            Sigma clipping threshold (default: 3.0)\n"
         "      --iterations <int>         Max clipping passes per pixel (default: 3)\n"
         "      --batch-size <int>         GPU integration mini-batch size (default: 16)\n"
@@ -244,9 +244,9 @@ int main(int argc, char **argv)
     cfg.min_stars       = 20;
     cfg.ransac          = {1000, 2.0f, 30.0f, 0.99f, 10};
     cfg.batch_size      = 16;
-    cfg.kappa           = 3.0f;
-    cfg.iterations      = 3;
-    cfg.use_kappa_sigma = 1;
+    cfg.kappa              = 3.0f;
+    cfg.iterations         = 3;
+    cfg.integration_method = DSO_INTEGRATE_KAPPA_SIGMA;
     cfg.output_file     = "output.fits";
     cfg.backend         = DSO_BACKEND_AUTO;
     cfg.bayer_override  = BAYER_NONE;   /* auto-detect */
@@ -497,9 +497,11 @@ int main(int argc, char **argv)
 
     /* Validate integration method */
     if (strcmp(integ_str, "kappa-sigma") == 0) {
-        cfg.use_kappa_sigma = 1;
+        cfg.integration_method = DSO_INTEGRATE_KAPPA_SIGMA;
     } else if (strcmp(integ_str, "mean") == 0) {
-        cfg.use_kappa_sigma = 0;
+        cfg.integration_method = DSO_INTEGRATE_MEAN;
+    } else if (strcmp(integ_str, "auto-adaptive") == 0) {
+        cfg.integration_method = DSO_INTEGRATE_AAWA;
     } else {
         fprintf(stderr, "Error: unknown integration method '%s'\n", integ_str);
         return 1;

@@ -141,14 +141,15 @@ done:
  * integrate_batch — flush the current mini-batch into the accumulators.
  * ------------------------------------------------------------------------- */
 static DsoError integrate_batch(
-    int M, int color, float kappa, int iterations, int use_kappa_sigma,
+    int M, int color, float kappa, int iterations, IntegrationMethod method,
     cudaStream_t stream,
     IntegrationGpuCtx *ctx_r, IntegrationGpuCtx *ctx_g, IntegrationGpuCtx *ctx_b)
 {
     DsoError err = DSO_OK;
     printf("[Pipeline] Integrating batch of %d frame(s)...\n", M);
 
-    if (use_kappa_sigma) {
+    switch (method) {
+    case DSO_INTEGRATE_KAPPA_SIGMA:
         PIPE_CHECK(integration_gpu_process_batch(ctx_r, M, kappa, iterations, stream),
                    done, "batch integration R");
         if (color) {
@@ -157,7 +158,18 @@ static DsoError integrate_batch(
             PIPE_CHECK(integration_gpu_process_batch(ctx_b, M, kappa, iterations, stream),
                        done, "batch integration B");
         }
-    } else {
+        break;
+    case DSO_INTEGRATE_AAWA:
+        PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_r, M, stream),
+                   done, "batch integration R");
+        if (color) {
+            PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_g, M, stream),
+                       done, "batch integration G");
+            PIPE_CHECK(integration_gpu_process_batch_aawa(ctx_b, M, stream),
+                       done, "batch integration B");
+        }
+        break;
+    default: /* DSO_INTEGRATE_MEAN */
         PIPE_CHECK(integration_gpu_process_batch_mean(ctx_r, M, stream),
                    done, "batch integration R");
         if (color) {
@@ -166,6 +178,7 @@ static DsoError integrate_batch(
             PIPE_CHECK(integration_gpu_process_batch_mean(ctx_b, M, stream),
                        done, "batch integration B");
         }
+        break;
     }
 done:
     return err;
@@ -439,7 +452,7 @@ static DsoError phase_detect_warp_integrate(
             CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup, "batch warp sync");
             PIPE_CHECK(integrate_batch(batch_n, color,
                                         config->kappa, config->iterations,
-                                        config->use_kappa_sigma, stream_compute,
+                                        config->integration_method, stream_compute,
                                         ctx_r, ctx_g, ctx_b),
                        cleanup, "batch integration");
             CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup, "batch int sync");
@@ -452,7 +465,7 @@ static DsoError phase_detect_warp_integrate(
         CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup, "final warp sync");
         PIPE_CHECK(integrate_batch(batch_n, color,
                                     config->kappa, config->iterations,
-                                    config->use_kappa_sigma, stream_compute,
+                                    config->integration_method, stream_compute,
                                     ctx_r, ctx_g, ctx_b),
                    cleanup, "final integration");
         CUDA_CHECK(cudaStreamSynchronize(stream_compute), cleanup, "final int sync");
@@ -530,7 +543,8 @@ DsoError pipeline_run_cuda(FrameInfo            *frames,
     /* ---- Single-pass with double-buffered I/O overlap ---- */
     printf("pipeline: single-pass star-detect + align + %s integration "
            "(%d frames, batch=%d)\n",
-           config->use_kappa_sigma ? "kappa-sigma" : "mean",
+           config->integration_method == DSO_INTEGRATE_KAPPA_SIGMA ? "kappa-sigma" :
+           config->integration_method == DSO_INTEGRATE_AAWA ? "auto-adaptive" : "mean",
            n_frames, config->batch_size);
 
     PIPE_CHECK(phase_detect_warp_integrate(frames, n_frames, ref_idx, W, H,

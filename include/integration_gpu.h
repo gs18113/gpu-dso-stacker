@@ -152,6 +152,25 @@ DsoError integration_gpu_process_batch_mean(IntegrationGpuCtx *ctx,
                                              cudaStream_t       stream);
 
 /*
+ * integration_gpu_process_batch_aawa — Auto Adaptive Weighted Average batch.
+ *
+ * Runs Stetson (1989) iterative weighted averaging on M pre-transformed
+ * frames.  Each pixel independently computes the AAWA result (max 10
+ * iterations, α = 2.0) and accumulates into the persistent buffers.
+ *
+ * Uses the same mini-batch approximation: per-batch AAWA result weighted
+ * by valid frame count, combined across batches in finalize.
+ *
+ * M      : number of frames in this batch
+ * stream : CUDA stream; no implicit synchronisation
+ *
+ * Returns DSO_OK or DSO_ERR_CUDA / DSO_ERR_INVALID_ARG.
+ */
+DsoError integration_gpu_process_batch_aawa(IntegrationGpuCtx *ctx,
+                                             int                M,
+                                             cudaStream_t       stream);
+
+/*
  * integration_gpu_finalize — download the final result image.
  *
  * Computes the final pixel value from the accumulated sums:

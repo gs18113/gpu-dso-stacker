@@ -779,6 +779,120 @@ static int test_lanczos_cpu_fractional_shift_accuracy(void)
 }
 
 /* =========================================================================
+ * AAWA (Auto Adaptive Weighted Average)
+ * ====================================================================== */
+
+/* Uniform frames → output equals the constant. */
+static int test_integrate_aawa_uniform(void)
+{
+    const int W = 4, H = 3, N = 5;
+    Image imgs[5];
+    const Image *ptrs[5];
+    for (int i = 0; i < N; i++) {
+        imgs[i] = make_image_const(W, H, 42.0f);
+        ptrs[i] = &imgs[i];
+    }
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, N, &out));
+    ASSERT_EQ(out.width, W);
+    ASSERT_EQ(out.height, H);
+    for (int p = 0; p < W * H; p++)
+        ASSERT_NEAR(out.data[p], 42.0f, 1e-4f);
+    for (int i = 0; i < N; i++) image_free(&imgs[i]);
+    image_free(&out);
+    return 0;
+}
+
+/* 9 frames at 100, 1 at 10000 → AAWA should strongly down-weight the outlier. */
+static int test_integrate_aawa_outlier_downweight(void)
+{
+    const int W = 2, H = 2, N = 10;
+    Image imgs[10];
+    const Image *ptrs[10];
+    for (int i = 0; i < 9; i++) {
+        imgs[i] = make_image_const(W, H, 100.0f);
+        ptrs[i] = &imgs[i];
+    }
+    imgs[9] = make_image_const(W, H, 10000.0f);
+    ptrs[9] = &imgs[9];
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, N, &out));
+    /* Simple mean would give 1090; AAWA should be much closer to 100 */
+    for (int p = 0; p < W * H; p++) {
+        ASSERT(out.data[p] < 150.0f);
+        ASSERT(out.data[p] > 50.0f);
+    }
+    for (int i = 0; i < N; i++) image_free(&imgs[i]);
+    image_free(&out);
+    return 0;
+}
+
+/* NaN values should be skipped. */
+static int test_integrate_aawa_nan_handling(void)
+{
+    const int W = 4, H = 3, N = 5;
+    Image imgs[5];
+    const Image *ptrs[5];
+    for (int i = 0; i < N; i++) {
+        imgs[i] = make_image_const(W, H, 50.0f);
+        ptrs[i] = &imgs[i];
+    }
+    /* Mark frames 3 and 4 as NaN for all pixels */
+    for (int p = 0; p < W * H; p++) {
+        imgs[3].data[p] = NAN;
+        imgs[4].data[p] = NAN;
+    }
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, N, &out));
+    for (int p = 0; p < W * H; p++)
+        ASSERT_NEAR(out.data[p], 50.0f, 1e-4f);
+    for (int i = 0; i < N; i++) image_free(&imgs[i]);
+    image_free(&out);
+    return 0;
+}
+
+/* Two frames → should produce result close to mean. */
+static int test_integrate_aawa_two_frames(void)
+{
+    const int W = 4, H = 3;
+    Image f1 = make_image_const(W, H, 10.0f);
+    Image f2 = make_image_const(W, H, 20.0f);
+    const Image *ptrs[2] = {&f1, &f2};
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, 2, &out));
+    for (int p = 0; p < W * H; p++)
+        ASSERT_NEAR(out.data[p], 15.0f, 0.5f);
+    image_free(&f1); image_free(&f2); image_free(&out);
+    return 0;
+}
+
+/* Deterministic: running twice produces the same result. */
+static int test_integrate_aawa_convergence(void)
+{
+    const int W = 4, H = 3, N = 8;
+    Image imgs[8];
+    const Image *ptrs[8];
+    /* Create frames with varied values */
+    for (int i = 0; i < N; i++) {
+        imgs[i] = make_image_const(W, H, 100.0f + (float)(i * 5));
+        ptrs[i] = &imgs[i];
+    }
+    imgs[N - 1] = make_image_const(W, H, 5000.0f); /* outlier */
+    ptrs[N - 1] = &imgs[N - 1];
+
+    Image out1 = {NULL, 0, 0};
+    Image out2 = {NULL, 0, 0};
+    ASSERT_OK(integrate_aawa(ptrs, N, &out1));
+    ASSERT_OK(integrate_aawa(ptrs, N, &out2));
+    for (int p = 0; p < W * H; p++)
+        ASSERT_NEAR(out1.data[p], out2.data[p], 1e-6f);
+    for (int i = 0; i < N; i++) image_free(&imgs[i]);
+    image_free(&out1); image_free(&out2);
+    return 0;
+}
+
+/* =========================================================================
  * CSV — additional edge cases
  * ====================================================================== */
 
@@ -870,6 +984,13 @@ int main(void)
     RUN(test_kappa_sigma_nan_handling);
     RUN(test_kappa_sigma_single_frame);
     RUN(test_kappa_sigma_two_frames);
+
+    SUITE("Integration — AAWA");
+    RUN(test_integrate_aawa_uniform);
+    RUN(test_integrate_aawa_outlier_downweight);
+    RUN(test_integrate_aawa_nan_handling);
+    RUN(test_integrate_aawa_two_frames);
+    RUN(test_integrate_aawa_convergence);
 
     SUITE("Lanczos CPU — edge cases");
     RUN(test_lanczos_cpu_small_image_2x2);
