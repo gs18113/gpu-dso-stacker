@@ -174,6 +174,8 @@ def build_command(
     argv += ["--moffat-beta",   str(opts["moffat_beta"])]
     argv += ["--top-stars",     str(opts["top_stars"])]
     argv += ["--min-stars",     str(opts["min_stars"])]
+    if opts.get("min_quality", 0.0) > 0:
+        argv += ["--min-quality", str(opts["min_quality"])]
 
     # --- triangle matching ---
     argv += ["--triangle-iters",  str(opts["triangle_iters"])]

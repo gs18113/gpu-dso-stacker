@@ -61,6 +61,8 @@ typedef struct {
     MoffatParams moffat;          /* Moffat kernel shape {alpha=2.5, beta=2.0}       */
     int          top_stars;       /* top-K stars to use for matching (50)            */
     int          min_stars;       /* minimum detected stars to attempt alignment (20)*/
+    float        min_quality;     /* auto-reject below this fraction of ref quality;
+                                      0 = disabled (default). E.g. 0.5 = reject < 50% */
 
     /* --- RANSAC --- */
     RansacParams ransac;          /* {max_iters=1000, inlier_thresh=2.0,

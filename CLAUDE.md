@@ -65,6 +65,7 @@ gpu-dso-stacker/
 │   ├── debayer_gpu.h            ← VNG debayer → luminance or RGB planes (GPU, h2h and d2d)
 │   ├── star_detect_gpu.h        ← Moffat convolution + sigma threshold (GPU, h2h and d2d)
 │   ├── star_detect_cpu.h        ← Moffat conv + threshold + CCL + CoM (CPU)
+│   ├── frame_quality.h          ��� Per-frame quality scoring (FWHM, roundness, background)
 │   ├── ransac.h                 ← DLT homography + RANSAC alignment
 │   ├── integration_gpu.h        ← GPU mini-batch kappa-sigma context + API
 │   ├── calibration.h            ← CalibFrames, CalibMethod, calib_load_or_generate, calib_apply_cpu
@@ -85,6 +86,7 @@ gpu-dso-stacker/
 │   ├── raw_io.c                 ← LibRaw wrapper: load RAW as float32 Bayer mosaic
 │   ├── frame_load.c             ← Extension-based dispatch to fits_io or raw_io
 │   ├── star_detect_cpu.c        ← Moffat conv + threshold (OpenMP) + CCL + CoM
+│   ├── frame_quality.c          ← Per-frame quality scoring (FWHM, roundness, composite score)
 │   ├── ransac.c                 ← Jacobi eigendecomp DLT + RANSAC loop
 │   ├── integration_gpu.cu       ← Mini-batch kappa-sigma + finalize kernels
 │   ├── calibration.c            ← Master frame generation (winsorized mean / median) + CPU apply
@@ -101,6 +103,7 @@ gpu-dso-stacker/
 │   ├── test_cpu.c               ← 42 tests: CSV, FITS, integration (mean, kappa-sigma, median), Lanczos CPU
 │   ├── test_gpu.cu              ← 5 tests: GPU Lanczos (all passing)
 │   ├── test_star_detect.c       ← 21 tests: CCL + CoM + Moffat conv + threshold
+│   ├── test_frame_quality.c     ← 9 tests: FWHM, roundness, background, composite scoring
 │   ├── test_ransac.c            ← 13 tests: DLT + RANSAC
 │   ├── test_debayer_cpu.c       ← 10 tests: VNG debayer CPU (all patterns + edge cases)
 │   ├── test_integration_gpu.cu  ← 9 tests: GPU mini-batch kappa-sigma
@@ -234,6 +237,7 @@ Star detection (2-column CSV only):
       --moffat-beta <float>      Moffat PSF beta / wing slope (default: 2.0)
       --top-stars <int>          Top-K stars for matching (default: 50)
       --min-stars <int>          Minimum detected stars to attempt alignment (default: 20)
+      --min-quality <float>      Min quality as fraction of reference (0=disabled, default: 0)
 
 Triangle matching (2-column CSV only):
       --triangle-iters <int>     Max triangle-matching iterations (default: 1000)
@@ -287,7 +291,9 @@ filepath, is_reference
 ```c
 typedef struct { double h[9]; }  Homography;   // row-major 3x3, backward map (ref → src)
 typedef struct { float *data; int width; int height; } Image;  // row-major float32
-typedef struct { char filepath[4096]; int is_reference; Homography H; } FrameInfo;
+typedef struct { char filepath[4096]; int is_reference; Homography H;
+                 int width; int height; int pattern;
+                 float quality_score; } FrameInfo;
 typedef struct { float x, y, flux; } StarPos;  // sub-pixel CoM position + integrated flux
 typedef struct { StarPos *stars; int n; } StarList;  // heap-alloc'd, caller must free()
 typedef struct { float alpha; float beta; } MoffatParams;  // Moffat PSF params (default: 2.5, 2.0)
@@ -446,6 +452,32 @@ DsoError star_detect_cpu_ccl_com(const uint8_t *mask, const float *original,
 `moffat_convolve`: pre-computed kernel (R = min(⌈3α⌉, 15)), zero-boundary padding, `collapse(2) omp parallel for`.
 `threshold`: double-precision Bessel-corrected σ via `reduction(+:)`, then parallel mask write.
 `ccl_com`: two-pass 8-connectivity union-find; not parallelized (raster scan has data dependencies). After Pass 2, a label re-mapping pass compacts sparse root labels to contiguous `[1, n_unique]`, so `CompStats` is allocated as `calloc(n_unique+1)` (O(n_stars)) rather than `calloc(npix+1)` (O(pixels)).
+
+### `frame_quality.h`
+
+```c
+typedef struct {
+    float fwhm;        /* median FWHM across detected stars (pixels) */
+    float roundness;   /* median min(fwhm_x,fwhm_y)/max(fwhm_x,fwhm_y), 1.0=circular */
+    float background;  /* sigma-clipped mean of luminance image */
+    int   star_count;  /* number of detected stars */
+    float composite;   /* raw composite score (before normalization) */
+    float normalized;  /* score normalized so reference = 100.0 */
+} FrameQuality;
+
+DsoError frame_quality_compute(const float *conv_data, const float *lum_data,
+                               const StarList *stars, int W, int H,
+                               FrameQuality *quality_out);
+void frame_quality_normalize(FrameQuality *q, float ref_composite);
+void frame_quality_print_table(const FrameQuality *qualities,
+                               const int *frame_indices, const int *rejected, int n);
+```
+
+- `frame_quality_compute`: FWHM estimated from the Moffat convolution map via 4-direction radial profile per star (walk outward until half-max crossing, linear interpolation). Roundness = min(FWHM_x, FWHM_y) / max(FWHM_x, FWHM_y) per star. Both metrics are median across all detected stars. Background via 3-iteration 3σ-clipped mean of the luminance image.
+- Composite score: `roundness * log2(1 + star_count) / (fwhm * (1 + 0.001 * background))`. Rewards more stars, rounder stars, tighter FWHM, lower background.
+- `frame_quality_normalize`: scales composite so reference frame = 100.0.
+- `frame_quality_print_table`: prints a summary table with FWHM, roundness, star count, and normalized score for each frame, with `[SKIPPED]` tag for quality-rejected frames.
+- Pure C, no CUDA dependency. Called after CCL+CoM and before RANSAC in both pipelines.
 
 ### `ransac.h`
 
@@ -639,6 +671,7 @@ typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGR
 - **RAW file support via LibRaw**: optional, controlled by `-DDSO_ENABLE_LIBRAW=ON` (default OFF). `raw_io.c` extracts the raw uint16 Bayer mosaic via `libraw_unpack()` — never calls `libraw_dcraw_process()` since the project has its own VNG debayer pipeline. Pixel extraction uses `sizes.width/height` (usable area) with `top_margin/left_margin` offsets, per-channel black subtraction via `cblack[c] + black`, normalization by `color.maximum` to float32 [0, 1]. CFA pattern derived from `idata.filters` (0x94949494→RGGB, 0x16161616→BGGR, 0x61616161→GRBG, 0x49494949→GBRG); non-Bayer sensors (X-Trans, Foveon) return `BAYER_NONE`.
 - **`frame_load` dispatch layer**: all pipeline call sites (`pipeline_cpu.c`, `pipeline.cu`, `main.cpp`, `calibration.c`) use `frame_load`/`frame_get_bayer_pattern`/`frame_get_dimensions` instead of calling `fits_load` directly. The dispatch layer checks file extension via `frame_is_raw()` and routes to `raw_*` or `fits_*`. When `DSO_HAS_LIBRAW=0`, RAW paths return `DSO_ERR_IO` with a diagnostic message.
 - **Calibration RAW support**: `calibration.c` uses `is_image_file()` (checks both FITS and RAW extensions) instead of `is_fits_file()` for the master-vs-framelist decision, and `frame_load()` for loading individual frames.
+- **Frame quality scoring**: `frame_quality.c` computes per-frame FWHM, roundness, background, and composite score from already-available star detection data (convolution map + StarList). FWHM is measured from the Moffat convolution map (matched-filter response), not the raw image — absolute values include kernel width but relative comparison is more robust. Score normalized to reference frame = 100. `--min-quality <fraction>` auto-rejects frames below the threshold (e.g. 0.5 = reject below 50% of reference quality). Quality scoring runs after CCL+CoM, before RANSAC, in both CPU and GPU pipelines. Pure CPU computation — no CUDA kernel needed.
 
 ---
 
@@ -841,7 +874,7 @@ options:
   integration: kappa-sigma     # or mean, median, auto-adaptive
   kappa: 3.0     iterations: 3     batch_size: 16
   star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
-  top_stars: 50     min_stars: 20    min_inliers: 10
+  top_stars: 50     min_stars: 20    min_quality: 0.0    min_inliers: 10
   triangle_iters: 1000     triangle_thresh: 2.0     match_radius: 30.0     match_device: auto
   bayer: auto     bit_depth: f32     tiff_compression: none
   stretch_min: null     stretch_max: null
