@@ -216,7 +216,7 @@
       <p class="intro-sub">
         A high-performance image stacker for DSO astrophotography, written in C/CUDA.
         VNG debayering, Moffat star detection, Lanczos-3 warp,
-        and kappa-sigma integration &mdash; with CUDA, Metal, and CPU backends.
+        and kappa-sigma / median integration &mdash; with CUDA, Metal, and CPU backends.
       </p>
       <div class="intro-actions">
         <a class="btn btn-primary" href="https://github.com/gs18113/gpu-dso-stacker/releases" target="_blank">
@@ -377,7 +377,7 @@ cmake --build build --parallel
     <div class="features-grid">
       <div class="feature-card">
         <h3>GPU-Accelerated Pipeline</h3>
-        <p>Every compute-heavy stage runs on CUDA &mdash; VNG debayer, Moffat convolution, Lanczos warp, and kappa-sigma / AAWA integration use double-buffered stream overlap for maximum GPU utilization.</p>
+        <p>Every compute-heavy stage runs on CUDA &mdash; VNG debayer, Moffat convolution, Lanczos warp, and kappa-sigma / median / AAWA integration use double-buffered stream overlap for maximum GPU utilization.</p>
       </div>
       <div class="feature-card">
         <h3>Automatic Star Alignment</h3>
@@ -584,8 +584,8 @@ python src/GUI/main.py</pre>
           </tr>
           <tr>
             <td>6</td><td><strong>Integration</strong></td>
-            <td>Mini-batch &kappa;-&sigma; clipping <span class="pipe-tag tag-cuda">CUDA</span></td>
-            <td>Full &kappa;-&sigma; clipping <span class="pipe-tag tag-omp">OpenMP</span></td>
+            <td>Mini-batch &kappa;-&sigma; / median <span class="pipe-tag tag-cuda">CUDA</span></td>
+            <td>Full &kappa;-&sigma; / median <span class="pipe-tag tag-omp">OpenMP</span></td>
           </tr>
         </tbody>
       </table>

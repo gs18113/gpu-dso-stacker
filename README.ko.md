@@ -103,7 +103,7 @@ Metal 가속이 필요 없으면 URL에서 `metal`을 `cpu`로 변경하세요.
 | 3. 삼각형 매칭 정렬 | 삼각형/별자리 매칭 + DLT (`--match-device`로 CPU/GPU 선택; 기본값은 스태킹 장치를 따름) | 삼각형/별자리 매칭 + DLT (`--cpu` 사용 시 기본 CPU) |
 | 4. 디베이어링 (워프) | VNG 디모자이크 → 휘도 **또는 R/G/B** | VNG 디모자이크 → 휘도 **또는 R/G/B** |
 | 5. Lanczos 워프 | nppiRemap + 좌표맵 커널 (CUDA) | 6-탭 역방향 매핑 워프 (OpenMP) |
-| 6. 적분 | 미니배치 카파-시그마 (CUDA) | 풀 카파-시그마 (OpenMP) |
+| 6. 적분 | 미니배치 카파-시그마 / 중앙값 (CUDA) | 풀 카파-시그마 / 중앙값 (OpenMP) |
 
 **컬러 출력**: 베이어 패턴이 활성화되면 (`--bayer` 또는 FITS `BAYERPAT` 키워드) 4단계에서 별도의 R, G, B 평면으로 디베이어링합니다. 5~6단계는 채널별로 한 번씩 실행되며 출력 FITS는 `NAXIS=3` (R=1/G=2/B=3)입니다. 별 검출(1~2단계)은 컬러 모드와 관계없이 항상 휘도를 사용합니다.
 
@@ -229,7 +229,7 @@ I/O:
 
 적분:
       --cpu                      모든 파이프라인 단계를 CPU에서 실행 (OpenMP 가속)
-      --integration <method>     mean | kappa-sigma | auto-adaptive (기본값: kappa-sigma)
+      --integration <method>     mean | kappa-sigma | median | auto-adaptive (기본값: kappa-sigma)
       --kappa <float>            시그마 클리핑 임계값 (기본값: 3.0)
       --iterations <int>         픽셀당 최대 클리핑 반복 횟수 (기본값: 3)
       --batch-size <int>         GPU 적분 미니배치 크기 (기본값: 16)
@@ -317,6 +317,12 @@ dso_stacker -f frames.csv -o stacked.fits --integration mean --batch-size 32
 dso_stacker -f frames.csv -o stacked.fits --bayer rggb --kappa 2.5 --iterations 5
 ```
 
+중앙값 적분 (튜닝 없이 이상값을 자연적으로 제거):
+
+```bash
+dso_stacker -f frames.csv -o stacked.fits --integration median
+```
+
 보정 프레임 목록에서 생성하여 스태킹 (바이어스 + 다크 + 플랫):
 
 ```bash
@@ -370,7 +376,7 @@ cd build && ctest --output-on-failure -V
 
 | 테스트 모음 | 테스트 수 | 커버리지 |
 |---|---|---|
-| `test_cpu` | 29 | CSV 파서, FITS I/O, 적분, Lanczos CPU |
+| `test_cpu` | 42 | CSV 파서, FITS I/O, 적분 (평균, 카파-시그마, 중앙값), Lanczos CPU |
 | `test_gpu` | 5 | GPU Lanczos (GPU 없이 2개 기존 실패) |
 | `test_star_detect` | 21 | CCL + CoM; Moffat 컨볼루션 + 임계값 (CPU) |
 | `test_ransac` | 13 | DLT 호모그래피 + 삼각형 매칭 |

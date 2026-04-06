@@ -152,6 +152,30 @@ DsoError integration_gpu_process_batch_mean(IntegrationGpuCtx *ctx,
                                              cudaStream_t       stream);
 
 /*
+ * integration_gpu_process_batch_median — compute per-batch median of M frames.
+ *
+ * Each pixel collects its M non-NaN values, sorts them via insertion sort
+ * in registers, computes the median, and accumulates:
+ *   d_combined_sum[px]   += median * n_valid
+ *   d_combined_count[px] += n_valid
+ *
+ * NOTE: This is a mini-batch approximation.  A true global median requires
+ * all N frames simultaneously.  The per-batch median is weighted by the
+ * number of valid frames and averaged across batches by finalize_kernel.
+ * For typical astronomical data with batch sizes of 16-32, this
+ * approximation is good.  The same approximation issue exists for
+ * kappa-sigma in this codebase.
+ *
+ * M      : number of frames in this batch
+ * stream : CUDA stream; no implicit synchronisation
+ *
+ * Returns DSO_OK or DSO_ERR_CUDA / DSO_ERR_INVALID_ARG.
+ */
+DsoError integration_gpu_process_batch_median(IntegrationGpuCtx *ctx,
+                                               int                M,
+                                               cudaStream_t       stream);
+
+/*
  * integration_gpu_process_batch_aawa — Auto Adaptive Weighted Average batch.
  *
  * Runs Stetson (1989) iterative weighted averaging on M pre-transformed

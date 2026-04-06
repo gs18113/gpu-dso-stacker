@@ -2,7 +2,7 @@
  * integration.h — Frame integration API
  *
  * Combines N aligned float32 images of identical dimensions into one
- * output image.  Three methods are provided:
+ * output image.  Four methods are provided:
  *
  * integrate_mean:
  *   Simple pixel-wise arithmetic mean.  Fast; no outlier rejection.
@@ -55,6 +55,20 @@ DsoError integrate_mean(const Image **frames, int n, Image *out);
  */
 DsoError integrate_kappa_sigma(const Image **frames, int n, Image *out,
                                 float kappa, int iterations);
+
+/*
+ * integrate_median — pixel-wise median over all frames.
+ *
+ * Per pixel, collects all non-NaN values, sorts them, and returns the
+ * middle value (or average of the two middle values for even counts).
+ * Naturally resistant to outliers (satellites, cosmic rays) without
+ * any tuning parameters.
+ *
+ * Allocates out->data; caller must free with image_free().
+ *
+ * Returns DSO_OK or DSO_ERR_INVALID_ARG / DSO_ERR_ALLOC.
+ */
+DsoError integrate_median(const Image **frames, int n, Image *out);
 
 /*
  * integrate_aawa — Auto Adaptive Weighted Average (Stetson 1989).

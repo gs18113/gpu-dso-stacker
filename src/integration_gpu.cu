@@ -301,6 +301,68 @@ __global__ static void mean_batch_kernel(
 }
 
 /*
+ * median_batch_kernel — per-pixel median over M frames (mini-batch).
+ *
+ * Each thread loads M values, skips NaN, sorts valid values via insertion
+ * sort in registers, computes the median, and accumulates into persistent
+ * buffers weighted by n_valid.
+ */
+__global__ static void median_batch_kernel(
+    float * const *d_frame_ptrs,
+    int            M,
+    double        *d_combined_sum,
+    int           *d_combined_count,
+    double        *d_rawsum,
+    int           *d_rawcount,
+    int            npix)
+{
+    int px = blockIdx.x * blockDim.x + threadIdx.x;
+    if (px >= npix) return;
+
+    /* Load M values into registers; skip NaN */
+    float vals[INTEGRATION_GPU_MAX_BATCH];
+    double raw_total = 0.0;
+    int   n_valid   = 0;
+
+    for (int i = 0; i < M; i++) {
+        float v = d_frame_ptrs[i][px];
+        if (!isnan(v)) {
+            vals[n_valid++] = v;
+            raw_total += (double)v;
+        }
+    }
+
+    /* Accumulate raw sum/count for the all-clipped fallback */
+    d_rawsum[px]   += raw_total;
+    d_rawcount[px] += n_valid;
+
+    if (n_valid == 0) return;
+
+    /* Insertion sort — M ≤ 32 so this is fast in registers */
+    for (int i = 1; i < n_valid; i++) {
+        float key = vals[i];
+        int   j   = i - 1;
+        while (j >= 0 && vals[j] > key) {
+            vals[j + 1] = vals[j];
+            j--;
+        }
+        vals[j + 1] = key;
+    }
+
+    /* Compute median */
+    float median;
+    if (n_valid & 1) {
+        median = vals[n_valid / 2];
+    } else {
+        median = (vals[n_valid / 2 - 1] + vals[n_valid / 2]) / 2.0f;
+    }
+
+    /* Weight by n_valid so batches with more valid frames contribute more */
+    d_combined_sum[px]   += (double)median * n_valid;
+    d_combined_count[px] += n_valid;
+}
+
+/*
  * finalize_kernel — compute the final pixel value from accumulators.
  *
  * Primary: combined_sum / combined_count  (survivor-weighted mean)
@@ -489,6 +551,42 @@ DsoError integration_gpu_process_batch_mean(IntegrationGpuCtx *ctx,
     return DSO_OK;
 }
 
+DsoError integration_gpu_process_batch_median(IntegrationGpuCtx *ctx,
+                                               int                M,
+                                               cudaStream_t       stream)
+{
+    if (!ctx || M < 1 || M > ctx->batch_size) return DSO_ERR_INVALID_ARG;
+
+    int npix = ctx->W * ctx->H;
+
+    cudaError_t cerr = cudaMemcpyAsync(
+        ctx->d_frame_ptrs,
+        ctx->d_frames,
+        (size_t)M * sizeof(float *),
+        cudaMemcpyHostToDevice, stream);
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "integration_gpu_process_batch_median: memcpy ptrs: %s\n",
+                cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+
+    dim3 block(256);
+    dim3 grid((npix + 255) / 256);
+
+    median_batch_kernel<<<grid, block, 0, stream>>>(
+        ctx->d_frame_ptrs, M,
+        ctx->d_combined_sum, ctx->d_combined_count,
+        ctx->d_rawsum, ctx->d_rawcount, npix);
+
+    cerr = cudaGetLastError();
+    if (cerr != cudaSuccess) {
+        fprintf(stderr, "integration_gpu_process_batch_median kernel: %s\n",
+                cudaGetErrorString(cerr));
+        return DSO_ERR_CUDA;
+    }
+    return DSO_OK;
+}
+
 DsoError integration_gpu_process_batch_aawa(IntegrationGpuCtx *ctx,
                                              int                M,
                                              cudaStream_t       stream)
@@ -497,7 +595,6 @@ DsoError integration_gpu_process_batch_aawa(IntegrationGpuCtx *ctx,
 
     int npix = ctx->W * ctx->H;
 
-    /* Update device-side frame pointer array for this batch */
     cudaError_t cerr = cudaMemcpyAsync(
         ctx->d_frame_ptrs,
         ctx->d_frames,

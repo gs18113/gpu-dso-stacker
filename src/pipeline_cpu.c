@@ -52,7 +52,7 @@
 static DsoError flush_batch(
     Image        *xformed_r, Image *xformed_g, Image *xformed_b,
     int           n_batch, int color, int W, int H, long npix,
-    float kappa, int iterations, IntegrationMethod method,
+    float kappa, int iterations, IntegrationMethod integration_method,
     const Image **ptrs_r, const Image **ptrs_g, const Image **ptrs_b,
     float *global_sum_r, float *global_sum_g, float *global_sum_b,
     int   *global_count_r, int   *global_count_g, int   *global_count_b)
@@ -67,37 +67,35 @@ static DsoError flush_batch(
 
     for (i = 0; i < n_batch; i++) ptrs_r[i] = &xformed_r[i];
 
-    switch (method) {
-    case DSO_INTEGRATE_KAPPA_SIGMA:
+    if (integration_method == DSO_INTEGRATE_KAPPA_SIGMA) {
         PIPE_CHECK(integrate_kappa_sigma(ptrs_r, n_batch, &b_out_r, kappa, iterations),
                    cleanup, "batch integration R");
-        break;
-    case DSO_INTEGRATE_AAWA:
+    } else if (integration_method == DSO_INTEGRATE_MEDIAN) {
+        PIPE_CHECK(integrate_median(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
+    } else if (integration_method == DSO_INTEGRATE_AAWA) {
         PIPE_CHECK(integrate_aawa(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
-        break;
-    default: /* DSO_INTEGRATE_MEAN */
+    } else {
         PIPE_CHECK(integrate_mean(ptrs_r, n_batch, &b_out_r), cleanup, "batch integration R");
-        break;
     }
 
     if (color) {
         for (i = 0; i < n_batch; i++) { ptrs_g[i] = &xformed_g[i]; ptrs_b[i] = &xformed_b[i]; }
-        switch (method) {
-        case DSO_INTEGRATE_KAPPA_SIGMA:
+        if (integration_method == DSO_INTEGRATE_KAPPA_SIGMA) {
             err = integrate_kappa_sigma(ptrs_g, n_batch, &b_out_g, kappa, iterations);
             if (err == DSO_OK)
                 err = integrate_kappa_sigma(ptrs_b, n_batch, &b_out_b, kappa, iterations);
-            break;
-        case DSO_INTEGRATE_AAWA:
+        } else if (integration_method == DSO_INTEGRATE_MEDIAN) {
+            err = integrate_median(ptrs_g, n_batch, &b_out_g);
+            if (err == DSO_OK)
+                err = integrate_median(ptrs_b, n_batch, &b_out_b);
+        } else if (integration_method == DSO_INTEGRATE_AAWA) {
             err = integrate_aawa(ptrs_g, n_batch, &b_out_g);
             if (err == DSO_OK)
                 err = integrate_aawa(ptrs_b, n_batch, &b_out_b);
-            break;
-        default:
+        } else {
             err = integrate_mean(ptrs_g, n_batch, &b_out_g);
             if (err == DSO_OK)
                 err = integrate_mean(ptrs_b, n_batch, &b_out_b);
-            break;
         }
         if (err != DSO_OK) { image_free(&b_out_r); goto cleanup; }
     }

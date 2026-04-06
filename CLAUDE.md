@@ -98,7 +98,7 @@ gpu-dso-stacker/
 │   └── getopt_port.c            ← Portable getopt_long (compiled only on MSVC)
 ├── tests/
 │   ├── test_framework.h         ← Minimal test harness (ASSERT_*, RUN, SUITE)
-│   ├── test_cpu.c               ← 29 tests: CSV, FITS, integration, Lanczos CPU
+│   ├── test_cpu.c               ← 42 tests: CSV, FITS, integration (mean, kappa-sigma, median), Lanczos CPU
 │   ├── test_gpu.cu              ← 5 tests: GPU Lanczos (all passing)
 │   ├── test_star_detect.c       ← 21 tests: CCL + CoM + Moffat conv + threshold
 │   ├── test_ransac.c            ← 13 tests: DLT + RANSAC
@@ -223,7 +223,7 @@ I/O:
 Integration:
       --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)
       --backend <backend>        auto | cpu | cuda | metal (default: auto)
-      --integration <method>     mean | kappa-sigma | auto-adaptive (default: kappa-sigma)
+      --integration <method>     mean | kappa-sigma | median | auto-adaptive (default: kappa-sigma)
       --kappa <float>            Sigma clipping threshold (default: 3.0)
       --iterations <int>         Max clipping passes per pixel (default: 3)
       --batch-size <int>         GPU integration mini-batch size (default: 16)
@@ -385,6 +385,8 @@ DsoError integrate_aawa(const Image **frames, int n, Image *out);
 All frames must be the same size. `out->data` is heap-allocated; free with `image_free()`.
 Kappa-sigma uses two-pass Bessel-corrected stddev per iteration; degenerate pixels (all clipped) fall back to unclipped mean. All three methods skip NaN-valued pixels (OOB sentinel from Lanczos warp) and output NAN when all frames are NaN at a pixel. `integrate_aawa` uses Stetson (1989) Auto Adaptive Weighted Average: iteratively computes weighted mean with `w[i] = 1/(1+(|r|/α)²)` (α=2.0), converging when |Δμ|/|μ| < 1e-6 or after 10 iterations. All accumulations use `double` precision.
 
+`integrate_median`: Per-pixel median over all frames. Collects all non-NaN values, sorts them (insertion sort), and returns the middle value (or average of the two middle values for even counts). Naturally resistant to outliers without any tuning parameters.
+
 ### `debayer_gpu.h`
 
 ```c
@@ -468,12 +470,15 @@ void     integration_gpu_cleanup(IntegrationGpuCtx *ctx);
 DsoError integration_gpu_process_batch(IntegrationGpuCtx *ctx, int M,
                                         float kappa, int iterations, cudaStream_t stream);
 DsoError integration_gpu_process_batch_mean(IntegrationGpuCtx *ctx, int M, cudaStream_t stream);
+DsoError integration_gpu_process_batch_median(IntegrationGpuCtx *ctx, int M, cudaStream_t stream);
 DsoError integration_gpu_process_batch_aawa(IntegrationGpuCtx *ctx, int M, cudaStream_t stream);
 DsoError integration_gpu_finalize(IntegrationGpuCtx *ctx, int n_frames,
                                    Image *out, cudaStream_t stream);
 ```
 
 `IntegrationGpuCtx` is now a **public** struct (in the header) exposing `d_frames[]`, `d_xmap`, `d_ymap` so `pipeline.cu` can fill frames without extra indirection. Mini-batch approximation: per-batch kappa-sigma / AAWA combined with survivor-count-weighted mean across batches. All-clipped fallback uses raw (unclipped) per-pixel sum. `integration_gpu_process_batch_aawa` runs the Stetson (1989) iterative weighted average per pixel (max 10 iterations, α=2.0) entirely in registers, using `double` accumulations.
+
+`integration_gpu_process_batch_median`: Mini-batch median approximation. Each pixel sorts its M non-NaN values in registers (insertion sort) and computes the median. The per-batch median is accumulated weighted by n_valid into the persistent buffers. Note: this is an approximation — a true global median requires all N frames simultaneously.
 
 ### `calibration.h`
 
@@ -564,6 +569,12 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
                              int ref_idx, const PipelineConfig *config);
 ```
 
+`PipelineConfig` uses `IntegrationMethod integration_method` to select the integration algorithm:
+
+```c
+typedef enum { DSO_INTEGRATE_MEAN = 0, DSO_INTEGRATE_KAPPA_SIGMA = 1, DSO_INTEGRATE_MEDIAN = 2 } IntegrationMethod;
+```
+
 `pipeline_run` is now a backend dispatcher in `pipeline_dispatch.c` using `PipelineConfig.backend` (`AUTO/CPU/CUDA/METAL`) with legacy `use_gpu_lanczos` preserved for AUTO behavior.
 
 `pipeline_run_cuda` is the CUDA orchestrator. Processes frames in order `[ref_idx, non_ref_0, ...]` via `phase_detect_warp_integrate`: double-buffered `pinned[2]`/`d_raw[2]` + `stream_copy`/`stream_compute`. Per frame: `stream_compute` waits for `e_h2d[slot]` → calib → debayer_lum → star_detect → `cudaStreamSynchronize` → D2H → CCL+CoM → RANSAC → Lanczos warp on `stream_compute`; then CPU pre-loads next frame + async H2D on `stream_copy` (overlaps with the warp). At batch boundaries, H2D of the next frame also overlaps mini-batch integration. The `cudaStreamSynchronize` for D2H also implicitly frees `d_raw[next_slot]` (clears the prior warp), so no `e_gpu` event is needed. For color output allocates ctx_r/g/b + d_ch_g/d_ch_b; `phase_warp` calls `debayer_gpu_rgb_d2d` + 3× Lanczos per frame. Finalizes via `image_save_rgb`/`image_save`. **Non-reference frames that fail alignment (too few stars or RANSAC mismatch) are skipped, not fatal; successful-frame count is passed to `integration_gpu_finalize`.**
@@ -605,7 +616,8 @@ DsoError pipeline_run_metal(FrameInfo *frames, int n_frames,
 - **`lanczos_transform_cpu` weight_sum guard**: uses `fabsf(weight_sum) < 1e-6f`, not `== 0.f`. When the Lanczos kernel center tap lands exactly on an integer OOB coordinate, `sinf(k·π)` floating-point error leaves `weight_sum` near but not exactly zero; an exact equality test would divide by ≈−1e-9 and amplify noise to ≈1560. The threshold correctly returns 0 for the OOB case.
 - **`lanczos_transform_gpu` singular-H guard**: checks `det(H) < 1e-12` before any CUDA allocation and returns `DSO_ERR_INVALID_ARG`.
 - **GPU kappa-sigma variance uses `double`**: `kappa_sigma_batch_kernel` accumulates squared deviations into `double sq` (not `float`). For pixel values up to 65535 and batch size 64, max sq ≈ 2.75×10¹¹ exceeds float precision; using double matches the CPU `integrate_kappa_sigma` implementation.
-- **AAWA (Auto Adaptive Weighted Average)**: Adapted from Stetson (1989). Uses Stetson weight function `w[i] = 1/(1+(|r[i]|/α)²)` with α=2.0. Converges when `|Δμ|/max(|μ|,1e-10) < 1e-6` or after 10 iterations. Values 2σ from the mean get weight ≈0.2 (vs. hard rejection in kappa-sigma). All accumulations use `double`. GPU mini-batch approximation: per-batch AAWA result weighted by valid frame count, combined across batches in `finalize_kernel`. Integration method is selected via `IntegrationMethod` enum in `PipelineConfig` (`DSO_INTEGRATE_MEAN`, `DSO_INTEGRATE_KAPPA_SIGMA`, `DSO_INTEGRATE_AAWA`).
+- **Mini-batch median approximation**: `integration_gpu_process_batch_median` computes a per-batch median and accumulates it weighted by valid-frame count. The finalize kernel produces a weighted average of per-batch medians. This is an approximation of the true global median (which would require all N frames in memory simultaneously). For typical astronomical data with batch sizes of 16-32, the approximation is good. The same architectural limitation applies to kappa-sigma.
+- **AAWA (Auto Adaptive Weighted Average)**: Adapted from Stetson (1989). Uses Stetson weight function `w[i] = 1/(1+(|r[i]|/α)²)` with α=2.0. Converges when `|Δμ|/max(|μ|,1e-10) < 1e-6` or after 10 iterations. Values 2σ from the mean get weight ≈0.2 (vs. hard rejection in kappa-sigma). All accumulations use `double`. GPU mini-batch approximation: per-batch AAWA result weighted by valid frame count, combined across batches in `finalize_kernel`. Integration method is selected via `IntegrationMethod` enum in `PipelineConfig` (`DSO_INTEGRATE_MEAN`, `DSO_INTEGRATE_KAPPA_SIGMA`, `DSO_INTEGRATE_MEDIAN`, `DSO_INTEGRATE_AAWA`).
 - **Synthetic RANSAC stress tests**: `test/star_coords_generator.{h,c}` generates deterministic synthetic star lists (shared inlier transform + independent outliers); `tests/test_ransac.c` uses it for seed sweeps and high-outlier scenarios, and `test_ransac` target links the generator directly in `CMakeLists.txt`.
 - **Calibration formula**: `light_cal = (light - dark_master) / flat_master`. Applied before debayering. With bias: `dark_master = stack(dark_raw - bias)`, `flat_master = stack(normalize(flat_raw - bias))`. With darkflat: `dark_master = stack(dark_raw)`, `flat_master = stack(normalize(flat_raw - darkflat))`. Bias and darkflat are mutually exclusive.
 - **Winsorized mean (γ=0.1)**: Sort N pixel values per pixel; replace bottom `g = floor(0.1·N)` values with `vals[g]` and top g with `vals[N-1-g]`; compute mean using `double` accumulator to prevent overflow for N·(65535)² accumulations. Insertion sort used for per-pixel sort (N typically < 100).
@@ -826,7 +838,7 @@ bias_frames:    { method: winsorized-mean, files: [] }
 darkflat_frames: { method: winsorized-mean, files: [] }
 options:
   output_path: output.fits     use_cpu: false
-  integration: kappa-sigma     # or mean, auto-adaptive
+  integration: kappa-sigma     # or mean, median, auto-adaptive
   kappa: 3.0     iterations: 3     batch_size: 16
   star_sigma: 3.0     moffat_alpha: 2.5     moffat_beta: 2.0
   top_stars: 50     min_stars: 20    min_inliers: 10

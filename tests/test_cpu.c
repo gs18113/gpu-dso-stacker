@@ -935,6 +935,111 @@ static int test_csv_multiple_references(void)
     return 0;
 }
 
+/* ------------------------------------------------------------------
+ * Integration — median
+ * ------------------------------------------------------------------ */
+
+static int test_integrate_median_basic(void)
+{
+    /* 5 frames of constant value → median = that value */
+    Image imgs[5];
+    for (int i = 0; i < 5; i++) imgs[i] = make_image_const(4, 4, 42.0f);
+    const Image *ptrs[5];
+    for (int i = 0; i < 5; i++) ptrs[i] = &imgs[i];
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_median(ptrs, 5, &out));
+    ASSERT_EQ(out.width, 4);
+    ASSERT_EQ(out.height, 4);
+    for (int i = 0; i < 16; i++) ASSERT_NEAR(out.data[i], 42.0f, 1e-6f);
+
+    image_free(&out);
+    for (int i = 0; i < 5; i++) image_free(&imgs[i]);
+    return 0;
+}
+
+static int test_integrate_median_outlier(void)
+{
+    /* 5 frames: 3 at 10.0, 2 outliers at 1000.0 → median = 10.0 */
+    Image imgs[5];
+    imgs[0] = make_image_const(4, 4, 10.0f);
+    imgs[1] = make_image_const(4, 4, 10.0f);
+    imgs[2] = make_image_const(4, 4, 10.0f);
+    imgs[3] = make_image_const(4, 4, 1000.0f);
+    imgs[4] = make_image_const(4, 4, 1000.0f);
+    const Image *ptrs[5];
+    for (int i = 0; i < 5; i++) ptrs[i] = &imgs[i];
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_median(ptrs, 5, &out));
+    for (int i = 0; i < 16; i++) ASSERT_NEAR(out.data[i], 10.0f, 1e-6f);
+
+    image_free(&out);
+    for (int i = 0; i < 5; i++) image_free(&imgs[i]);
+    return 0;
+}
+
+static int test_integrate_median_even_count(void)
+{
+    /* 4 frames: values 1,2,3,4 → median = (2+3)/2 = 2.5 */
+    Image imgs[4];
+    imgs[0] = make_image_const(4, 4, 1.0f);
+    imgs[1] = make_image_const(4, 4, 2.0f);
+    imgs[2] = make_image_const(4, 4, 3.0f);
+    imgs[3] = make_image_const(4, 4, 4.0f);
+    const Image *ptrs[4];
+    for (int i = 0; i < 4; i++) ptrs[i] = &imgs[i];
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_median(ptrs, 4, &out));
+    for (int i = 0; i < 16; i++) ASSERT_NEAR(out.data[i], 2.5f, 1e-6f);
+
+    image_free(&out);
+    for (int i = 0; i < 4; i++) image_free(&imgs[i]);
+    return 0;
+}
+
+static int test_integrate_median_nan_skip(void)
+{
+    /* 3 frames: [5, NaN, 7] → median of {5,7} = 6.0.
+     * All-NaN pixel → output NaN. */
+    Image imgs[3];
+    imgs[0] = make_image_const(2, 2, 5.0f);
+    imgs[1] = make_image_const(2, 2, NAN);
+    imgs[2] = make_image_const(2, 2, 7.0f);
+    /* Make pixel 0 all-NaN */
+    imgs[0].data[0] = NAN;
+    imgs[2].data[0] = NAN;
+    const Image *ptrs[3];
+    for (int i = 0; i < 3; i++) ptrs[i] = &imgs[i];
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_median(ptrs, 3, &out));
+    ASSERT(isnan(out.data[0]));         /* all-NaN → NaN */
+    ASSERT_NEAR(out.data[1], 6.0f, 1e-6f);  /* median of {5,7} = 6 */
+    ASSERT_NEAR(out.data[2], 6.0f, 1e-6f);
+    ASSERT_NEAR(out.data[3], 6.0f, 1e-6f);
+
+    image_free(&out);
+    for (int i = 0; i < 3; i++) image_free(&imgs[i]);
+    return 0;
+}
+
+static int test_integrate_median_single_frame(void)
+{
+    /* N=1 → output equals input */
+    Image img = make_image_const(4, 4, 99.0f);
+    const Image *ptrs[1] = { &img };
+
+    Image out = {NULL, 0, 0};
+    ASSERT_OK(integrate_median(ptrs, 1, &out));
+    for (int i = 0; i < 16; i++) ASSERT_NEAR(out.data[i], 99.0f, 1e-6f);
+
+    image_free(&out);
+    image_free(&img);
+    return 0;
+}
+
 /* =========================================================================
  * main
  * ====================================================================== */
@@ -968,6 +1073,13 @@ int main(void)
     RUN(test_kappa_sigma_uniform);
     RUN(test_kappa_sigma_all_clipped_fallback);
     RUN(test_kappa_sigma_multi_pixel);
+
+    SUITE("Integration — median");
+    RUN(test_integrate_median_basic);
+    RUN(test_integrate_median_outlier);
+    RUN(test_integrate_median_even_count);
+    RUN(test_integrate_median_nan_skip);
+    RUN(test_integrate_median_single_frame);
 
     SUITE("Lanczos CPU");
     RUN(test_lanczos_cpu_identity);

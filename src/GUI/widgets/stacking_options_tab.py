@@ -218,7 +218,7 @@ class StackingOptionsTab(QWidget):
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self._integration_combo = QComboBox()
-        self._integration_combo.addItems(["kappa-sigma", "mean", "auto-adaptive"])
+        self._integration_combo.addItems(["kappa-sigma", "mean", "median", "auto-adaptive"])
         form.addRow("Method:", self._integration_combo)
 
         self._kappa_spin     = _dbl_spin(0.1, 20.0, 3.0, 1, 0.1)

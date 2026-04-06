@@ -103,7 +103,7 @@ Replace `metal` with `cpu` in the URL if you don't need Metal acceleration.
 | 3. Triangle Matching Alignment | Triangle/asterism matching + DLT (`--match-device` selects CPU/GPU; default follows stacking device) | Triangle/asterism matching + DLT (CPU by default with `--cpu`) |
 | 4. Debayering (warp) | VNG demosaic → luminance **or R/G/B** | VNG demosaic → luminance **or R/G/B** |
 | 5. Lanczos Warp | nppiRemap + coord-map kernel (CUDA) | 6-tap backward-map warp (OpenMP) |
-| 6. Integration | Mini-batch kappa-sigma (CUDA) | Full kappa-sigma (OpenMP) |
+| 6. Integration | Mini-batch kappa-sigma / median (CUDA) | Full kappa-sigma / median (OpenMP) |
 
 **Color output**: when a Bayer pattern is active (from `--bayer` or the FITS `BAYERPAT` keyword), stage 4 debayers to separate R, G, B planes; stages 5–6 run once per channel; the output FITS has `NAXIS=3` with planes R=1/G=2/B=3. Star detection (stages 1–2) always uses luminance regardless of color mode.
 
@@ -229,7 +229,7 @@ I/O:
 
 Integration:
       --cpu                      Run ALL pipeline stages on CPU (OpenMP-accelerated)
-      --integration <method>     mean | kappa-sigma | auto-adaptive (default: kappa-sigma)
+      --integration <method>     mean | kappa-sigma | median | auto-adaptive (default: kappa-sigma)
       --kappa <float>            Sigma clipping threshold (default: 3.0)
       --iterations <int>         Max clipping passes per pixel (default: 3)
       --batch-size <int>         GPU integration mini-batch size (default: 16)
@@ -311,6 +311,12 @@ Stack with mean integration and a larger batch:
 dso_stacker -f frames.csv -o stacked.fits --integration mean --batch-size 32
 ```
 
+Median integration (robust outlier rejection, no tuning required):
+
+```bash
+dso_stacker -f frames.csv -o stacked.fits --integration median
+```
+
 Stack a color camera image (RGGB sensor) with tighter outlier rejection:
 
 ```bash
@@ -370,7 +376,7 @@ cd build && ctest --output-on-failure -V
 
 | Test suite | Tests | What it covers |
 |---|---|---|
-| `test_cpu` | 29 | CSV parser, FITS I/O, integration, Lanczos CPU |
+| `test_cpu` | 42 | CSV parser, FITS I/O, integration (mean, kappa-sigma, median), Lanczos CPU |
 | `test_gpu` | 5 | GPU Lanczos (2 known pre-existing failures without GPU) |
 | `test_star_detect` | 21 | CCL + CoM; Moffat convolution + threshold (CPU) |
 | `test_ransac` | 13 | DLT homography + triangle matching |
