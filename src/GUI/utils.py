@@ -184,6 +184,8 @@ def build_command(
     argv += ["--min-inliers",   str(opts["min_inliers"])]
     if backend != "cpu" and opts.get("match_device", "auto") != "auto":
         argv += ["--match-device", opts["match_device"]]
+    if opts.get("transform", "auto") != "auto":
+        argv += ["--transform", opts["transform"]]
 
     # --- calibration ---
     for key, flag in (("dark", "--dark"), ("flat", "--flat"),

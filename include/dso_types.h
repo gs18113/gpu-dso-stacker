@@ -46,11 +46,43 @@ typedef struct {
 } Image;
 
 /*
+ * TransformModel — alignment coordinate mapping model.
+ *
+ * PROJECTIVE : 3×3 homography (8 DOF, existing default)
+ * BILINEAR   : affine polynomial (6 DOF)
+ * BISQUARED  : quadratic polynomial (12 DOF)
+ * BICUBIC    : cubic polynomial (20 DOF)
+ * AUTO       : auto-select based on matched star count
+ */
+typedef enum {
+    TRANSFORM_PROJECTIVE = 0,
+    TRANSFORM_BILINEAR   = 1,
+    TRANSFORM_BISQUARED  = 2,
+    TRANSFORM_BICUBIC    = 3,
+    TRANSFORM_AUTO       = 4
+} TransformModel;
+
+/* Maximum polynomial coefficients (bicubic: 10 per axis × 2 axes). */
+#define TRANSFORM_MAX_COEFFS 20
+
+/*
+ * PolyTransform — polynomial coordinate transform (backward map: ref → src).
+ *
+ * For PROJECTIVE, coeffs are unused; use Homography H directly.
+ * For polynomial models, coeffs stores {a0..aN, b0..bN} sequentially.
+ */
+typedef struct {
+    TransformModel model;
+    double coeffs[TRANSFORM_MAX_COEFFS];
+} PolyTransform;
+
+/*
  * FrameInfo — one row from the input CSV file.
  *
  * filepath     : absolute or relative path to the FITS frame
  * is_reference : 1 if this frame is the alignment reference, 0 otherwise
  * H            : backward homography (ref → src); zero-init when not provided
+ * poly         : polynomial transform; used when model != PROJECTIVE
  * width, height: cached image dimensions
  * pattern      : cached BayerPattern
  */
@@ -58,6 +90,7 @@ typedef struct {
     char       filepath[4096];
     int        is_reference;
     Homography H;
+    PolyTransform poly;   /* polynomial transform (model != PROJECTIVE) */
     int        width;
     int        height;
     int        pattern;

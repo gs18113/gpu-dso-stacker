@@ -66,8 +66,10 @@ typedef struct {
     float        min_quality;     /* auto-reject below this fraction of ref quality;
                                       0 = disabled (default). E.g. 0.5 = reject < 50% */
 
-    /* --- RANSAC --- */
-    RansacParams ransac;          /* {max_iters=1000, inlier_thresh=2.0,
+    /* --- RANSAC / alignment --- */
+    RansacParams ransac;
+    TransformModel transform_model; /* auto | projective | bilinear | bisquared | bicubic
+                                        (default: TRANSFORM_AUTO) */          /* {max_iters=1000, inlier_thresh=2.0,
                                       match_radius=30.0, confidence=0.99,
                                       min_inliers=10}                                */
 

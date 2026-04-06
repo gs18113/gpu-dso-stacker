@@ -33,6 +33,17 @@ extern "C" {
  */
 DsoError lanczos_transform_cpu(const Image *src, Image *dst, const Homography *H);
 
+/*
+ * lanczos_transform_cpu_poly — Lanczos-3 warp using polynomial transform.
+ *
+ * Same as lanczos_transform_cpu but uses a PolyTransform for coordinate
+ * mapping instead of a 3×3 homography.  The Lanczos-3 interpolation kernel
+ * is unchanged.  Only valid for polynomial models (BILINEAR, BISQUARED,
+ * BICUBIC); for PROJECTIVE, use lanczos_transform_cpu().
+ */
+DsoError lanczos_transform_cpu_poly(const Image *src, Image *dst,
+                                     const PolyTransform *T);
+
 #ifdef __cplusplus
 }
 #endif

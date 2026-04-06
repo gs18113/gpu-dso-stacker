@@ -100,7 +100,7 @@ Replace `metal` with `cpu` in the URL if you don't need Metal acceleration.
 |---|---|---|
 | 1. Debayering (star detection) | VNG demosaic → luminance (CUDA kernel) | VNG demosaic → luminance (OpenMP) |
 | 2. Star Detection | Moffat PSF conv + threshold (CUDA) | Moffat PSF conv + threshold (OpenMP) |
-| 3. Triangle Matching Alignment | Triangle/asterism matching + DLT (`--match-device` selects CPU/GPU; default follows stacking device) | Triangle/asterism matching + DLT (CPU by default with `--cpu`) |
+| 3. Triangle Matching Alignment | Triangle/asterism matching + DLT (`--match-device` selects CPU/GPU; default follows stacking device). Transform model auto-selected by `--transform`. | Triangle/asterism matching + DLT (CPU by default with `--cpu`). Transform model auto-selected by `--transform`. |
 | 4. Debayering (warp) | VNG demosaic → luminance **or R/G/B** | VNG demosaic → luminance **or R/G/B** |
 | 5. Lanczos Warp | nppiRemap + coord-map kernel (CUDA) | 6-tap backward-map warp (OpenMP) |
 | 5b. Background Normalization (optional) | GPU kernel (`--bg-calibration`) | CPU + OpenMP (`--bg-calibration`) |
@@ -109,6 +109,8 @@ Replace `metal` with `cpu` in the URL if you don't need Metal acceleration.
 **Color output**: when a Bayer pattern is active (from `--bayer` or the FITS `BAYERPAT` keyword), stage 4 debayers to separate R, G, B planes; stages 5–6 run once per channel; the output FITS has `NAXIS=3` with planes R=1/G=2/B=3. Star detection (stages 1–2) always uses luminance regardless of color mode.
 
 **White balance** (`--white-balance`): optional per-channel multiplier correction applied to the raw Bayer mosaic after calibration and before debayering. Three modes: `camera` (from RAW file metadata), `auto` (gray-world: equalise R/G/B channel means), `manual` (user-specified multipliers via `--wb-red/green/blue`). Multipliers are computed once from the reference frame and applied consistently to all frames.
+
+**Transform model selection** (`--transform`): higher-order transform models (bisquared, bicubic) correct field curvature and optical distortion that a single projective homography cannot model. The `auto` mode selects the best model based on the number of matched stars: ≥20 → bicubic, ≥12 → bisquared, ≥6 → bilinear, otherwise projective.
 
 **Triangle-matching mismatch handling**: if a non-reference frame cannot be aligned (too few stars or triangle-matching mismatch), that frame is skipped and processing continues. At the end, the CLI prints a summary with successful and skipped frame counts.
 
@@ -254,6 +256,8 @@ Triangle matching (2-column CSV only):
       --ransac-thresh <float>    Deprecated alias of --triangle-thresh
       --match-radius <float>     Star matching search radius px (default: 30.0)
       --match-device <device>    auto | cpu | gpu (default: auto = stacking device)
+      --transform <model>        auto | projective | bilinear | bisquared | bicubic
+                                 (default: auto — selects model based on star count)
       --backend <backend>        auto | cpu | cuda | metal (default: auto)
 
 Calibration (applied before debayering; bias and darkflat are mutually exclusive):
